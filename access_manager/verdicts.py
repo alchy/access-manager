@@ -8,8 +8,7 @@ from dataclasses import dataclass, field
 OUTCOMES = frozenset({
     "ok",
     "bad_code",
-    "bad_password",
-    "need_second_factor",
+    "need_factor",
     "replay",
     "throttled",
     "no_secret",

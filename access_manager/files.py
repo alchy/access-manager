@@ -1,12 +1,39 @@
-"""Souborovy backend."""
+"""Souborove uloziste.
+
+NENI to atrapa pro testy: je to skutecne uloziste, ktere si vevnitr drzi sama
+sluzba. Tytez testy tak bezi proti obema zapojenim.
+
+Ven se `FileStore` nevystavuje. Kdyby si ho aplikace mohla vzit primo,
+obejde tim origin ACL, omezovani pokusu i auditni stopu - a udela to, protoze
+je to jednodussi. Aplikace dostane `Access`, spravcovsky nastroj `Admin`.
+
+Format navazuje na to, co uz zaklada `python -m viewbase.admin adduser`:
+
+    HOME/
+      user-jindrich/totp.secret     tajemstvi (0600)
+      user-jindrich/totp.uri        URI pro autentikator
+      user-jindrich/totp.txt        QR jako text - `cat` na hlave bez obrazovky
+      user-jindrich/used.json       spotrebovane kroky, per ucel
+      user-jindrich/disabled        kdyz je clovek docasne vypnuty
+      groups.json                   {"ucetni": {"members": [...], "includes": [...]}}
+"""
 from __future__ import annotations
 
 import hmac
 import json
+import os
 import time
 from pathlib import Path
 
-from .principals import PUBLIC, USERS, User, check_name
+from .principals import (
+    ISSUER,
+    PUBLIC,
+    USERS,
+    Enrolment,
+    Group,
+    User,
+    check_name,
+)
 from .purpose import check_purpose
 from .verdicts import Verdict
 
@@ -16,27 +43,54 @@ GROUPS = "groups.json"
 #: Kolik kroku dozadu a dopredu se kod jeste uzna. Hodiny telefonu se rozchazi.
 WINDOW = 1
 
+#: Prava. Tajemstvi je citelne jen vlastnikem a adresar se ani neda projit.
+FILE_MODE = 0o600
+DIR_MODE = 0o700
 
-class Files:
+
+class FileStore:
     """Identita a politika ze souboru pod jednim adresarem."""
 
     def __init__(self, home) -> None:
         self.home = Path(home).expanduser()
 
-    # -- identita ----------------------------------------------------------
+    # == cteni =============================================================
 
     def user(self, name: str) -> User | None:
         name = check_name(name)
-        if not (self.home / f"user-{name}").is_dir():
+        directory = self.home / f"user-{name}"
+        if not directory.is_dir():
             return None
         groups = {f"group:{g}" for g in self._groups_of(name)}
         return User(
             name=name,
             subject_id=f"user:{name}",
+            enabled=not (directory / "disabled").exists(),
             principals=frozenset({f"user:{name}", USERS, PUBLIC, *groups}),
         )
 
-    # -- overeni -----------------------------------------------------------
+    def users(self) -> list[str]:
+        return sorted(
+            d.name[len("user-"):]
+            for d in self.home.glob("user-*")
+            if d.is_dir()
+        )
+
+    def groups(self) -> list[str]:
+        return sorted(self._table())
+
+    def group(self, name: str) -> Group | None:
+        name = check_name(name)
+        data = self._table().get(name)
+        if data is None:
+            return None
+        return Group(
+            name=name,
+            members=tuple(sorted(data.get("members", ()))),
+            includes=tuple(sorted(data.get("includes", ()))),
+        )
+
+    # == overeni ===========================================================
 
     def authenticate(self, username: str, credentials, *, purpose: str) -> Verdict:
         """Odpoved na "jsi to ty?" - nikdy na "smis to?"."""
@@ -59,7 +113,7 @@ class Files:
         # chova, jako by neprislo - jinak si klient vybere ten slabsi.
         code = dict(credentials or {}).get("totp")
         if not code:
-            return Verdict.refused("need_second_factor", required=("totp",))
+            return Verdict.refused("need_factor", required=("totp",))
 
         step = _matching_step(secret.read_text(encoding="utf-8").strip(), code)
         if step is None:
@@ -70,7 +124,92 @@ class Files:
         user = self.user(name)
         return Verdict.ok(user.subject_id, user.principals)
 
-    # -- anti-replay -------------------------------------------------------
+    # == zapis: lide =======================================================
+
+    def add_user(self, name: str) -> Enrolment:
+        name = check_name(name)
+        directory = self.home / f"user-{name}"
+        if directory.exists():
+            raise ValueError(
+                f"uzivatel {name!r} uz existuje ({directory}); prepsat jeho "
+                f"tajemstvi by ho zamklo ven"
+            )
+        directory.mkdir(parents=True, mode=DIR_MODE)
+        os.chmod(directory, DIR_MODE)  # mkdir podleha umask, chmod ne
+        return self._pair(name, directory)
+
+    def pair_missing(self) -> list[Enrolment]:
+        """Doplň parovaci kod tem, kdo zadny nemaji. Ostatnich se nedotykej.
+
+        Sluzba restartovana ve 3 rano nesmi vymenit tajemstvi lidem, kteri uz
+        je maji - autentikator by dal vydaval kody, ktere uz nikam nepatri.
+        """
+        doplneno = []
+        for directory in sorted(self.home.glob("user-*")):
+            if not directory.is_dir() or (directory / "totp.secret").is_file():
+                continue
+            doplneno.append(
+                self._pair(check_name(directory.name[len("user-"):]), directory)
+            )
+        return doplneno
+
+    def _pair(self, name: str, directory: Path) -> Enrolment:
+        import pyotp
+
+        secret = pyotp.random_base32()
+        label = f"{ISSUER}:user:{name}"
+        uri = pyotp.TOTP(secret).provisioning_uri(name=label, issuer_name=ISSUER)
+        _write(directory / "totp.secret", secret)
+        _write(directory / "totp.uri", uri)
+        _write(directory / "totp.txt", _qr_text(uri))
+        return Enrolment(name=name, directory=directory, label=label)
+
+    # == zapis: skupiny ====================================================
+
+    def add_group(self, name: str) -> None:
+        name = check_name(name)
+        table = self._table()
+        if name in table:
+            raise ValueError(f"skupina {name!r} uz existuje")
+        table[name] = {"members": [], "includes": []}
+        self._write_table(table)
+
+    def add_member(self, group: str, name: str) -> None:
+        group, name = check_name(group), check_name(name)
+        table = self._table()
+        if group not in table:
+            # Preklep by jinak zalozil skupinu, kterou nikdo nikdy nenapsal
+            # do zadneho ACL - clenstvi bez ucinku, ktere vypada hotove.
+            raise ValueError(f"skupina {group!r} neexistuje")
+        if not (self.home / f"user-{name}").is_dir():
+            raise ValueError(f"uzivatel {name!r} neexistuje")
+        members = set(table[group].get("members", ()))
+        members.add(name)
+        table[group]["members"] = sorted(members)
+        self._write_table(table)
+
+    def include(self, parent: str, child: str) -> None:
+        """`parent` OBSAHUJE `child`: kdo je v child, je i v parent."""
+        parent, child = check_name(parent), check_name(child)
+        table = self._table()
+        for group in (parent, child):
+            if group not in table:
+                raise ValueError(f"skupina {group!r} neexistuje")
+        if parent == child:
+            raise ValueError(f"skupina {parent!r} nemuze obsahovat sama sebe")
+        if parent in _descendants(table, child):
+            # Cyklus cteni prezije, ale VYROBIT ho je vzdycky omyl - a v tuhle
+            # chvili jeste vime, kdo ho dela a proc.
+            raise ValueError(
+                f"{parent!r} uz je obsazena v {child!r}; opacne zretezeni by "
+                f"udelalo cyklus"
+            )
+        includes = set(table[parent].get("includes", ()))
+        includes.add(child)
+        table[parent]["includes"] = sorted(includes)
+        self._write_table(table)
+
+    # == anti-replay =======================================================
 
     def _consume(self, name: str, purpose: str, step: int) -> bool:
         """Zapis pouzity kod pod jeho ucel. `False`, kdyz uz tam byl.
@@ -94,10 +233,10 @@ class Files:
 
         used.setdefault(purpose, []).append(step)
         used = {klic: steps for klic, steps in used.items() if steps}
-        path.write_text(json.dumps(used), encoding="utf-8")
+        _replace(path, json.dumps(used))
         return True
 
-    # -- zretezeni ---------------------------------------------------------
+    # == zretezeni =========================================================
 
     def _table(self) -> dict:
         path = self.home / GROUPS
@@ -105,11 +244,16 @@ class Files:
             return {}
         return json.loads(path.read_text(encoding="utf-8"))
 
+    def _write_table(self, table: dict) -> None:
+        self.home.mkdir(parents=True, mode=DIR_MODE, exist_ok=True)
+        _replace(self.home / GROUPS, json.dumps(table, indent=2, sort_keys=True))
+
     def _groups_of(self, name: str) -> set[str]:
         """Tranzitivni uzaver smerem NAHORU: kdo je v mzdach, je i v ucetni.
 
         Fronta s mnozinou uz nalezenych, takze cyklus ve zretezeni skonci -
         dva spravci, kazdy prida jedno zretezeni, a nikdo nevidi cely graf.
+        Vyrobit cyklus sice `include` odmita, ale soubor muze prijit i odjinud.
         """
         table = self._table()
 
@@ -127,6 +271,70 @@ class Files:
                     found.add(parent)
                     queue.append(parent)
         return found
+
+
+# ===========================================================================
+# Pomocne
+# ===========================================================================
+
+
+def _descendants(table: dict, start: str) -> set[str]:
+    """Vsechno, co `start` obsahuje - primo i pres dalsi zretezeni."""
+    seen: set[str] = set()
+    queue = list(table.get(start, {}).get("includes", ()))
+    while queue:
+        group = queue.pop()
+        if group in seen:
+            continue
+        seen.add(group)
+        queue.extend(table.get(group, {}).get("includes", ()))
+    return seen
+
+
+def _write(path: Path, text: str) -> None:
+    """Zapis s pravy 0600 uz pri VZNIKU souboru.
+
+    Kdyby se prava nastavovala az po zapisu, existuje okamzik, kdy je
+    tajemstvi citelne komukoli - kratky, ale skutecny.
+    """
+    handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, FILE_MODE)
+    with os.fdopen(handle, "w", encoding="utf-8") as out:
+        out.write(text if text.endswith("\n") else text + "\n")
+    os.chmod(path, FILE_MODE)
+
+
+def _replace(path: Path, text: str) -> None:
+    """Prepis souboru atomicky.
+
+    Pres docasny soubor a prejmenovani: prerusenym zapisem do `groups.json` by
+    se ztratilo clenstvi vsech, a poznalo by se to az tim, ze nikdo nikam
+    nesmi.
+    """
+    tmp = path.with_name(path.name + ".tmp")
+    handle = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, FILE_MODE)
+    with os.fdopen(handle, "w", encoding="utf-8") as out:
+        out.write(text if text.endswith("\n") else text + "\n")
+    os.chmod(tmp, FILE_MODE)
+    os.replace(tmp, path)
+
+
+def _qr_text(uri: str) -> str:
+    """QR jako text.
+
+    Na server se clovek dostane pres ssh; `cat totp.txt` vypise kod do
+    terminalu a telefon ho sejme z obrazovky. Obrazek je na hlave bez
+    obrazovky k nicemu.
+    """
+    import io
+
+    import qrcode
+
+    code = qrcode.QRCode(border=2)
+    code.add_data(uri)
+    code.make(fit=True)
+    buffer = io.StringIO()
+    code.print_ascii(out=buffer)
+    return buffer.getvalue()
 
 
 def _matching_step(secret: str, code: str, now: float | None = None) -> int | None:

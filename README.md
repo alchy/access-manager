@@ -29,7 +29,7 @@ access = Access.remote(
 
 verdikt = access.authenticate("jindrich", {"totp": kod}, purpose="login")
 
-if verdikt.outcome == "need_second_factor":
+if verdikt.outcome == "need_factor":
     ...                                   # co chybi, rekla komponenta
 if not verdikt:
     ...                                   # ven JEDNA hlaska, do logu duvod

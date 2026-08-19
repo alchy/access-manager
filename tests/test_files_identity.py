@@ -15,7 +15,7 @@ import json
 
 import pytest
 
-from access_manager import Files
+from access_manager import Access
 
 PUBLIC = "group:public"
 USERS = "group:users"
@@ -39,31 +39,31 @@ def skupiny(home, table):
 
 def test_an_unknown_user_is_none(tmp_path):
     # "Neznam" neni "vychozi" - chyba 3.5 zacinala presne tady.
-    assert Files(tmp_path).user("nikdo") is None
+    assert Access.local(tmp_path).user("nikdo") is None
 
 
 def test_a_known_user_is_found(tmp_path):
     zaloz(tmp_path, "hana")
-    assert Files(tmp_path).user("hana") is not None
+    assert Access.local(tmp_path).user("hana") is not None
 
 
 def test_a_user_carries_their_own_principal(tmp_path):
     zaloz(tmp_path, "hana")
-    assert "user:hana" in Files(tmp_path).user("hana").principals
+    assert "user:hana" in Access.local(tmp_path).user("hana").principals
 
 
 def test_every_user_is_in_users_and_public(tmp_path):
     zaloz(tmp_path, "hana")
-    assert {USERS, PUBLIC} <= Files(tmp_path).user("hana").principals
+    assert {USERS, PUBLIC} <= Access.local(tmp_path).user("hana").principals
 
 
 def test_a_name_cannot_climb_out_of_the_home(tmp_path):
     # Jmeno se sklada do CESTY. Bez kontroly by `../..` cetlo, co si nekdo
     # preje - a jmeno chodi zvenci.
     with pytest.raises(ValueError):
-        Files(tmp_path).user("../../etc/passwd")
+        Access.local(tmp_path).user("../../etc/passwd")
 
 
 def test_a_name_with_a_slash_is_refused(tmp_path):
     with pytest.raises(ValueError):
-        Files(tmp_path).user("hana/../petr")
+        Access.local(tmp_path).user("hana/../petr")

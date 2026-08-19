@@ -14,13 +14,13 @@ import json
 
 import pytest
 
-from access_manager import Files
+from access_manager import Access
 
 from test_files_identity import skupiny, zaloz
 
 
 def principaly(home, name):
-    return Files(home).user(name).principals
+    return Access.local(home).user(name).principals
 
 
 # ===========================================================================
