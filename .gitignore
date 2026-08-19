@@ -1,0 +1,41 @@
+# --- co se nikdy nesmi dostat do gitu -------------------------------------
+# Datovy adresar sluzby. Lezi normalne v ~/.access-manager, ale cesta se da
+# nasmerovat kamkoli - vcetne klonu, typicky u kontejneru a testu.
+.access-manager/
+
+# Holy klic klienta. Vznika jednou pri startu, odnese se do prostredi
+# a smaze; do gitu nepatri ani omylem.
+*.key
+client-*.key
+
+# Certifikaty.
+*.pem
+*.crt
+*.p12
+*.pfx
+
+# Konfigurace prostredi.
+.env
+.env.*
+!.env.example
+
+# --- build a nastroje -----------------------------------------------------
+**/__pycache__
+*.py[cod]
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+.venv
+venv/
+
+# --- editory a OS ---------------------------------------------------------
+.claude
+.idea/
+.vscode/
+.DS_Store
