@@ -1,13 +1,19 @@
 # access-manager
 
-Samostatna komponenta, ktera odpovida na dve otazky:
+**Autentikator a adresar skupin.** Odpovi na jednu otazku a rovnou k ni
+prida, kam ten clovek patri:
 
-* **kdo jsi** - overeni cloveka proti zasuvnym mechanismum (dnes TOTP),
-* **co je napsano** - jake ACL plati pro danou adresu.
+    "jsi to ty?"  ->  ok, user:jindrich, [group:mzdy, group:ucetni, ...]
 
-Na treti otazku - *"smi to?"* - **neodpovida zamerne**. Ta patri tomu, kdo
-sve objekty zna; access-manager je nezna a znat je nema. Duvod je v
-[docs/design.md](docs/design.md), par. 5.
+Dnes je mechanismus jediny: autentikator v telefonu (TOTP).
+
+Na otazku *"smi to?"* **neodpovida zamerne** - a od te otazky uz nedrzi ani
+zadna ACL. Prava patri tomu, kdo sve objekty zna; access-manager je nezna
+a znat je nema. Duvod je v [docs/design.md](docs/design.md), par. 5.
+
+Zretezeni skupin rozbaluje SERVER a vraci plochy uzaver. Klasicka bolest
+LDAPu je prave tohle - zanorene clenstvi se necha dopocitat klientovi
+a pulka klientu to udela spatne.
 
 Ma vlastni proces a vlastni REST API, protoze ho pouziva **jak jadro, tak
 aplikace** - nemuze tedy bydlet uvnitr ani jednoho. Muze bezet v jinem
@@ -56,12 +62,40 @@ pip install access-manager[totp]    # + zakladani TOTP identit
 Klient nema zadne povinne zavislosti. HTTP vrstva a TOTP jsou volitelne
 extra, takze apka, ktera jen vola `authenticate`, si netahne nic.
 
+## Sprava
+
+Zakladani a clenstvi jsou na samostatnem objektu, se samostatnym klicem:
+
+```python
+from access_manager import Admin
+
+admin = Admin.local("~/.access-manager")
+
+admin.add_user("jindrich")            # + tajemstvi, URI a QR JAKO TEXT
+admin.pair_missing()                  # doplni jen tem, kdo parovaci kod nemaji
+
+admin.add_group("mzdy")
+admin.add_member("mzdy", "jindrich")
+admin.include("ucetni", "mzdy")       # ucetni OBSAHUJE mzdy; cyklus odmitne
+```
+
+`Access` zapisove operace **nema** a `Admin` neumi `authenticate`. Kdyby
+zavadeni viselo na tomtez objektu, umi kazda apka se svym klicem zalozit
+uzivatele a strcit ho do `group:spravci`.
+
+QR se zaklada jako text (`totp.txt`): na server se clovek dostane pres ssh,
+`cat` vypise kod do terminalu a telefon ho sejme z obrazovky. Obrazek je na
+hlave bez obrazovky k nicemu.
+
 ## Stav
 
-Rozpracovane. Hotovy je souborovy backend s overenim a rozbalenim skupin
-(35 testu, bezi bez site i bez serveru); klient `Access.remote` a sama
-sluzba jeste ne. Navrh REST API je v [docs/design.md](docs/design.md) a
-plati jako zavazny - knihovna se pise podle nej, ne naopak.
+Rozpracovane. Hotova je souborova vrstva - overeni, rozbaleni skupin,
+anti-replay a cela zapisova pulka (64 testu, bezi bez site i bez serveru).
+Klient `Access.remote` a sama sluzba jeste ne, takze priklad vys s
+`Access.remote` zatim popisuje cil, ne skutecnost; `Access.local` funguje.
+
+Navrh REST API je v [docs/design.md](docs/design.md) a plati jako zavazny -
+knihovna se pise podle nej, ne naopak.
 
 ## Licence
 
