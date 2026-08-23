@@ -15,7 +15,7 @@ import pytest
 
 from access_manager import Access
 
-from helpers import PUBLIC, USERS, zaloz
+from helpers import PUBLIC, USERS, zaloz, skupiny
 
 
 # ===========================================================================
@@ -53,3 +53,53 @@ def test_a_name_cannot_climb_out_of_the_home(tmp_path):
 def test_a_name_with_a_slash_is_refused(tmp_path):
     with pytest.raises(ValueError):
         Access.local(tmp_path).user("hana/../petr")
+
+
+# ===========================================================================
+# Existuji tyhle principaly? (navrh par. 3.3)
+# ===========================================================================
+
+
+def test_existing_principals_are_not_unknown(tmp_path):
+    zaloz(tmp_path, "hana")
+    skupiny(tmp_path, {"ucetni": {"members": []}})
+    assert Access.local(tmp_path).unknown_principals(
+        ["user:hana", "group:ucetni", USERS, PUBLIC]
+    ) == []
+
+
+def test_a_typo_in_a_group_is_reported(tmp_path):
+    # `default_access` se skupinou, ktera neexistuje, je slib, ktery
+    # instance nemuze splnit - dnes to konci prazdnou obrazovkou.
+    skupiny(tmp_path, {"ucetni": {"members": []}})
+    assert Access.local(tmp_path).unknown_principals(["group:ucetnii"]) == [
+        "group:ucetnii"
+    ]
+
+
+def test_a_malformed_principal_is_unknown_not_an_error(tmp_path):
+    # Kontrola pri startu ma vyjmenovat vsechno spatne, ne spadnout na
+    # prvnim preklepu.
+    assert Access.local(tmp_path).unknown_principals(["group:../x", "cokoli"]) == [
+        "cokoli",
+        "group:../x",
+    ]
+
+
+# ===========================================================================
+# Pripravenost uloziste (zrcadlo /readyz, navrh par. 3.4)
+# ===========================================================================
+
+
+def test_an_existing_home_is_ready(tmp_path):
+    assert Access.local(tmp_path).ready() is None
+
+
+def test_a_missing_home_is_not_ready(tmp_path):
+    # Neexistujici domov je spatne pripojeny svazek, ne cerstva instalace.
+    assert Access.local(tmp_path / "nikde").ready() is not None
+
+
+def test_a_corrupt_groups_file_is_not_ready(tmp_path):
+    (tmp_path / "groups.json").write_text("{zlomeno", encoding="utf-8")
+    assert "groups.json" in Access.local(tmp_path).ready()

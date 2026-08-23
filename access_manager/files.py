@@ -106,6 +106,42 @@ class FileStore:
         path = self.home / GEN
         return int(path.read_text(encoding="utf-8")) if path.is_file() else 0
 
+    def unknown_principals(self, names) -> list[str]:
+        """Ktere z principalu NEEXISTUJI - hromadne, kvuli startu instance.
+
+        Zdeformovane jmeno je "neznamy", ne vyjimka: kontrola deklarace ma
+        vyjmenovat vsechno spatne najednou, ne spadnout na prvnim preklepu.
+        """
+        return sorted({str(p) for p in names if not self._principal_exists(str(p))})
+
+    def _principal_exists(self, principal: str) -> bool:
+        if principal in (USERS, PUBLIC):
+            return True
+        kind, _, name = principal.partition(":")
+        try:
+            name = check_name(name)
+        except ValueError:
+            return False
+        if kind == "group":
+            return name in self._table()
+        if kind == "user":
+            return (self.home / f"user-{name}").is_dir()
+        return False
+
+    def ready(self) -> str | None:
+        """`None` znamena pripraveno; jinak duvod. Zrcadli budouci /readyz.
+
+        Neexistujici domov je duvod: sluzba se spatne pripojenym svazkem ma
+        rict "nejsem", ne obsluhovat prazdno a vsem odpovidat `unknown_user`.
+        """
+        if not self.home.is_dir():
+            return f"uloziste neexistuje: {self.home}"
+        try:
+            self._table()
+        except (OSError, json.JSONDecodeError) as chyba:
+            return f"{GROUPS} nejde precist: {chyba}"
+        return None
+
     # == overeni ===========================================================
 
     def authenticate(self, username: str, credentials, *, purpose: str) -> Verdict:

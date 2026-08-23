@@ -52,3 +52,11 @@ class Access:
     def generation(self) -> int:
         """Cislo generace: nezmenene znamena, ze drzena odpoved plati dal."""
         return self._store.generation()
+
+    def unknown_principals(self, names) -> list[str]:
+        """Ktere z principalu neexistuji - hromadne, kvuli startu instance."""
+        return self._store.unknown_principals(names)
+
+    def ready(self) -> str | None:
+        """`None` znamena pripraveno; jinak duvod."""
+        return self._store.ready()
