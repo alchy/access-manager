@@ -43,9 +43,12 @@ def test_disabling_keeps_the_membership(tmp_path):
 def test_disabling_twice_is_harmless(tmp_path):
     zaloz(tmp_path, "hana")
     admin = Admin.local(tmp_path)
+    access = Access.local(tmp_path)
     admin.disable_user("hana")
+    gen_after_first = access.generation()
     admin.disable_user("hana")
     assert not Access.local(tmp_path).user("hana").enabled
+    assert access.generation() == gen_after_first
 
 
 def test_disabling_an_unknown_user_is_refused(tmp_path):
@@ -65,8 +68,11 @@ def test_a_removed_member_loses_the_group(tmp_path):
 def test_removing_an_absent_member_is_harmless(tmp_path):
     # DELETE je idempotentni: "uz tam neni" je splneny cil, ne chyba.
     admin = Admin.local(tmp_path)
+    access = Access.local(tmp_path)
     admin.add_group("ucetni")
+    gen_before = access.generation()
     admin.remove_member("ucetni", "hana")
+    assert access.generation() == gen_before
 
 
 def test_removing_a_member_from_an_unknown_group_is_refused(tmp_path):

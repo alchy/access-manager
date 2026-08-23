@@ -249,28 +249,26 @@ class FileStore:
 
     # == zapis: zivotni cyklus =============================================
 
-    def _existing_user_dir(self, name: str) -> Path:
-        directory = self.home / f"user-{name}"
-        if not directory.is_dir():
-            raise ValueError(f"uzivatel {name!r} neexistuje")
-        return directory
-
     def disable_user(self, name: str) -> None:
         """Docasne vypnuti. Clenstvi i auditni stopa zustavaji."""
         name = check_name(name)
-        directory = self._existing_user_dir(name)
-        if (directory / "disabled").exists():
-            return
         with _locked(self.home):
+            directory = self.home / f"user-{name}"
+            if not directory.is_dir():
+                raise ValueError(f"uzivatel {name!r} neexistuje")
+            if (directory / "disabled").exists():
+                return
             _write(directory / "disabled", "")
             self._bump_gen()
 
     def enable_user(self, name: str) -> None:
         name = check_name(name)
-        directory = self._existing_user_dir(name)
-        if not (directory / "disabled").exists():
-            return
         with _locked(self.home):
+            directory = self.home / f"user-{name}"
+            if not directory.is_dir():
+                raise ValueError(f"uzivatel {name!r} neexistuje")
+            if not (directory / "disabled").exists():
+                return
             (directory / "disabled").unlink(missing_ok=True)
             self._bump_gen()
 
@@ -297,8 +295,10 @@ class FileStore:
         audit a jednou by se pod nim zalozil nekdo jiny.
         """
         name = check_name(name)
-        directory = self._existing_user_dir(name)
         with _locked(self.home):
+            directory = self.home / f"user-{name}"
+            if not directory.is_dir():
+                raise ValueError(f"uzivatel {name!r} neexistuje")
             table = self._table()
             for data in table.values():
                 if name in data.get("members", ()):
