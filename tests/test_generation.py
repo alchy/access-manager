@@ -1,11 +1,11 @@
 """Generace: nezmenene cislo znamena, ze cache plati dal.
 
 Resi napeti mezi "odvolani je okamzite" a "expiraci si hlida kazdy
-komponent sam" (navrh par. 3.4) - jeden trivialni dotaz miste push kanalu.
+komponent sam" (navrh par. 3.4) - jeden trivialni dotaz misto push kanalu.
 """
-from access_manager import Access, Admin
-
 from helpers import kod, zaloz
+
+from access_manager import Access, Admin
 
 
 def test_a_fresh_home_is_generation_zero(tmp_path):

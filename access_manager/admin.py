@@ -22,7 +22,7 @@ class Admin:
         self._store = store
 
     @classmethod
-    def local(cls, home) -> "Admin":
+    def local(cls, home) -> Admin:
         return cls(FileStore(home))
 
     # -- lide --------------------------------------------------------------

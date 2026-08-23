@@ -24,7 +24,7 @@ class Access:
         self._store = store
 
     @classmethod
-    def local(cls, home) -> "Access":
+    def local(cls, home) -> Access:
         """V jednom procese, primo ze souboru.
 
         Pro vyvoj na jednom stroji a pro sluzbu samotnou. Obchazi sit - a tim

@@ -8,10 +8,10 @@ ztracenym zapisem.
 import threading
 import time
 
+from helpers import kod, zaloz
+
 from access_manager import Access, Admin
 from access_manager.files import _locked
-
-from helpers import kod, zaloz
 
 
 def test_the_lock_is_exclusive(tmp_path):

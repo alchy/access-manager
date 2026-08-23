@@ -398,7 +398,10 @@ class FileStore:
         """
         path = self.home / f"user-{name}" / "used.json"
         with _locked(self.home):
-            used = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+            if path.is_file():
+                used = json.loads(path.read_text(encoding="utf-8"))
+            else:
+                used = {}
 
             nejstarsi = step - (2 * WINDOW + 1)
             used = {

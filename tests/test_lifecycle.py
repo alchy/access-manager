@@ -5,10 +5,9 @@ prijit o jeho clenstvi i o auditni stopu (navrh par. 3.1). Proto jsou
 disable a remove dva ruzne ukony a oba tu musi byt.
 """
 import pytest
+from helpers import kod, skupiny, zaloz
 
 from access_manager import Access, Admin
-
-from helpers import kod, skupiny, zaloz
 
 
 def test_a_disabled_user_stops_authenticating(tmp_path):

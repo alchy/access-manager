@@ -15,11 +15,9 @@ import stat
 import sys
 
 import pytest
-
-from access_manager import Access, Admin
-
 from helpers import principaly, zaloz
 
+from access_manager import Access, Admin
 
 # ===========================================================================
 # Zalozeni cloveka
@@ -90,7 +88,8 @@ def test_an_existing_secret_is_left_alone(tmp_path):
     # Restart ve 3 rano nesmi vymenit tajemstvi tem, kdo uz je maji.
     zaloz(tmp_path, "jindrich", "JBSWY3DPEHPK3PXP")
     assert Admin.local(tmp_path).pair_missing() == []
-    assert "JBSWY3DPEHPK3PXP" in (tmp_path / "user-jindrich" / "totp.secret").read_text()
+    secret_file = tmp_path / "user-jindrich" / "totp.secret"
+    assert "JBSWY3DPEHPK3PXP" in secret_file.read_text()
 
 
 # ===========================================================================
@@ -211,7 +210,7 @@ def test_including_an_unknown_group_is_refused(tmp_path):
 
 def test_missing_pyotp_says_how_to_install_and_leaves_nothing(tmp_path, monkeypatch):
     # Pad az UVNITR zavadeni nechava torzo: adresar bez tajemstvi, na kterem
-    # druhy pokus recne "uz existuje". Selhat se musi driv - a s navodem.
+    # druhy pokus rekne "uz existuje". Selhat se musi driv - a s navodem.
     monkeypatch.setitem(sys.modules, "pyotp", None)
     with pytest.raises(RuntimeError, match=r"access-manager\[totp\]"):
         Admin.local(tmp_path).add_user("hana")

@@ -10,12 +10,9 @@ je v mzdach, je i v ucetni. Opacne ne. Kdyby se smer prohodil, vetsina testu
 nize by porad prochazela - proto je tu
 `test_membership_does_not_flow_downwards`.
 """
-import pytest
 
-from access_manager import Access
 
 from helpers import principaly, skupiny, zaloz
-
 
 # ===========================================================================
 # Prime clenstvi

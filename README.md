@@ -90,9 +90,11 @@ hlave bez obrazovky k nicemu.
 ## Stav
 
 Rozpracovane. Hotova je souborova vrstva - overeni, rozbaleni skupin,
-anti-replay a cela zapisova pulka (64 testu, bezi bez site i bez serveru).
-Klient `Access.remote` a sama sluzba jeste ne, takze priklad vys s
-`Access.remote` zatim popisuje cil, ne skutecnost; `Access.local` funguje.
+anti-replay a cela zapisova pulka vcetne zivotniho cyklu (disable, remove,
+revoke + nove parovani), generace a kontroly principalu (116 testu, bezi bez
+site i bez serveru). Klient `Access.remote` a sama sluzba jeste ne, takze
+priklad vys s `Access.remote` zatim popisuje cil, ne skutecnost; `Access.local`
+funguje.
 
 Navrh REST API je v [docs/design.md](docs/design.md) a plati jako zavazny -
 knihovna se pise podle nej, ne naopak.

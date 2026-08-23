@@ -11,11 +11,9 @@ ktery obcas spadne na zatizenem stroji. Az pribude heslo s argon2id, bude ten
 rozdil meritelny a test bude mit smysl - do te doby by to bylo divadlo.
 """
 import pytest
-
-from access_manager import Access, Verdict
-
 from helpers import TAJEMSTVI, kod, skupiny, zaloz
 
+from access_manager import Access
 
 # ===========================================================================
 # Co projde a co ne
@@ -29,7 +27,8 @@ def test_the_right_code_passes(tmp_path):
 
 def test_a_wrong_code_is_refused(tmp_path):
     zaloz(tmp_path, "hana", TAJEMSTVI)
-    verdikt = Access.local(tmp_path).authenticate("hana", {"totp": "000000"}, purpose="login")
+    access = Access.local(tmp_path)
+    verdikt = access.authenticate("hana", {"totp": "000000"}, purpose="login")
     assert not verdikt
     assert verdikt.reason == "bad_code"
 
@@ -39,13 +38,15 @@ def test_a_passing_verdict_carries_the_principals(tmp_path):
     # jinak by kazde prihlaseni byla dve kolecka po siti.
     zaloz(tmp_path, "hana", TAJEMSTVI)
     skupiny(tmp_path, {"ucetni": {"members": ["hana"]}})
-    verdikt = Access.local(tmp_path).authenticate("hana", {"totp": kod()}, purpose="login")
+    access = Access.local(tmp_path)
+    verdikt = access.authenticate("hana", {"totp": kod()}, purpose="login")
     assert verdikt.subject_id == "user:hana"
     assert "group:ucetni" in verdikt.principals
 
 
 def test_an_unknown_user_is_refused_by_name(tmp_path):
-    verdikt = Access.local(tmp_path).authenticate("nikdo", {"totp": "123456"}, purpose="login")
+    access = Access.local(tmp_path)
+    verdikt = access.authenticate("nikdo", {"totp": "123456"}, purpose="login")
     assert verdikt.reason == "unknown_user"
 
 
@@ -53,7 +54,8 @@ def test_a_user_without_a_secret_is_refused_by_name(tmp_path):
     # Zalozeny adresar bez tajemstvi neni "spatny kod" - je to nedokoncene
     # zavedeni a spravce to ma poznat z auditu.
     (tmp_path / "user-hana").mkdir()
-    verdikt = Access.local(tmp_path).authenticate("hana", {"totp": "123456"}, purpose="login")
+    access = Access.local(tmp_path)
+    verdikt = access.authenticate("hana", {"totp": "123456"}, purpose="login")
     assert verdikt.reason == "no_secret"
 
 
@@ -62,7 +64,8 @@ def test_a_disabled_user_is_refused_by_name(tmp_path):
     # znamena prijit o jeho clenstvi i o auditni stopu.
     zaloz(tmp_path, "hana", TAJEMSTVI)
     (tmp_path / "user-hana" / "disabled").write_text("dovolena\n", encoding="utf-8")
-    verdikt = Access.local(tmp_path).authenticate("hana", {"totp": kod()}, purpose="login")
+    access = Access.local(tmp_path)
+    verdikt = access.authenticate("hana", {"totp": kod()}, purpose="login")
     assert verdikt.reason == "disabled"
 
 
@@ -99,7 +102,8 @@ def test_the_same_code_twice_for_the_same_purpose_is_a_replay(tmp_path):
     access = Access.local(tmp_path)
     stejny = kod()
     assert access.authenticate("hana", {"totp": stejny}, purpose="login")
-    assert access.authenticate("hana", {"totp": stejny}, purpose="login").reason == "replay"
+    verdikt = access.authenticate("hana", {"totp": stejny}, purpose="login")
+    assert verdikt.reason == "replay"
 
 
 def test_the_same_code_serves_a_different_purpose(tmp_path):
@@ -156,6 +160,8 @@ def test_login_and_unlock_with_a_target_are_the_two_shapes(tmp_path):
     zaloz(tmp_path, "hana", TAJEMSTVI)
     access = Access.local(tmp_path)
     prvni = access.authenticate("hana", {"totp": "000000"}, purpose="login")
-    druhy = access.authenticate("hana", {"totp": "000000"}, purpose="unlock:screen.provoz/mzdy")
+    druhy = access.authenticate(
+        "hana", {"totp": "000000"}, purpose="unlock:screen.provoz/mzdy"
+    )
     assert prvni.reason == "bad_code"
     assert druhy.reason == "bad_code"

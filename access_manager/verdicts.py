@@ -63,7 +63,7 @@ class Verdict:
         return self.outcome == "ok"
 
     @classmethod
-    def ok(cls, subject_id: str | None, principals, gen: int | None = None) -> "Verdict":
+    def ok(cls, subject_id: str | None, principals, gen: int | None = None) -> Verdict:
         return cls(
             outcome="ok",
             subject_id=subject_id,
@@ -72,10 +72,10 @@ class Verdict:
         )
 
     @classmethod
-    def refused(cls, reason: str, gen: int | None = None) -> "Verdict":
+    def refused(cls, reason: str, gen: int | None = None) -> Verdict:
         """Odmitnuti s duvodem. Ven jde `denied`; duvod je pro audit."""
         return cls(outcome="denied", reason=reason, gen=gen)
 
     @classmethod
-    def need_factor(cls, required, gen: int | None = None) -> "Verdict":
+    def need_factor(cls, required, gen: int | None = None) -> Verdict:
         return cls(outcome="need_factor", required=tuple(required), gen=gen)
