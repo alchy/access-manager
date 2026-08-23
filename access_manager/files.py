@@ -19,10 +19,12 @@ Format navazuje na to, co uz zaklada `python -m viewbase.admin adduser`:
 """
 from __future__ import annotations
 
+import fcntl
 import hmac
 import json
 import os
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from .principals import (
@@ -46,6 +48,10 @@ WINDOW = 1
 #: Prava. Tajemstvi je citelne jen vlastnikem a adresar se ani neda projit.
 FILE_MODE = 0o600
 DIR_MODE = 0o700
+
+#: Zamek vedle dat. Jeden na cely adresar: sporu je malo a spravnost je
+#: videt na prvni pohled. fcntl je POSIXovy - Windows tu nikdy nebyl cil.
+LOCK = ".lock"
 
 
 class FileStore:
@@ -168,46 +174,49 @@ class FileStore:
 
     def add_group(self, name: str) -> None:
         name = check_name(name)
-        table = self._table()
-        if name in table:
-            raise ValueError(f"skupina {name!r} uz existuje")
-        table[name] = {"members": [], "includes": []}
-        self._write_table(table)
+        with _locked(self.home):
+            table = self._table()
+            if name in table:
+                raise ValueError(f"skupina {name!r} uz existuje")
+            table[name] = {"members": [], "includes": []}
+            self._write_table(table)
 
     def add_member(self, group: str, name: str) -> None:
         group, name = check_name(group), check_name(name)
-        table = self._table()
-        if group not in table:
-            # Preklep by jinak zalozil skupinu, kterou nikdo nikdy nenapsal
-            # do zadneho ACL - clenstvi bez ucinku, ktere vypada hotove.
-            raise ValueError(f"skupina {group!r} neexistuje")
-        if not (self.home / f"user-{name}").is_dir():
-            raise ValueError(f"uzivatel {name!r} neexistuje")
-        members = set(table[group].get("members", ()))
-        members.add(name)
-        table[group]["members"] = sorted(members)
-        self._write_table(table)
+        with _locked(self.home):
+            table = self._table()
+            if group not in table:
+                # Preklep by jinak zalozil skupinu, kterou nikdo nikdy nenapsal
+                # do zadneho ACL - clenstvi bez ucinku, ktere vypada hotove.
+                raise ValueError(f"skupina {group!r} neexistuje")
+            if not (self.home / f"user-{name}").is_dir():
+                raise ValueError(f"uzivatel {name!r} neexistuje")
+            members = set(table[group].get("members", ()))
+            members.add(name)
+            table[group]["members"] = sorted(members)
+            self._write_table(table)
 
     def include(self, parent: str, child: str) -> None:
         """`parent` OBSAHUJE `child`: kdo je v child, je i v parent."""
         parent, child = check_name(parent), check_name(child)
-        table = self._table()
-        for group in (parent, child):
-            if group not in table:
-                raise ValueError(f"skupina {group!r} neexistuje")
-        if parent == child:
-            raise ValueError(f"skupina {parent!r} nemuze obsahovat sama sebe")
-        if parent in _descendants(table, child):
-            # Cyklus cteni prezije, ale VYROBIT ho je vzdycky omyl - a v tuhle
-            # chvili jeste vime, kdo ho dela a proc.
-            raise ValueError(
-                f"{parent!r} uz je obsazena v {child!r}; opacne zretezeni by "
-                f"udelalo cyklus"
-            )
-        includes = set(table[parent].get("includes", ()))
-        includes.add(child)
-        table[parent]["includes"] = sorted(includes)
-        self._write_table(table)
+        with _locked(self.home):
+            table = self._table()
+            for group in (parent, child):
+                if group not in table:
+                    raise ValueError(f"skupina {group!r} neexistuje")
+            if parent == child:
+                raise ValueError(f"skupina {parent!r} nemuze obsahovat sama sebe")
+            if parent in _descendants(table, child):
+                # Cyklus cteni prezije, ale VYROBIT ho je vzdycky omyl - a v tuhle
+                # chvili jeste vime, kdo ho dela a proc.
+                raise ValueError(
+                    f"{parent!r} uz je obsazena v {child!r}; opacne zretezeni by "
+                    f"udelalo cyklus"
+                )
+            includes = set(table[parent].get("includes", ()))
+            includes.add(child)
+            table[parent]["includes"] = sorted(includes)
+            self._write_table(table)
 
     # == anti-replay =======================================================
 
@@ -220,21 +229,22 @@ class FileStore:
         zacal odmitat legitimni kody.
         """
         path = self.home / f"user-{name}" / "used.json"
-        used = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        with _locked(self.home):
+            used = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
 
-        nejstarsi = step - (2 * WINDOW + 1)
-        used = {
-            klic: [s for s in steps if s > nejstarsi]
-            for klic, steps in used.items()
-        }
+            nejstarsi = step - (2 * WINDOW + 1)
+            used = {
+                klic: [s for s in steps if s > nejstarsi]
+                for klic, steps in used.items()
+            }
 
-        if step in used.get(purpose, ()):
-            return False
+            if step in used.get(purpose, ()):
+                return False
 
-        used.setdefault(purpose, []).append(step)
-        used = {klic: steps for klic, steps in used.items() if steps}
-        _replace(path, json.dumps(used))
-        return True
+            used.setdefault(purpose, []).append(step)
+            used = {klic: steps for klic, steps in used.items() if steps}
+            _replace(path, json.dumps(used))
+            return True
 
     # == zretezeni =========================================================
 
@@ -276,6 +286,27 @@ class FileStore:
 # ===========================================================================
 # Pomocne
 # ===========================================================================
+
+
+@contextmanager
+def _locked(home: Path):
+    """Vyhradni zamek nad celym ulozistem.
+
+    Kazde cteni-uprava-zapis (`used.json`, `groups.json`, `gen`) musi bezet
+    pod nim: dva procesy nad tymz adresarem si jinak ztrati zapis toho
+    pomalejsiho - a u anti-replay by tyz kod prosel dvakrat.
+
+    NENI reentrantni: nic, co bezi pod zamkem, nesmi zamykat znovu.
+    Zavrenim deskriptoru se zamek pousti.
+    """
+    home.mkdir(parents=True, mode=DIR_MODE, exist_ok=True)
+    os.chmod(home, DIR_MODE)
+    handle = os.open(home / LOCK, os.O_WRONLY | os.O_CREAT, FILE_MODE)
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(handle)
 
 
 def _descendants(table: dict, start: str) -> set[str]:
