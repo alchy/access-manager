@@ -13,7 +13,7 @@ import pytest
 from access_manager import Access, Admin
 
 
-ZAPISOVE = ["add_user", "add_group", "add_member", "include"]
+ZAPISOVE = ["add_user", "add_group", "add_member", "include", "disable_user", "enable_user", "remove_member", "remove_user", "pair_missing"]
 
 
 @pytest.mark.parametrize("jmeno", ZAPISOVE)

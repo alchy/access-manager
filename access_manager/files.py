@@ -23,6 +23,7 @@ import fcntl
 import hmac
 import json
 import os
+import shutil
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -244,6 +245,66 @@ class FileStore:
             includes.add(child)
             table[parent]["includes"] = sorted(includes)
             self._write_table(table)
+            self._bump_gen()
+
+    # == zapis: zivotni cyklus =============================================
+
+    def _existing_user_dir(self, name: str) -> Path:
+        directory = self.home / f"user-{name}"
+        if not directory.is_dir():
+            raise ValueError(f"uzivatel {name!r} neexistuje")
+        return directory
+
+    def disable_user(self, name: str) -> None:
+        """Docasne vypnuti. Clenstvi i auditni stopa zustavaji."""
+        name = check_name(name)
+        directory = self._existing_user_dir(name)
+        if (directory / "disabled").exists():
+            return
+        with _locked(self.home):
+            _write(directory / "disabled", "")
+            self._bump_gen()
+
+    def enable_user(self, name: str) -> None:
+        name = check_name(name)
+        directory = self._existing_user_dir(name)
+        if not (directory / "disabled").exists():
+            return
+        with _locked(self.home):
+            (directory / "disabled").unlink(missing_ok=True)
+            self._bump_gen()
+
+    def remove_member(self, group: str, name: str) -> None:
+        group, name = check_name(group), check_name(name)
+        with _locked(self.home):
+            table = self._table()
+            if group not in table:
+                raise ValueError(f"skupina {group!r} neexistuje")
+            members = set(table[group].get("members", ()))
+            if name not in members:
+                # DELETE je idempotentni: "uz tam neni" je splneny cil.
+                return
+            members.discard(name)
+            table[group]["members"] = sorted(members)
+            self._write_table(table)
+            self._bump_gen()
+
+    def remove_user(self, name: str) -> None:
+        """Smaz cloveka VCETNE jmena v seznamech clenu.
+
+        Principaly se pocitaji pri kazdem dotazu, takze zasah je ucinny uz
+        smazanim adresare - ale jmeno visici v `groups.json` by matlo kazdy
+        audit a jednou by se pod nim zalozil nekdo jiny.
+        """
+        name = check_name(name)
+        directory = self._existing_user_dir(name)
+        with _locked(self.home):
+            table = self._table()
+            for data in table.values():
+                if name in data.get("members", ()):
+                    data["members"] = sorted(set(data["members"]) - {name})
+            self._write_table(table)
+            shutil.rmtree(directory)
             self._bump_gen()
 
     # == anti-replay =======================================================

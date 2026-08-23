@@ -35,6 +35,17 @@ class Admin:
         """Doplni parovaci kod tem, kdo zadny nemaji. Ostatnich se nedotkne."""
         return self._store.pair_missing()
 
+    def disable_user(self, name: str) -> None:
+        """Docasne vypnuti - clenstvi i auditni stopa zustavaji."""
+        self._store.disable_user(name)
+
+    def enable_user(self, name: str) -> None:
+        self._store.enable_user(name)
+
+    def remove_user(self, name: str) -> None:
+        """Smazani vcetne clenstvi. Na tri dny se clovek vypina, ne maze."""
+        self._store.remove_user(name)
+
     # -- skupiny -----------------------------------------------------------
 
     def add_group(self, name: str) -> None:
@@ -46,3 +57,6 @@ class Admin:
     def include(self, parent: str, child: str) -> None:
         """`parent` obsahuje `child`: kdo je v child, je i v parent."""
         self._store.include(parent, child)
+
+    def remove_member(self, group: str, name: str) -> None:
+        self._store.remove_member(group, name)
