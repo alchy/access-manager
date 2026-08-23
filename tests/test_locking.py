@@ -25,7 +25,7 @@ def test_the_lock_is_exclusive(tmp_path):
             poradi.append("drzitel")
 
     def cekatel():
-        drzim.wait()
+        assert drzim.wait(timeout=5), "timeout: drzitel nikdy nenapsal event"
         with _locked(tmp_path):
             poradi.append("cekatel")
 
@@ -33,7 +33,8 @@ def test_the_lock_is_exclusive(tmp_path):
     for v in vlakna:
         v.start()
     for v in vlakna:
-        v.join()
+        v.join(timeout=10)
+        assert not v.is_alive(), f"thread {v.name} se neukoncilo"
     assert poradi == ["drzitel", "cekatel"]
 
 
@@ -41,7 +42,7 @@ def test_a_burst_of_the_same_code_passes_exactly_once(tmp_path):
     zaloz(tmp_path, "hana")
     access = Access.local(tmp_path)
     stejny = kod()
-    zavora = threading.Barrier(8)
+    zavora = threading.Barrier(8, timeout=5)
     verdikty = []
 
     def utocnik():
@@ -54,7 +55,8 @@ def test_a_burst_of_the_same_code_passes_exactly_once(tmp_path):
     for v in vlakna:
         v.start()
     for v in vlakna:
-        v.join()
+        v.join(timeout=10)
+        assert not v.is_alive(), f"thread {v.name} se neukoncilo"
     assert sum(1 for v in verdikty if v) == 1
 
 
@@ -63,7 +65,7 @@ def test_two_writers_do_not_lose_each_others_members(tmp_path):
     admin.add_group("ucetni")
     admin.add_user("hana")
     admin.add_user("petr")
-    zavora = threading.Barrier(2)
+    zavora = threading.Barrier(2, timeout=5)
 
     def pridej(jmeno):
         zavora.wait()
@@ -76,5 +78,6 @@ def test_two_writers_do_not_lose_each_others_members(tmp_path):
     for v in vlakna:
         v.start()
     for v in vlakna:
-        v.join()
+        v.join(timeout=10)
+        assert not v.is_alive(), f"thread {v.name} se neukoncilo"
     assert Access.local(tmp_path).group("ucetni").members == ("hana", "petr")
