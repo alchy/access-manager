@@ -10,17 +10,11 @@ je v mzdach, je i v ucetni. Opacne ne. Kdyby se smer prohodil, vetsina testu
 nize by porad prochazela - proto je tu
 `test_membership_does_not_flow_downwards`.
 """
-import json
-
 import pytest
 
 from access_manager import Access
 
-from test_files_identity import skupiny, zaloz
-
-
-def principaly(home, name):
-    return Access.local(home).user(name).principals
+from helpers import principaly, skupiny, zaloz
 
 
 # ===========================================================================

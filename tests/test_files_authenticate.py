@@ -10,21 +10,11 @@ identity. U TOTP je rozdil v radu mikrosekund a merit ho znamena mit test,
 ktery obcas spadne na zatizenem stroji. Az pribude heslo s argon2id, bude ten
 rozdil meritelny a test bude mit smysl - do te doby by to bylo divadlo.
 """
-import json
-
-import pyotp
 import pytest
 
 from access_manager import Access, Verdict
 
-from test_files_identity import skupiny, zaloz
-
-TAJEMSTVI = "JBSWY3DPEHPK3PXP"
-
-
-def kod(secret=TAJEMSTVI, at=None):
-    totp = pyotp.TOTP(secret)
-    return totp.now() if at is None else totp.at(at)
+from helpers import TAJEMSTVI, kod, skupiny, zaloz
 
 
 # ===========================================================================
@@ -161,7 +151,11 @@ def test_an_unlock_without_a_target_is_refused(tmp_path):
 
 
 def test_login_and_unlock_with_a_target_are_the_two_shapes(tmp_path):
+    # Oba tvary ucelu projdou kontrolou tvaru - odmitne je az spatny kod,
+    # ne ValueError. Bez assertu tenhle test nedrzel nic.
     zaloz(tmp_path, "hana", TAJEMSTVI)
     access = Access.local(tmp_path)
-    access.authenticate("hana", {"totp": "000000"}, purpose="login")
-    access.authenticate("hana", {"totp": "000000"}, purpose="unlock:screen.provoz/mzdy")
+    prvni = access.authenticate("hana", {"totp": "000000"}, purpose="login")
+    druhy = access.authenticate("hana", {"totp": "000000"}, purpose="unlock:screen.provoz/mzdy")
+    assert prvni.outcome == "bad_code"
+    assert druhy.outcome == "bad_code"

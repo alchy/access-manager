@@ -11,25 +11,11 @@ Format navazuje na to, co uz dnes zaklada `python -m viewbase.admin adduser`:
       user-hana/totp.secret
       groups.json     {"ucetni": {"members": ["hana"], "includes": ["mzdy"]}}
 """
-import json
-
 import pytest
 
 from access_manager import Access
 
-PUBLIC = "group:public"
-USERS = "group:users"
-
-
-def zaloz(home, name, secret="JBSWY3DPEHPK3PXP"):
-    directory = home / f"user-{name}"
-    directory.mkdir(parents=True)
-    (directory / "totp.secret").write_text(secret + "\n", encoding="utf-8")
-    return directory
-
-
-def skupiny(home, table):
-    (home / "groups.json").write_text(json.dumps(table), encoding="utf-8")
+from helpers import PUBLIC, USERS, zaloz
 
 
 # ===========================================================================

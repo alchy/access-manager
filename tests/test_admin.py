@@ -11,18 +11,13 @@ Parovani je na TEXTOVEM QR: na server se clovek dostane pres ssh, `cat`
 vypise kod do terminalu a telefon ho sejme z obrazovky. SVG je hezci, ale
 na hlavu bez obrazovky k nicemu.
 """
-import json
 import stat
 
 import pytest
 
 from access_manager import Access, Admin
 
-from test_files_identity import skupiny, zaloz
-
-
-def principaly(home, jmeno):
-    return Access.local(home).user(jmeno).principals
+from helpers import principaly, zaloz
 
 
 # ===========================================================================
