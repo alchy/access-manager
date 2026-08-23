@@ -156,3 +156,38 @@ def test_an_unknown_mechanism_cannot_be_revoked(tmp_path):
     zaloz(tmp_path, "hana")
     with pytest.raises(ValueError):
         Admin.local(tmp_path).revoke_credential("hana", mechanism="password")
+
+
+def test_pairing_an_unknown_user_is_refused(tmp_path):
+    with pytest.raises(ValueError):
+        Admin.local(tmp_path).pair("nikdo")
+
+
+def test_revoking_an_unknown_user_is_refused(tmp_path):
+    with pytest.raises(ValueError):
+        Admin.local(tmp_path).revoke_credential("nikdo")
+
+
+def test_pairing_heals_a_dir_with_stale_qr_but_no_secret(tmp_path):
+    # Pad uprostred revoke necha uri/txt bez tajemstvi; pair to musi uklidit,
+    # ne spadnout na O_EXCL a nechat pulku stareho a pulku noveho.
+    (tmp_path / "user-hana").mkdir(parents=True)
+    (tmp_path / "user-hana" / "totp.uri").write_text("stary\n", encoding="utf-8")
+    (tmp_path / "user-hana" / "totp.txt").write_text("stary qr\n", encoding="utf-8")
+    Admin.local(tmp_path).pair("hana")
+    secret_path = tmp_path / "user-hana" / "totp.secret"
+    secret = secret_path.read_text(encoding="utf-8").strip()
+    uri = (tmp_path / "user-hana" / "totp.uri").read_text(encoding="utf-8")
+    assert secret in uri   # QR patri k NOVEMU tajemstvi
+
+
+def test_pair_missing_heals_a_dir_with_stale_qr_but_no_secret(tmp_path):
+    # Stejny pad, ale cestou pair_missing() - pouziva se pri startu sluzby.
+    (tmp_path / "user-hana").mkdir(parents=True)
+    (tmp_path / "user-hana" / "totp.uri").write_text("stary\n", encoding="utf-8")
+    (tmp_path / "user-hana" / "totp.txt").write_text("stary qr\n", encoding="utf-8")
+    Admin.local(tmp_path).pair_missing()
+    secret_path = tmp_path / "user-hana" / "totp.secret"
+    secret = secret_path.read_text(encoding="utf-8").strip()
+    uri = (tmp_path / "user-hana" / "totp.uri").read_text(encoding="utf-8")
+    assert secret in uri   # QR patri k NOVEMU tajemstvi

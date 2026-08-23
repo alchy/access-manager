@@ -55,8 +55,12 @@ DIR_MODE = 0o700
 #: videt na prvni pohled. fcntl je POSIXovy - Windows tu nikdy nebyl cil.
 LOCK = ".lock"
 
-#: Cislo generace. Zvedne ho kazdy zapis; cteni ho jen cte.
+#: Cislo generace. Zvedne ho kazdy administrativni zapis; cteni ho jen cte.
 GEN = "gen"
+
+#: Soubory jednoho povereni: pouziva revoke_credential i uklid pred novym
+#: parovanim, kdyz po preruseni zbyde osireny QR bez tajemstvi.
+CREDENTIAL_ARTEFACTS = ("totp.secret", "totp.uri", "totp.txt", "used.json")
 
 
 class FileStore:
@@ -102,7 +106,8 @@ class FileStore:
         )
 
     def generation(self) -> int:
-        """Cislo generace: zvedne ho kazdy zapis. Cache plati, dokud se nehne."""
+        """Cislo generace: zvedne ho kazdy administrativni zapis. Cache plati,
+        dokud se nehne."""
         path = self.home / GEN
         return int(path.read_text(encoding="utf-8")) if path.is_file() else 0
 
@@ -175,6 +180,10 @@ class FileStore:
             return Verdict.refused("replay", gen=gen)
 
         user = self.user(name)
+        if user is None:
+            # Soubeh: mezi _consume a timhle dotazem stihl remove_user smazat
+            # adresar. Spravny kod bez existujiciho uzivatele neni verdikt.
+            return Verdict.refused("unknown_user", gen=gen)
         return Verdict.ok(user.subject_id, user.principals, gen=gen)
 
     # == zapis: lide =======================================================
@@ -211,6 +220,10 @@ class FileStore:
             for directory in sorted(self.home.glob("user-*")):
                 if not directory.is_dir() or (directory / "totp.secret").is_file():
                     continue
+                # Osireny QR z preruseneho revoke (nebo cizi zasah) by jinak
+                # srazil _pair na O_EXCL - viz pair().
+                (directory / "totp.uri").unlink(missing_ok=True)
+                (directory / "totp.txt").unlink(missing_ok=True)
                 doplneno.append(
                     self._pair(check_name(directory.name[len("user-"):]), directory)
                 )
@@ -360,11 +373,10 @@ class FileStore:
             directory = self.home / f"user-{name}"
             if not directory.is_dir():
                 raise ValueError(f"uzivatel {name!r} neexistuje")
-            artefakty = ("totp.secret", "totp.uri", "totp.txt", "used.json")
-            if not any((directory / a).exists() for a in artefakty):
+            if not any((directory / a).exists() for a in CREDENTIAL_ARTEFACTS):
                 # Idempotentni: zadne tajemstvi neni zadny problem
                 return
-            for artefakt in artefakty:
+            for artefakt in CREDENTIAL_ARTEFACTS:
                 (directory / artefakt).unlink(missing_ok=True)
             self._bump_gen()
 
@@ -381,7 +393,13 @@ class FileStore:
                     f"uzivatel {name!r} uz tajemstvi ma; nejdriv revoke_credential - "
                     f"prepsani by ho zamklo ven"
                 )
+            # Osireny stav z preruseneho revoke (nebo cizi zasah): tajemstvi
+            # chybi, ale used.json/uri/txt patrici STAREMU tajemstvi tu jeste
+            # mohou lezet. Bez uklidu by _pair spadl na O_EXCL a nechal by
+            # pulku stareho QR vedle pulky noveho.
             (directory / "used.json").unlink(missing_ok=True)
+            (directory / "totp.uri").unlink(missing_ok=True)
+            (directory / "totp.txt").unlink(missing_ok=True)
             enrolment = self._pair(name, directory)
             self._bump_gen()
         return enrolment
