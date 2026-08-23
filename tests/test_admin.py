@@ -12,6 +12,7 @@ vypise kod do terminalu a telefon ho sejme z obrazovky. SVG je hezci, ale
 na hlavu bez obrazovky k nicemu.
 """
 import stat
+import sys
 
 import pytest
 
@@ -201,3 +202,25 @@ def test_including_an_unknown_group_is_refused(tmp_path):
     admin.add_group("ucetni")
     with pytest.raises(ValueError):
         admin.include("ucetni", "mzdi")
+
+
+# ===========================================================================
+# Chyby pri chybejicich zavislostich
+# ===========================================================================
+
+
+def test_missing_pyotp_says_how_to_install_and_leaves_nothing(tmp_path, monkeypatch):
+    # Pad az UVNITR zavadeni nechava torzo: adresar bez tajemstvi, na kterem
+    # druhy pokus recne "uz existuje". Selhat se musi driv - a s navodem.
+    monkeypatch.setitem(sys.modules, "pyotp", None)
+    with pytest.raises(RuntimeError, match=r"access-manager\[totp\]"):
+        Admin.local(tmp_path).add_user("hana")
+    assert not (tmp_path / "user-hana").exists()
+
+
+def test_the_home_is_private_from_the_first_write(tmp_path):
+    # Vypis `user-*` adresaru je seznam uzivatelu - domov musi byt 0700
+    # od prvniho zapisu, ne az od druheho.
+    home = tmp_path / "am"
+    Admin.local(home).add_user("hana")
+    assert stat.S_IMODE(home.stat().st_mode) == 0o700

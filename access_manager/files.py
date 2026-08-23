@@ -149,6 +149,7 @@ class FileStore:
 
     def add_user(self, name: str) -> Enrolment:
         name = check_name(name)
+        _require_pairing()
         with _locked(self.home):
             directory = self.home / f"user-{name}"
             if directory.exists():
@@ -168,6 +169,7 @@ class FileStore:
         Sluzba restartovana ve 3 rano nesmi vymenit tajemstvi lidem, kteri uz
         je maji - autentikator by dal vydaval kody, ktere uz nikam nepatri.
         """
+        _require_pairing()
         with _locked(self.home):
             doplneno = []
             for directory in sorted(self.home.glob("user-*")):
@@ -181,7 +183,7 @@ class FileStore:
         return doplneno
 
     def _pair(self, name: str, directory: Path) -> Enrolment:
-        import pyotp
+        pyotp = _require_totp()
 
         secret = pyotp.random_base32()
         label = f"{ISSUER}:user:{name}"
@@ -333,6 +335,7 @@ class FileStore:
     def pair(self, name: str) -> Enrolment:
         """Nove parovani JEDNOHO cloveka. Existujici tajemstvi neprepise."""
         name = check_name(name)
+        _require_pairing()
         with _locked(self.home):
             directory = self.home / f"user-{name}"
             if not directory.is_dir():
@@ -417,6 +420,28 @@ class FileStore:
 # ===========================================================================
 
 
+def _require_totp():
+    """Vrat pyotp, nebo rekni JAK ho doinstalovat - ne jen ze chybi."""
+    try:
+        import pyotp
+    except ImportError as chybi:
+        raise RuntimeError(
+            "TOTP potrebuje pyotp: pip install 'access-manager[totp]'"
+        ) from chybi
+    return pyotp
+
+
+def _require_pairing() -> None:
+    """Parovani chce pyotp i qrcode. Selhat ma DRIV, nez po nem neco zbyde."""
+    try:
+        import pyotp  # noqa: F401
+        import qrcode  # noqa: F401
+    except ImportError as chybi:
+        raise RuntimeError(
+            "zavadeni potrebuje pyotp a qrcode: pip install 'access-manager[totp]'"
+        ) from chybi
+
+
 @contextmanager
 def _locked(home: Path):
     """Vyhradni zamek nad celym ulozistem.
@@ -487,7 +512,12 @@ def _qr_text(uri: str) -> str:
     """
     import io
 
-    import qrcode
+    try:
+        import qrcode
+    except ImportError as chybi:
+        raise RuntimeError(
+            "textovy QR potrebuje qrcode: pip install 'access-manager[totp]'"
+        ) from chybi
 
     code = qrcode.QRCode(border=2)
     code.add_data(uri)
@@ -503,12 +533,7 @@ def _matching_step(secret: str, code: str, now: float | None = None) -> int | No
     `pyotp.verify` odpovi jen ano/ne, jenze pro anti-replay potrebujeme VEDET
     KTERY krok se spotreboval; bez toho by "pouzity kod" nesel zapamatovat.
     """
-    try:
-        import pyotp
-    except ModuleNotFoundError as chybi:  # pragma: no cover - instalacni chyba
-        raise RuntimeError(
-            "TOTP potrebuje pyotp: pip install 'access-manager[totp]'"
-        ) from chybi
+    pyotp = _require_totp()
 
     totp = pyotp.TOTP(secret)
     now = time.time() if now is None else now
