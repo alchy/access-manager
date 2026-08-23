@@ -109,6 +109,14 @@ def test_an_existing_group_is_refused(tmp_path):
         admin.add_group("ucetni")
 
 
+@pytest.mark.parametrize("jmeno", ["users", "public"])
+def test_a_reserved_group_cannot_be_created(tmp_path, jmeno):
+    # `group:users` a `group:public` dostava kazdy automaticky. Zalozit je
+    # jako obycejne skupiny znamena dve pravdy o temz jmene.
+    with pytest.raises(ValueError):
+        Admin.local(tmp_path).add_group(jmeno)
+
+
 # ===========================================================================
 # Clenstvi
 # ===========================================================================

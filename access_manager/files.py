@@ -30,6 +30,7 @@ from pathlib import Path
 from .principals import (
     ISSUER,
     PUBLIC,
+    RESERVED_GROUPS,
     USERS,
     Enrolment,
     Group,
@@ -193,6 +194,11 @@ class FileStore:
 
     def add_group(self, name: str) -> None:
         name = check_name(name)
+        if name in RESERVED_GROUPS:
+            raise ValueError(
+                f"skupina {name!r} je vyhrazena: clenstvi v ni je automaticke "
+                f"a nejde spravovat"
+            )
         with _locked(self.home):
             table = self._table()
             if name in table:

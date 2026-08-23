@@ -19,6 +19,11 @@ PUBLIC = "group:public"
 #: Kdo je prihlaseny - kdokoli se jmenem.
 USERS = "group:users"
 
+#: Vyhrazena jmena skupin - hola, bez prefixu. Kazdy je dostava automaticky
+#: (viz `USERS` a `PUBLIC`), takze zalozit je jako obycejne skupiny znamena
+#: dve pravdy o temz jmene.
+RESERVED_GROUPS = frozenset({"users", "public"})
+
 #: Vydavatel ve stitku autentikatoru. Stejna syntaxe jako principal, takze se
 #: clovek v telefonu jmenuje stejne jako v pravech.
 ISSUER = "viewBase"
