@@ -307,6 +307,46 @@ class FileStore:
             shutil.rmtree(directory)
             self._bump_gen()
 
+    def revoke_credential(self, name: str, mechanism: str = "totp") -> None:
+        """Odvolani povereni - reseni ztraceneho telefonu.
+
+        Maze i `used.json`: cisla spotrebovanych kroku patri ke staremu
+        tajemstvi a s novym by tyz krok byl falesny replay.
+        """
+        if mechanism != "totp":
+            raise ValueError(
+                f"neznamy mechanismus {mechanism!r}; zatim existuje jen 'totp'"
+            )
+        name = check_name(name)
+        with _locked(self.home):
+            directory = self.home / f"user-{name}"
+            if not directory.is_dir():
+                raise ValueError(f"uzivatel {name!r} neexistuje")
+            artefakty = ("totp.secret", "totp.uri", "totp.txt", "used.json")
+            if not any((directory / a).exists() for a in artefakty):
+                # Idempotentni: zadne tajemstvi neni zadny problem
+                return
+            for artefakt in artefakty:
+                (directory / artefakt).unlink(missing_ok=True)
+            self._bump_gen()
+
+    def pair(self, name: str) -> Enrolment:
+        """Nove parovani JEDNOHO cloveka. Existujici tajemstvi neprepise."""
+        name = check_name(name)
+        with _locked(self.home):
+            directory = self.home / f"user-{name}"
+            if not directory.is_dir():
+                raise ValueError(f"uzivatel {name!r} neexistuje")
+            if (directory / "totp.secret").is_file():
+                raise ValueError(
+                    f"uzivatel {name!r} uz tajemstvi ma; nejdriv revoke_credential - "
+                    f"prepsani by ho zamklo ven"
+                )
+            (directory / "used.json").unlink(missing_ok=True)
+            enrolment = self._pair(name, directory)
+            self._bump_gen()
+        return enrolment
+
     # == anti-replay =======================================================
 
     def _consume(self, name: str, purpose: str, step: int) -> bool:

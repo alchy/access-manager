@@ -35,6 +35,14 @@ class Admin:
         """Doplni parovaci kod tem, kdo zadny nemaji. Ostatnich se nedotkne."""
         return self._store.pair_missing()
 
+    def revoke_credential(self, name: str, mechanism: str = "totp") -> None:
+        """Ztraceny telefon: odvolat, pak `pair` pro novy."""
+        self._store.revoke_credential(name, mechanism)
+
+    def pair(self, name: str) -> Enrolment:
+        """Nove parovani jednoho cloveka. Existujici tajemstvi neprepise."""
+        return self._store.pair(name)
+
     def disable_user(self, name: str) -> None:
         """Docasne vypnuti - clenstvi i auditni stopa zustavaji."""
         self._store.disable_user(name)

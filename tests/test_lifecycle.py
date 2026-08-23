@@ -107,3 +107,53 @@ def test_lifecycle_writes_move_the_generation(tmp_path):
     pred = access.generation()
     admin.disable_user("hana")
     assert access.generation() > pred
+
+
+# ===========================================================================
+# Ztraceny telefon: odvolat a znovu sparovat
+# ===========================================================================
+
+
+def test_a_revoked_credential_refuses_as_no_secret(tmp_path):
+    zaloz(tmp_path, "hana")
+    Admin.local(tmp_path).revoke_credential("hana")
+    verdikt = Access.local(tmp_path).authenticate(
+        "hana", {"totp": kod()}, purpose="login"
+    )
+    assert verdikt.reason == "no_secret"
+
+
+def test_pairing_never_overwrites_an_existing_secret(tmp_path):
+    # Stejne pravidlo jako u add_user: prepsat tajemstvi znamena zamknout
+    # cloveka ven. Jedina cesta k novemu je revoke + pair.
+    zaloz(tmp_path, "hana")
+    with pytest.raises(ValueError):
+        Admin.local(tmp_path).pair("hana")
+
+
+def test_revoke_and_pair_issue_a_different_secret(tmp_path):
+    admin = Admin.local(tmp_path)
+    admin.add_user("hana")
+    stare = (tmp_path / "user-hana" / "totp.secret").read_text()
+    admin.revoke_credential("hana")
+    admin.pair("hana")
+    assert (tmp_path / "user-hana" / "totp.secret").read_text() != stare
+
+
+def test_revocation_forgets_the_used_steps_of_the_old_secret(tmp_path):
+    # Cisla spotrebovanych kroku patri ke STAREMU tajemstvi. Kdyby prezila,
+    # prvni kod z noveho telefonu by v temz okne vypadal jako replay.
+    zaloz(tmp_path, "hana")
+    access = Access.local(tmp_path)
+    assert access.authenticate("hana", {"totp": kod()}, purpose="login")
+    admin = Admin.local(tmp_path)
+    admin.revoke_credential("hana")
+    admin.pair("hana")
+    nove = (tmp_path / "user-hana" / "totp.secret").read_text().strip()
+    assert access.authenticate("hana", {"totp": kod(nove)}, purpose="login")
+
+
+def test_an_unknown_mechanism_cannot_be_revoked(tmp_path):
+    zaloz(tmp_path, "hana")
+    with pytest.raises(ValueError):
+        Admin.local(tmp_path).revoke_credential("hana", mechanism="password")
