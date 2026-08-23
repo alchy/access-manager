@@ -3,14 +3,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-#: Kazdy duvod ma vlastni jmeno. Ve viewBase2 se tri ruzne priciny hlasily
-#: stejnou hlaskou a stalo to hodinu hledani (chyba 3.6).
-OUTCOMES = frozenset({
-    "ok",
+#: Ctyri tvary, ktere jdou VEN - presne ty z navrhu, par. 3.1. Nic dalsiho
+#: ven nejde: kdo umi rozlisit `unknown_user` od `bad_code`, umi si vypsat
+#: uzivatele.
+OUTCOMES = frozenset({"ok", "denied", "need_factor", "throttled"})
+
+#: Podrobny duvod odmitnuti - patri do AUDITU a duveryhodnym volajicim.
+#: Ve viewBase2 se tri ruzne priciny hlasily stejnou hlaskou a stalo to
+#: hodinu hledani (chyba 3.6); ta hodina se hledala v logu, takze rozdil
+#: musi byt tam. `expired` jmenuje navrh par. 3.1; zatim ho nic nevyrabi.
+REASONS = frozenset({
     "bad_code",
-    "need_factor",
     "replay",
-    "throttled",
     "no_secret",
     "unknown_user",
     "disabled",
@@ -22,21 +26,36 @@ OUTCOMES = frozenset({
 class Verdict:
     """Odpoved na "jsi to ty?".
 
-    Pravdivy je JEN `ok`. Kdo napise `if access.authenticate(...)`, dostane
-    spravne chovani; kdo chce vedet proc, sahne na `outcome`.
+    Pravdivy je JEN `ok`. `outcome` je jeden ze ctyr verejnych tvaru;
+    `reason` je podrobnost pro audit. Lokalni zapojeni je duveryhodne cele,
+    takze `reason` plni vzdycky - vzdaleny klient ho jednou dostane, jen
+    kdyz to jeho zaznam povoli (`"detail": true`, navrh par. 3.1).
     """
 
     outcome: str
+    reason: str | None = None
     subject_id: str | None = None
     principals: frozenset[str] = field(default_factory=frozenset)
     required: tuple[str, ...] = ()
+    gen: int | None = None
 
     def __post_init__(self) -> None:
         if self.outcome not in OUTCOMES:
             raise ValueError(
-                f"nezname jmeno verdiktu {self.outcome!r}; zname: "
+                f"neznamy tvar verdiktu {self.outcome!r}; zname: "
                 f"{', '.join(sorted(OUTCOMES))}"
             )
+        if self.reason is not None:
+            if self.outcome != "denied":
+                raise ValueError(
+                    f"duvod {self.reason!r} patri jen k `denied`, "
+                    f"ne k {self.outcome!r}"
+                )
+            if self.reason not in REASONS:
+                raise ValueError(
+                    f"neznamy duvod {self.reason!r}; zname: "
+                    f"{', '.join(sorted(REASONS))}"
+                )
         if self.outcome == "ok" and not self.subject_id:
             raise ValueError("verdikt `ok` bez subject_id: nevim, kdo prosel")
 
@@ -44,11 +63,19 @@ class Verdict:
         return self.outcome == "ok"
 
     @classmethod
-    def ok(cls, subject_id: str | None, principals) -> "Verdict":
-        return cls(outcome="ok", subject_id=subject_id, principals=frozenset(principals))
+    def ok(cls, subject_id: str | None, principals, gen: int | None = None) -> "Verdict":
+        return cls(
+            outcome="ok",
+            subject_id=subject_id,
+            principals=frozenset(principals),
+            gen=gen,
+        )
 
     @classmethod
-    def refused(cls, outcome: str, required=()) -> "Verdict":
-        if outcome == "ok":
-            raise ValueError("odmitnuti se nesmi jmenovat `ok`")
-        return cls(outcome=outcome, required=tuple(required))
+    def refused(cls, reason: str, gen: int | None = None) -> "Verdict":
+        """Odmitnuti s duvodem. Ven jde `denied`; duvod je pro audit."""
+        return cls(outcome="denied", reason=reason, gen=gen)
+
+    @classmethod
+    def need_factor(cls, required, gen: int | None = None) -> "Verdict":
+        return cls(outcome="need_factor", required=tuple(required), gen=gen)

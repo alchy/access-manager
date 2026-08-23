@@ -113,7 +113,7 @@ class FileStore:
         # chova, jako by neprislo - jinak si klient vybere ten slabsi.
         code = dict(credentials or {}).get("totp")
         if not code:
-            return Verdict.refused("need_factor", required=("totp",))
+            return Verdict.need_factor(("totp",))
 
         step = _matching_step(secret.read_text(encoding="utf-8").strip(), code)
         if step is None:
