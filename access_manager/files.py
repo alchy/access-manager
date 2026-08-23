@@ -53,6 +53,9 @@ DIR_MODE = 0o700
 #: videt na prvni pohled. fcntl je POSIXovy - Windows tu nikdy nebyl cil.
 LOCK = ".lock"
 
+#: Cislo generace. Zvedne ho kazdy zapis; cteni ho jen cte.
+GEN = "gen"
+
 
 class FileStore:
     """Identita a politika ze souboru pod jednim adresarem."""
@@ -96,6 +99,11 @@ class FileStore:
             includes=tuple(sorted(data.get("includes", ()))),
         )
 
+    def generation(self) -> int:
+        """Cislo generace: zvedne ho kazdy zapis. Cache plati, dokud se nehne."""
+        path = self.home / GEN
+        return int(path.read_text(encoding="utf-8")) if path.is_file() else 0
+
     # == overeni ===========================================================
 
     def authenticate(self, username: str, credentials, *, purpose: str) -> Verdict:
@@ -103,46 +111,54 @@ class FileStore:
         purpose = check_purpose(purpose)
         name = check_name(username)
         directory = self.home / f"user-{name}"
+        gen = self.generation()
 
         if not directory.is_dir():
-            return Verdict.refused("unknown_user")
+            return Verdict.refused("unknown_user", gen=gen)
         if (directory / "disabled").exists():
-            return Verdict.refused("disabled")
+            return Verdict.refused("disabled", gen=gen)
 
         secret = directory / "totp.secret"
         if not secret.is_file():
             # Zalozeny adresar bez tajemstvi neni "spatny kod": je to
             # nedokoncene zavedeni a spravce to ma poznat z auditu.
-            return Verdict.refused("no_secret")
+            return Verdict.refused("no_secret", gen=gen)
 
         # Co je potreba, rozhoduje KOMPONENTA. Nezname jmeno mechanismu se
         # chova, jako by neprislo - jinak si klient vybere ten slabsi.
         code = dict(credentials or {}).get("totp")
         if not code:
-            return Verdict.need_factor(("totp",))
+            return Verdict.need_factor(("totp",), gen=gen)
 
         step = _matching_step(secret.read_text(encoding="utf-8").strip(), code)
         if step is None:
-            return Verdict.refused("bad_code")
+            return Verdict.refused("bad_code", gen=gen)
         if not self._consume(name, purpose, step):
-            return Verdict.refused("replay")
+            return Verdict.refused("replay", gen=gen)
 
         user = self.user(name)
-        return Verdict.ok(user.subject_id, user.principals)
+        return Verdict.ok(user.subject_id, user.principals, gen=gen)
 
     # == zapis: lide =======================================================
 
+    def _bump_gen(self) -> None:
+        # Volat JEN pod _locked - jinak se dva zapisy sejdou na temz cisle.
+        _replace(self.home / GEN, str(self.generation() + 1))
+
     def add_user(self, name: str) -> Enrolment:
         name = check_name(name)
-        directory = self.home / f"user-{name}"
-        if directory.exists():
-            raise ValueError(
-                f"uzivatel {name!r} uz existuje ({directory}); prepsat jeho "
-                f"tajemstvi by ho zamklo ven"
-            )
-        directory.mkdir(parents=True, mode=DIR_MODE)
-        os.chmod(directory, DIR_MODE)  # mkdir podleha umask, chmod ne
-        return self._pair(name, directory)
+        with _locked(self.home):
+            directory = self.home / f"user-{name}"
+            if directory.exists():
+                raise ValueError(
+                    f"uzivatel {name!r} uz existuje ({directory}); prepsat jeho "
+                    f"tajemstvi by ho zamklo ven"
+                )
+            directory.mkdir(mode=DIR_MODE)
+            os.chmod(directory, DIR_MODE)  # mkdir podleha umask, chmod ne
+            enrolment = self._pair(name, directory)
+            self._bump_gen()
+        return enrolment
 
     def pair_missing(self) -> list[Enrolment]:
         """Doplň parovaci kod tem, kdo zadny nemaji. Ostatnich se nedotykej.
@@ -150,13 +166,16 @@ class FileStore:
         Sluzba restartovana ve 3 rano nesmi vymenit tajemstvi lidem, kteri uz
         je maji - autentikator by dal vydaval kody, ktere uz nikam nepatri.
         """
-        doplneno = []
-        for directory in sorted(self.home.glob("user-*")):
-            if not directory.is_dir() or (directory / "totp.secret").is_file():
-                continue
-            doplneno.append(
-                self._pair(check_name(directory.name[len("user-"):]), directory)
-            )
+        with _locked(self.home):
+            doplneno = []
+            for directory in sorted(self.home.glob("user-*")):
+                if not directory.is_dir() or (directory / "totp.secret").is_file():
+                    continue
+                doplneno.append(
+                    self._pair(check_name(directory.name[len("user-"):]), directory)
+                )
+            if doplneno:
+                self._bump_gen()
         return doplneno
 
     def _pair(self, name: str, directory: Path) -> Enrolment:
@@ -180,6 +199,7 @@ class FileStore:
                 raise ValueError(f"skupina {name!r} uz existuje")
             table[name] = {"members": [], "includes": []}
             self._write_table(table)
+            self._bump_gen()
 
     def add_member(self, group: str, name: str) -> None:
         group, name = check_name(group), check_name(name)
@@ -195,6 +215,7 @@ class FileStore:
             members.add(name)
             table[group]["members"] = sorted(members)
             self._write_table(table)
+            self._bump_gen()
 
     def include(self, parent: str, child: str) -> None:
         """`parent` OBSAHUJE `child`: kdo je v child, je i v parent."""
@@ -217,6 +238,7 @@ class FileStore:
             includes.add(child)
             table[parent]["includes"] = sorted(includes)
             self._write_table(table)
+            self._bump_gen()
 
     # == anti-replay =======================================================
 

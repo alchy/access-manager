@@ -48,3 +48,7 @@ class Access:
 
     def group(self, name: str) -> Group | None:
         return self._store.group(name)
+
+    def generation(self) -> int:
+        """Cislo generace: nezmenene znamena, ze drzena odpoved plati dal."""
+        return self._store.generation()
