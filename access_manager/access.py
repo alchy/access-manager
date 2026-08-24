@@ -13,6 +13,7 @@ from __future__ import annotations
 from .files import FileStore
 from .principals import Group, User, check_realm
 from .realms import realm_root
+from .remote import RemoteStore
 from .verdicts import Verdict
 
 
@@ -32,6 +33,29 @@ class Access:
         i vsechno, co se na siti kontroluje.
         """
         return cls(FileStore(realm_root(home, realm), realm=check_realm(realm)))
+
+    @classmethod
+    def remote(
+        cls,
+        url: str,
+        key: str,
+        *,
+        realm: str | None = None,
+        ca=None,
+        timeout: float = 5.0,
+        deadline: float = 30.0,
+        transport=None,
+    ) -> Access:
+        """Pres sit, na sluzbu na jine strane. Kontejner (uloziste) je JINDE -
+        na strane sluzby, ne tady.
+
+        https je povinne a bez vypinace: vyjimka jen pro loopback (vyvoj bez
+        certifikatu). Vlastni CA jde predat jen pres `ca=`.
+        """
+        return cls(RemoteStore(
+            url, key, realm=realm, ca=ca, timeout=timeout, deadline=deadline,
+            transport=transport,
+        ))
 
     # -- identita ----------------------------------------------------------
 
