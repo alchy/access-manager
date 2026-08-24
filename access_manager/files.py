@@ -248,6 +248,37 @@ class FileStore:
         self._complete_pairing(directory)
         return Verdict.ok(user.subject_id, user.principals, gen=gen)
 
+    def authenticate_admin(self, name: str, first, second) -> Verdict:
+        """Vstup do konzole: dva kody z po sobe jdoucich oken.
+
+        NENI to verejny endpoint ani povrch fasad - vola to konzole uvnitr
+        procesu sluzby. Druhy kod musi sedet PRESNE na krok s+1: tolerance
+        hodin plati pro nalezeni s, ne pro sousednost.
+        """
+        name = check_identity(name)
+        directory = self._dir(ADMIN_PREFIX, name)
+        gen = self.generation()
+
+        if not directory.is_dir():
+            return Verdict.refused("unknown_user", gen=gen)
+        if (directory / "disabled").exists():
+            return Verdict.refused("disabled", gen=gen)
+        secret = directory / "totp.secret"
+        if not secret.is_file():
+            return Verdict.refused("no_secret", gen=gen)
+        if self._enrolment_expired(directory):
+            return Verdict.refused("expired", gen=gen)
+
+        tajemstvi = secret.read_text(encoding="utf-8").strip()
+        step = _matching_step(tajemstvi, first)
+        if step is None or not _code_at_step(tajemstvi, step + 1, second):
+            return Verdict.refused("bad_code", gen=gen)
+        if not self._consume(name, "admin", step, step + 1, prefix=ADMIN_PREFIX):
+            return Verdict.refused("replay", gen=gen)
+
+        self._complete_pairing(directory)
+        return Verdict.ok(f"admin:{name}", frozenset(), gen=gen)
+
     # == zapis: lide =======================================================
 
     def _bump_gen(self) -> None:
@@ -565,32 +596,40 @@ class FileStore:
 
     # == anti-replay =======================================================
 
-    def _consume(self, name: str, purpose: str, step: int) -> bool:
-        """Zapis pouzity kod pod jeho ucel. `False`, kdyz uz tam byl.
+    def _consume(
+        self, name: str, purpose: str, *steps: int, prefix: str = USER_PREFIX
+    ) -> bool:
+        """Zapis pouzite kroky pod jeden ucel, atomicky pod jednim zamkem.
 
-        Na disku lezi CISLO KROKU, ne kod: zadne poverení se tim nikam
+        Na disku lezi CISLA KROKU, ne kody: zadne poverení se tim nikam
         neuklada a prorezavani je pouhe porovnani. Sestimistna hodnota se
         casem vrati, takze bez prorezavani by seznam nejen rostl, ale po case
         zacal odmitat legitimni kody.
+
+        Kdyz je kroku vic (dvoukodove overeni spravce), plati vsechno-nebo-nic:
+        prorezava se podle nejvyssiho z nich a pokud uz je zapsany KTERYKOLI
+        z nich, nezapise se zadny - jinak by pulka dvojice presla jako pouzita
+        a druhy pokus se stejnym prvnim kodem uz by neprosel.
         """
-        path = self._dir(USER_PREFIX, name) / "used.json"
+        path = self._dir(prefix, name) / "used.json"
         with _locked(self.home):
             if path.is_file():
                 used = json.loads(path.read_text(encoding="utf-8"))
             else:
                 used = {}
 
-            nejstarsi = step - (2 * WINDOW + 1)
+            nejstarsi = max(steps) - (2 * WINDOW + 1)
             used = {
-                klic: [s for s in steps if s > nejstarsi]
-                for klic, steps in used.items()
+                klic: [s for s in staved if s > nejstarsi]
+                for klic, staved in used.items()
             }
 
-            if step in used.get(purpose, ()):
+            jiz_pouzite = used.get(purpose, ())
+            if any(step in jiz_pouzite for step in steps):
                 return False
 
-            used.setdefault(purpose, []).append(step)
-            used = {klic: steps for klic, steps in used.items() if steps}
+            used.setdefault(purpose, []).extend(steps)
+            used = {klic: staved for klic, staved in used.items() if staved}
             _replace(path, json.dumps(used))
             return True
 
@@ -758,3 +797,10 @@ def _matching_step(secret: str, code: str, now: float | None = None) -> int | No
         if hmac.compare_digest(totp.at(moment), str(code)):
             return int(moment // totp.interval)
     return None
+
+
+def _code_at_step(secret: str, step: int, code) -> bool:
+    """Sedi kod PRESNE na dany krok? Zadna tolerance - sousednost je tvrda."""
+    pyotp = _require_totp()
+    totp = pyotp.TOTP(secret)
+    return hmac.compare_digest(totp.at(step * totp.interval), str(code))

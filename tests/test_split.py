@@ -48,6 +48,13 @@ def test_admin_does_not_authenticate(tmp_path):
     assert not hasattr(Admin.local(tmp_path, realm=REALM), "authenticate")
 
 
+def test_neither_facade_has_authenticate_admin(tmp_path):
+    # Dvoukodove overeni spravce je vnitrni povrch pro budouci konzoli - ne
+    # neco, co by mohla zavolat aplikace nebo spravcovsky nastroj.
+    assert not hasattr(Access.local(tmp_path, realm=REALM), "authenticate_admin")
+    assert not hasattr(Admin.local(tmp_path, realm=REALM), "authenticate_admin")
+
+
 def test_admin_has_admins(tmp_path):
     assert hasattr(Admin.local(tmp_path, realm=REALM), "admins")
 
