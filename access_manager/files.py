@@ -67,6 +67,9 @@ LOCK = ".lock"
 #: Cislo generace. Zvedne ho kazdy administrativni zapis; cteni ho jen cte.
 GEN = "gen"
 
+#: Omezovani pokusu. Soubor v adresari identity.
+THROTTLE = "throttle.json"
+
 #: Soubory jednoho povereni: pouziva revoke_credential i revoke_admin_credential,
 #: i uklid pred novym parovanim, kdyz po preruseni zbyde osireny QR bez tajemstvi.
 CREDENTIAL_ARTEFACTS = (
@@ -94,12 +97,16 @@ class FileStore:
         qr_ttl_days: int = 14,
         audit_retention_days: int = 90,
         actor: str = "operator",
+        throttle_attempts: int = 5,
+        throttle_window_s: int = 60,
     ) -> None:
         self.home = Path(root).expanduser()
         self.realm = realm
         self.qr_ttl_days = qr_ttl_days
         self.audit_retention_days = audit_retention_days
         self.actor = actor
+        self.throttle_attempts = throttle_attempts
+        self.throttle_window_s = throttle_window_s
 
     def _dir(self, prefix: str, name: str) -> Path:
         """Cesta k adresari identifikujici se podle prefixu a jmena."""
@@ -231,6 +238,10 @@ class FileStore:
             self._table()
         except (OSError, json.JSONDecodeError) as chyba:
             return f"{GROUPS} nejde precist: {chyba}"
+        try:
+            self.generation()
+        except (OSError, ValueError) as chyba:
+            return f"{GEN} nejde precist: {chyba}"
         return None
 
     # == platnost ==========================================================
@@ -269,6 +280,41 @@ class FileStore:
             _write(directory / "totp.paired", str(int(time.time())))
             (directory / "totp.uri").unlink(missing_ok=True)
             (directory / "totp.txt").unlink(missing_ok=True)
+
+    # == omezovani pokusu ==================================================
+
+    def _throttled(self, directory: Path) -> int | None:
+        """Kolik sekund jeste identita ceka - nebo None. Cteni bez zamku."""
+        cesta = directory / THROTTLE
+        if not cesta.is_file():
+            return None
+        try:
+            data = json.loads(cesta.read_text(encoding="utf-8"))
+            od, pokusu = int(data["od"]), int(data["pokusu"])
+        except (ValueError, KeyError, OSError):
+            return None                      # poskozeny soubor neblokuje
+        zbyva = od + self.throttle_window_s - int(time.time())
+        if pokusu >= self.throttle_attempts and zbyva > 0:
+            return zbyva
+        return None
+
+    def _record_failure(self, directory: Path) -> None:
+        # Pocita se jen neuspech EXISTUJICI identity (bad_code/replay) -
+        # neexistujici jmeno pocitadlo nezveda, jinak jde zamknout cizi ucet.
+        with _locked(self.home):
+            cesta = directory / THROTTLE
+            ted = int(time.time())
+            try:
+                data = json.loads(cesta.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                data = {"od": ted, "pokusu": 0}
+            if int(data.get("od", 0)) + self.throttle_window_s <= ted:
+                data = {"od": ted, "pokusu": 0}
+            data["pokusu"] = int(data.get("pokusu", 0)) + 1
+            _replace(cesta, json.dumps(data))
+
+    def _clear_throttle(self, directory: Path) -> None:
+        (directory / THROTTLE).unlink(missing_ok=True)
 
     # == overeni ===========================================================
 
@@ -321,6 +367,10 @@ class FileStore:
         if self._enrolment_expired(directory):
             return Verdict.refused("expired", gen=gen)
 
+        zbyva = self._throttled(directory)
+        if zbyva is not None:
+            return Verdict.throttled(zbyva, gen=gen)
+
         # Co je potreba, rozhoduje KOMPONENTA. Nezname jmeno mechanismu se
         # chova, jako by neprislo - jinak si klient vybere ten slabsi.
         code = dict(credentials or {}).get("totp")
@@ -329,8 +379,10 @@ class FileStore:
 
         step = _matching_step(secret.read_text(encoding="utf-8").strip(), code)
         if step is None:
+            self._record_failure(directory)
             return Verdict.refused("bad_code", gen=gen)
         if not self._consume(name, purpose, step):
+            self._record_failure(directory)
             return Verdict.refused("replay", gen=gen)
 
         user = self.user(name)
@@ -339,6 +391,7 @@ class FileStore:
             # adresar. Spravny kod bez existujiciho uzivatele neni verdikt.
             return Verdict.refused("unknown_user", gen=gen)
 
+        self._clear_throttle(directory)
         self._complete_pairing(directory)
         return Verdict.ok(user.subject_id, user.principals, gen=gen)
 
@@ -377,13 +430,20 @@ class FileStore:
         if self._enrolment_expired(directory):
             return Verdict.refused("expired", gen=gen)
 
+        zbyva = self._throttled(directory)
+        if zbyva is not None:
+            return Verdict.throttled(zbyva, gen=gen)
+
         tajemstvi = secret.read_text(encoding="utf-8").strip()
         step = _matching_step(tajemstvi, first)
         if step is None or not _code_at_step(tajemstvi, step + 1, second):
+            self._record_failure(directory)
             return Verdict.refused("bad_code", gen=gen)
         if not self._consume(name, "admin", step, step + 1, prefix=ADMIN_PREFIX):
+            self._record_failure(directory)
             return Verdict.refused("replay", gen=gen)
 
+        self._clear_throttle(directory)
         self._complete_pairing(directory)
         return Verdict.ok(f"admin:{name}", frozenset(), gen=gen)
 

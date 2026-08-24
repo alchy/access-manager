@@ -38,6 +38,7 @@ class Verdict:
     principals: frozenset[str] = field(default_factory=frozenset)
     required: tuple[str, ...] = ()
     gen: int | None = None
+    retry_after: int | None = None
 
     def __post_init__(self) -> None:
         if self.outcome not in OUTCOMES:
@@ -58,6 +59,8 @@ class Verdict:
                 )
         if self.outcome == "ok" and not self.subject_id:
             raise ValueError("verdikt `ok` bez subject_id: nevim, kdo prosel")
+        if self.retry_after is not None and self.outcome != "throttled":
+            raise ValueError("retry_after patri jen k `throttled`")
 
     def __bool__(self) -> bool:
         return self.outcome == "ok"
@@ -79,3 +82,8 @@ class Verdict:
     @classmethod
     def need_factor(cls, required, gen: int | None = None) -> Verdict:
         return cls(outcome="need_factor", required=tuple(required), gen=gen)
+
+    @classmethod
+    def throttled(cls, retry_after: int | None, gen: int | None = None) -> Verdict:
+        """Prilis mnoho pokusu. `retry_after` rika, za kolik sekund to zkusit."""
+        return cls(outcome="throttled", retry_after=retry_after, gen=gen)

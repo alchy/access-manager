@@ -61,3 +61,9 @@ def test_an_ok_verdict_without_an_identity_is_refused():
     # "Prosel, ale nevim kdo" neni odpoved, se kterou jde neco delat.
     with pytest.raises(ValueError):
         Verdict.ok(subject_id=None, principals=["group:users"])
+
+
+def test_retry_after_rides_only_on_throttled():
+    assert Verdict.throttled(27).retry_after == 27
+    with pytest.raises(ValueError):
+        Verdict(outcome="denied", reason="bad_code", retry_after=5)

@@ -121,3 +121,9 @@ def test_an_email_is_a_valid_user_name(tmp_path):
 def test_two_ats_are_refused(tmp_path):
     with pytest.raises(ValueError):
         Access.local(tmp_path, realm=REALM).user("a@b@c")
+
+
+def test_a_corrupt_gen_file_is_not_ready(tmp_path):
+    zaloz(tmp_path, "hana")
+    (koren(tmp_path) / "gen").write_text("zlomeno", encoding="utf-8")
+    assert "gen" in Access.local(tmp_path, realm=REALM).ready()
