@@ -47,13 +47,13 @@ Dve veci, ktere je treba vedet predem:
 2. **`group:users` a `group:public` jsou vyhrazene.** Znamenaji "kdokoli
    overeny" a "kdokoli"; clovek je dostane tak jako tak a nejdou mu odebrat.
 3. **Realm je povinny.** Kazdy uzivatel a kazda skupina zije jen v ramci sveho
-   realmu; clovek z jednoho se nikdy nesetkv s druhym.
+   realmu; clovek z jednoho se nikdy nesetka s druhym.
 
 ## Realmy
 
 Realm je subadresar a jmenny prostor. Instance je vzdy per-realm: vsichni
-uzivatele jedne instance pamatuje stejny realm. Vznik deklaraci (kdo patri
-kam) se resi externlnlm systemem, access-manager jen splni `reconcile`, tj.
+uzivatele jedne instance patri do stejneho realmu. Vznik deklaraci (kdo patri
+kam) se resi externim systemem, access-manager jen splni `reconcile`, tj.
 doplni z uloziste jen to, co chybi. Spravci jsou oddelene identity se stitkem
 `<realm>-<role>-<jmeno>` a maji dvoukodovy vstup do budouci provozovatelske
 konzole. Klice aplikaci se vydavaji jednou, na serveru si drzi jen otisk.
