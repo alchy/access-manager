@@ -144,6 +144,9 @@ access = Access.remote(url, key=klic, *, realm=None, ca=None,
 ## 9. Otevřené / odložené body
 
 1. mTLS (konfig připravit, vynucení až bude potřeba).
+1b. HMAC podepisování požadavků jako budoucí zesílení vedle mTLS — tajemství
+   nikdy neopouští aplikaci, podpis váže replay na konkrétní požadavek
+   (správná „TOTP pro stroje“; klíč s otiskem zůstává výchozí).
 2. Endpoint/mechanism origin ACL (§2b plné znění) — až s heslem/druhým mechanismem.
 3. SIGHUP reload deklarací bez restartu.
 4. Databázový backend pro víc replik (design.md §7.1).
