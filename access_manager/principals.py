@@ -111,9 +111,14 @@ class Enrolment:
     name: str
     directory: Path
     label: str
+    role: str = "member"
 
     @property
     def principal(self) -> str:
+        # Spravce a clen stejneho jmena jsou dve ruzne identity - principal
+        # to musi rozlisit, jinak by ACL napsane pro clena pustily i spravce.
+        if self.role == "admin":
+            return f"admin:{self.name}"
         return f"user:{self.name}"
 
 

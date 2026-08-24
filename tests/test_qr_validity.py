@@ -62,6 +62,34 @@ def test_a_dir_without_issued_never_expires(tmp_path):
     )
 
 
+def test_a_corrupt_issued_file_expires_instead_of_crashing(tmp_path):
+    # Pad uprostred zapisu umi nechat prazdny soubor; prihlaseni musi
+    # odpovedet verdiktem, ne vyjimkou - a fail-closed znamena expired.
+    Admin.local(tmp_path, realm=REALM).add_user("hana")
+    directory = koren(tmp_path) / "user-hana"
+    (directory / "totp.issued").write_text("", encoding="utf-8")
+    secret = (directory / "totp.secret").read_text().strip()
+    verdikt = Access.local(tmp_path, realm=REALM).authenticate(
+        "hana", {"totp": kod(secret)}, purpose="login"
+    )
+    assert verdikt.reason == "expired"
+
+
+def test_completing_a_pairing_after_removal_is_a_quiet_noop(tmp_path):
+    # Zavod: mezi overenim a dokoncenim parovani nekdo identitu smazal.
+    # _complete_pairing nesmi spadnout ani vyrobit osirely marker.
+    Admin.local(tmp_path, realm=REALM).add_user("hana")
+    directory = koren(tmp_path) / "user-hana"
+    import shutil as _shutil
+
+    from access_manager.files import FileStore
+    store = FileStore(koren(tmp_path), realm=REALM)
+    _shutil.rmtree(directory)
+    directory.mkdir()          # adresar bez tajemstvi (po revoke)
+    store._complete_pairing(directory)
+    assert not (directory / "totp.paired").exists()
+
+
 def test_revoke_and_pair_reset_the_validity(tmp_path):
     admin = Admin.local(tmp_path, realm=REALM)
     admin.add_user("hana")

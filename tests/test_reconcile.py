@@ -56,6 +56,11 @@ def test_duplicate_realm_names_close_the_start(tmp_path):
         reconcile(tmp_path, [{"name": "a", "admins": []}, {"name": "A", "admins": []}])
 
 
+def test_a_declaration_without_a_name_closes_the_start(tmp_path):
+    with pytest.raises(ValueError):
+        reconcile(tmp_path, [{"admins": ["jindrich"]}])
+
+
 def test_reconcile_audits_as_the_operator(tmp_path):
     from access_manager.audit import read_events
     reconcile(tmp_path, DEKLARACE)

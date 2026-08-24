@@ -38,3 +38,10 @@ def test_generations_are_independent_per_realm(tmp_path):
 def test_realm_is_required(tmp_path):
     with pytest.raises(TypeError):
         Access.local(tmp_path)
+
+
+def test_a_fresh_instance_home_is_private(tmp_path):
+    domov = tmp_path / "instance"
+    Admin.local(domov, realm="example.com").add_user("hana")
+    import stat as _stat
+    assert _stat.S_IMODE(domov.stat().st_mode) == 0o700

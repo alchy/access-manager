@@ -112,6 +112,7 @@ class FileStore:
         Domov si zalozi sam (stejne jako `_write_table`): "neznamy uzivatel"
         se overuje i proti realmu, ktery jeste nikdo nezalozil.
         """
+        _ensure_root(self.home)
         self.home.mkdir(parents=True, mode=DIR_MODE, exist_ok=True)
         udalost = {"t": datetime.now(UTC).isoformat(timespec="seconds"), **pole}
         append_event(self.home, udalost, self.audit_retention_days)
@@ -241,7 +242,14 @@ class FileStore:
         issued = directory / "totp.issued"
         if not issued.is_file():
             return False
-        vydano = int(issued.read_text(encoding="utf-8").strip())
+        try:
+            vydano = int(issued.read_text(encoding="utf-8").strip())
+        except (ValueError, OSError):
+            # Poskozeny/prazdny soubor (napr. pad uprostred zapisu) neni
+            # duvod, aby prihlaseni spadlo vyjimkou - musi dostat verdikt.
+            # Fail-closed (expired) je bezpecnejsi nez fail-open a stav se
+            # sam spravi: revoke_credential + pair napisou novy totp.issued.
+            return True
         return time.time() - vydano > self.qr_ttl_days * 86400
 
     def _complete_pairing(self, directory: Path) -> None:
@@ -253,6 +261,10 @@ class FileStore:
             return
         with _locked(self.home):
             if (directory / "totp.paired").is_file():
+                return
+            if not (directory / "totp.secret").is_file():
+                # Identita mezitim zmizela (remove_user) nebo byla odvolana
+                # (revoke_credential) - neni co dokoncovat.
                 return
             _write(directory / "totp.paired", str(int(time.time())))
             (directory / "totp.uri").unlink(missing_ok=True)
@@ -443,7 +455,7 @@ class FileStore:
         _write(directory / "totp.uri", uri)
         _write(directory / "totp.txt", _qr_text(uri))
         _write(directory / "totp.issued", str(int(time.time())))
-        return Enrolment(name=name, directory=directory, label=label)
+        return Enrolment(name=name, directory=directory, label=label, role=role)
 
     # == zapis: skupiny ====================================================
 
@@ -901,6 +913,21 @@ def _require_pairing() -> None:
         ) from chybi
 
 
+def _ensure_root(home: Path) -> None:
+    """Zalozi rodice domova (instance home, rodic `realm-*`), pokud chybi.
+
+    `Path.mkdir(parents=True, mode=...)` dava chybejicim RODICUM vychozi
+    prava podle umask, ne pozadovany `mode` - jen listu to respektuje. Bez
+    tehle opravy je instance home (a tim i jmena realmu v nem) citelny
+    komukoli. Chmod delame JEN kdyz adresar zalozime MY - cizi adresar
+    (napr. uzivateluv vlastni domovsky adresar) nechavame byt.
+    """
+    rodic = home.parent
+    if not rodic.exists():
+        rodic.mkdir(parents=True)
+        os.chmod(rodic, DIR_MODE)
+
+
 @contextmanager
 def _locked(home: Path):
     """Vyhradni zamek nad celym ulozistem.
@@ -912,6 +939,7 @@ def _locked(home: Path):
     NENI reentrantni: nic, co bezi pod zamkem, nesmi zamykat znovu.
     Zavrenim deskriptoru se zamek pousti.
     """
+    _ensure_root(home)
     home.mkdir(parents=True, mode=DIR_MODE, exist_ok=True)
     os.chmod(home, DIR_MODE)
     handle = os.open(home / LOCK, os.O_WRONLY | os.O_CREAT, FILE_MODE)

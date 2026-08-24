@@ -20,7 +20,12 @@ MODE = 0o600
 
 def append_event(root, event: dict, retention_days: int) -> None:
     adresar = Path(root) / ADRESAR
+    zalozili_jsme = not adresar.exists()
     adresar.mkdir(mode=0o700, exist_ok=True)
+    if zalozili_jsme:
+        # mode= u mkdir podleha umask; chmod je nezavisly na nem. Cizi
+        # (jiz existujici) adresar tim nepresahujeme.
+        os.chmod(adresar, 0o700)
     dnes = datetime.now(UTC)
     cil = adresar / f"{dnes:%Y-%m-%d}.jsonl"
     if not cil.exists():

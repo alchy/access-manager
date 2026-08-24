@@ -67,6 +67,12 @@ def test_a_second_admin_can_be_removed(tmp_path):
     assert a.admins() == ["jindrich"]
 
 
+def test_an_admin_enrolment_carries_the_admin_principal(tmp_path):
+    a = admin(tmp_path)
+    assert a.add_admin("jindrich").principal == "admin:jindrich"
+    assert a.add_user("hana").principal == "user:hana"
+
+
 def test_admin_lifecycle_moves_the_generation(tmp_path):
     a = admin(tmp_path)
     access = Access.local(tmp_path, realm=REALM)

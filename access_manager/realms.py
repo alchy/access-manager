@@ -32,7 +32,13 @@ def reconcile(home, declarations) -> list[Enrolment]:
     videne: set[str] = set()
     nova: list[Enrolment] = []
     for deklarace in declarations:
-        nazev = check_realm(deklarace["name"])
+        syrove_jmeno = deklarace.get("name")
+        if syrove_jmeno is None:
+            # Chybejici jmeno je stejny druh chyby jako duplicitni - deklarace
+            # je zmatena a start se ma zastavit driv, nez neco napulku zalozi.
+            msg = f"deklarace realmu bez jmena: {deklarace!r}"
+            raise ValueError(msg)
+        nazev = check_realm(syrove_jmeno)
         if nazev in videne:
             msg = f"realm {nazev!r} je deklarovany dvakrat; konflikt zavira start"
             raise ValueError(msg)
