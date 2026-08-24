@@ -156,13 +156,10 @@ class FileStore:
         return result
 
     def component_for_key(self, key: str) -> Component | None:
-        """Komponenta soucasne se svedenim klice. Konstantni cas pres hmac."""
+        """Komponenta patrici k otisku klice. Konstantni cas pres hmac."""
         if not key.startswith("am_"):
             return None
-        try:
-            key_hash = hashlib.sha256(key.encode()).hexdigest()
-        except Exception:
-            return None
+        key_hash = hashlib.sha256(key.encode()).hexdigest()
 
         data = self._components_table()
         for name, info in data.get("components", {}).items():
@@ -905,17 +902,11 @@ def _check_component_name(name: str) -> str:
     text = str(name).strip()
     if not text:
         raise ValueError("jmeno komponenty nesmi byt prazdne")
-    if text != name.strip():
-        # Vnitrni bile znaky
-        if any(c.isspace() for c in text):
-            raise ValueError(
-                f"neplatne jmeno komponenty {name!r}: nesmuje obsahovat bile znaky"
-            )
     # Kontrola na bile znaky a rizici znaky
     for c in text:
         if c.isspace() or ord(c) < 32:
             raise ValueError(
-                f"neplatne jmeno komponenty {name!r}: nesmuje obsahovat bile znaky "
+                f"neplatne jmeno komponenty {name!r}: nesmi obsahovat bile znaky "
                 f"nebo rizici znaky"
             )
     return text
