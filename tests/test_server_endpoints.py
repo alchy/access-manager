@@ -1,4 +1,4 @@
-"""Ctecí endpointy sluzby: vzdy jen v realmu klice, nikdy krizem.
+"""Cteci endpointy sluzby: vzdy jen v realmu klice, nikdy krizem.
 
 Fixture zaklada DVA realmy (REALM a beta), kazdy s vlastnim loopback klicem.
 V REALMu je hana clenem mzdy a ucetni obsahuje mzdy zretezenim - uzaver tak
@@ -96,6 +96,17 @@ def test_principals_check_rejects_malformed_json(prostredi):
     odpoved = client.post(
         "/v1/principals/check", headers=hlavicky(klic),
         data="neni to json", content_type="application/json",
+    )
+    assert odpoved.status_code == 400
+    assert odpoved.get_json() == {"error": "bad_request"}
+
+
+def test_principals_check_rejects_a_scalar(prostredi):
+    # "principals" musi byt seznam - retezec by se tise iteroval po znacich.
+    client, klic, _ = prostredi
+    odpoved = client.post(
+        "/v1/principals/check", headers=hlavicky(klic),
+        json={"principals": "group:x"},
     )
     assert odpoved.status_code == 400
     assert odpoved.get_json() == {"error": "bad_request"}
