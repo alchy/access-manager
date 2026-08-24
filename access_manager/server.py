@@ -22,7 +22,7 @@ from pathlib import Path
 
 from .config import ServiceConfig, load_config
 from .files import FileStore
-from .principals import Component
+from .principals import Component, check_realm
 from .realms import realm_root, reconcile
 from .wire import group_to_wire, user_to_wire, verdict_to_wire
 
@@ -131,12 +131,19 @@ def create_app(cfg: ServiceConfig):
     flask, _waitress = _require_server()
 
     stores: dict[str, FileStore] = {}
+    videne: set[str] = set()
     for deklarace in cfg.realms:
         if "name" not in deklarace:
             # Stejna chyba a stejne zneni jako v realms.reconcile - deklarace
             # je zmatena a start se ma zastavit driv, nez neco napulku zalozi.
             raise ValueError(f"deklarace realmu bez jmena: {deklarace!r}")
-        jmeno = deklarace["name"]
+        # Normalizace na mala pismena - stejne jako v realms.reconcile, jinak
+        # by "Example.com" a "example.com" zalozily dve uloziste pro jeden realm.
+        jmeno = check_realm(deklarace["name"])
+        if jmeno in videne:
+            msg = f"realm {jmeno!r} je deklarovany dvakrat; konflikt zavira start"
+            raise ValueError(msg)
+        videne.add(jmeno)
         stores[jmeno] = FileStore(
             realm_root(cfg.data, jmeno),
             realm=jmeno,
@@ -171,6 +178,12 @@ def create_app(cfg: ServiceConfig):
         if component is None:
             # Nezname i spatne jsou 401 UPLNE stejny - jinak by odpoved
             # prozradila, ktere klice existuji.
+            # Klic ani hlavicka Authorization sem NIKDY nepatri - jen puvod
+            # a cesta, at je 401 vubec videt v provoznim logu (spec §3).
+            print(
+                f"401 unauthorized: puvod={origin} cesta={flask.request.path}",
+                file=sys.stderr,
+            )
             return flask.jsonify({"error": "unauthorized"}), 401
 
         if not _origin_allowed(component, origin):
@@ -310,9 +323,9 @@ def console_app(environ, start_response):
 def main(argv=None):
     """Hlavni vstupni bod sluzby.
 
-    Parsuje argumenty, nacte konfiguraci, spusti reconcile,
-    zalozi Flask aplikaci a spusti dva waitress listenery
-    (API a konzole) v oddelenych vlaknech.
+    Parsuje argumenty, nacte konfiguraci, spusti reconcile, zalozi Flask
+    aplikaci, spusti konzoli v demonskem vlakne a API primo v hlavnim
+    vlakne.
     """
     if argv is None:
         argv = sys.argv[1:]
@@ -328,8 +341,15 @@ def main(argv=None):
     # Nacti konfiguraci
     cfg = load_config(Path(args.config))
 
+    # Instancni defaults se slouci do kazde deklarace, ktera si vlastni
+    # hodnotu nerekla sama - deklarace smi prebit instancni defaults,
+    # ne naopak.
+    deklarace = [
+        {**cfg.defaults, **d} for d in cfg.realms
+    ]
+
     # Spusti reconcile a vypise nove zavedeni
-    nova = reconcile(cfg.data, list(cfg.realms))
+    nova = reconcile(cfg.data, deklarace)
     for z in nova:
         print(f"nove zavedeni: {z.directory / 'totp.txt'}")
 
@@ -350,24 +370,18 @@ def main(argv=None):
     api_port = int(api_port_str)
     console_port = int(console_port_str)
 
-    # Funkce pro spusteni API serveru
-    def serve_api():
-        waitress.serve(app, host=api_host, port=api_port)
-
     # Funkce pro spusteni konzole serveru
     def serve_console():
         waitress.serve(console_app, host=console_host, port=console_port)
 
-    # Spusti oba servery v oddelenych vlaknech
-    thread1 = threading.Thread(target=serve_api, daemon=False)
-    thread2 = threading.Thread(target=serve_console, daemon=False)
+    # Konzole je demon - kdyz spadne API (hlavni vlakno), proces skonci
+    # cely, nezustane napulku bezici proces bez API. Ctrl+C/SIGTERM ukonci
+    # waitress.serve v hlavnim vlakne prirozene, bez zadneho .join().
+    konzole_vlakno = threading.Thread(target=serve_console, daemon=True)
+    konzole_vlakno.start()
 
-    thread1.start()
-    thread2.start()
-
-    # Cekej na obe vlakna
-    thread1.join()
-    thread2.join()
+    # API bezi primo v hlavnim vlakne - zadne druhe vlakno, zadny join.
+    waitress.serve(app, host=api_host, port=api_port)
 
 
 if __name__ == "__main__":

@@ -48,6 +48,20 @@ def test_a_wrong_key_is_the_same_401(prostredi):
     assert odpoved.status_code == 401
 
 
+def test_a_401_is_logged_to_stderr_without_the_key(prostredi, capsys):
+    client, _, _ = prostredi
+    spatny_klic = "am_k1_" + "0" * 64
+    hlavicka = {"Authorization": f"Bearer {spatny_klic}"}
+    odpoved = client.get("/v1/users", headers=hlavicka)
+    assert odpoved.status_code == 401
+
+    zachyceno = capsys.readouterr()
+    assert "401" in zachyceno.err
+    assert "/v1/users" in zachyceno.err
+    assert spatny_klic not in zachyceno.err
+    assert "Bearer" not in zachyceno.err
+
+
 def test_a_valid_key_from_a_wrong_origin_is_403(prostredi):
     client, klic, _ = prostredi
     odpoved = client.get(
@@ -120,3 +134,30 @@ def test_a_realm_without_a_name_is_a_worded_value_error(tmp_path):
     cfg = load_config(tmp_path / "conf.d")
     with pytest.raises(ValueError, match="deklarace realmu bez jmena"):
         create_app(cfg)
+
+
+def test_duplicate_realm_names_after_normalization_close_the_start(tmp_path):
+    # "A" a "a" jsou po normalizaci stejny realm - konflikt musi zavrit start
+    # driv, nez create_app cokoli napulku zalozi.
+    zapis(tmp_path / "conf.d", "service.json", {"data": str(tmp_path / "data")})
+    zapis(tmp_path / "conf.d" / "realms", "velke.json", {"name": "A", "admins": []})
+    zapis(tmp_path / "conf.d" / "realms", "male.json", {"name": "a", "admins": []})
+    cfg = load_config(tmp_path / "conf.d")
+    with pytest.raises(ValueError, match="je deklarovany dvakrat"):
+        create_app(cfg)
+
+
+def test_a_mixed_case_realm_name_is_normalized(tmp_path):
+    zapis(tmp_path / "conf.d", "service.json", {"data": str(tmp_path / "data")})
+    zapis(tmp_path / "conf.d" / "realms", "mixed.json",
+          {"name": "Example.COM", "admins": ["jindrich"]})
+    admin = Admin.local(tmp_path / "data", realm="example.com")
+    klic = admin.register_component("app:test")
+
+    cfg = load_config(tmp_path / "conf.d")
+    app = create_app(cfg)
+    app.config["TESTING"] = True
+    telo = app.test_client().get(
+        "/v1/whoami", headers={"Authorization": f"Bearer {klic}"}
+    ).get_json()
+    assert telo["realm"] == "example.com"

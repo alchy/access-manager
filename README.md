@@ -136,6 +136,9 @@ potrebne a spusti sluzbu jako uzivatel `spravce`.
 Poznamka: healthcheck kontejneru pocita s vychozim api listenerem
 127.0.0.1:22000 - kdo listener prevaze, musi prevazit i healthcheck.
 
+V kontejneru je treba nastavit `listeners.api` na `0.0.0.0:22000`, jinak
+sluzba neni zvenku dosazitelna (EXPOSE sam nestaci).
+
 ## Stav
 
 Hotova je souborova vrstva (overeni, rozbaleni skupin, anti-replay, cela
