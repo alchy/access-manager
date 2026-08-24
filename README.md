@@ -21,6 +21,8 @@ kontejneru nez oba.
 
 ## Pouziti
 
+### Lokalne
+
 Aplikace, ktera jen prihlasuje lidi, potrebuje tohle a nic vic:
 
 ```python
@@ -38,6 +40,24 @@ if not verdikt:
 verdikt.subject_id     # "user:jindrich"
 verdikt.principals     # {"user:jindrich", "group:users", "group:public"}
 ```
+
+### Vzdalenosti (REST)
+
+Chces-li se pripojit k bezici sluzbe:
+
+```python
+from access_manager import Access
+
+access = Access.remote(
+    url="https://auth.example.com:22000",
+    key="tajny-klic-aplikace",
+    realm="example.com"
+)
+
+verdikt = access.authenticate("jindrich", {"totp": kod}, purpose="login")
+```
+
+### Obecne
 
 Dve veci, ktere je treba vedet predem:
 
@@ -94,13 +114,34 @@ QR se zaklada jako text (`totp.txt`): na server se clovek dostane pres ssh,
 `cat` vypise kod do terminalu a telefon ho sejme z obrazovky. Obrazek je na
 hlave bez obrazovky k nicemu.
 
+## Sluzba
+
+Spusteni vlastni instance se slusy:
+
+```bash
+pip install 'access-manager[server]'
+python -m access_manager.server -c conf.d/
+```
+
+Sluzba vyposlouchava na portu 22000 (REST API). Vicemene casu se bude zdat,
+ze veci nefunguje - vice v konzoli (port 22001), zatim ale vraci 501.
+
+TLS terminuje reverse proxy pred sluzbou (vzorova konfigurace nginx prijde
+s dokumentaci). Detaily jsou v
+[docs/superpowers/specs/2026-08-24-sluzba-a-remote-design.md](docs/superpowers/specs/2026-08-24-sluzba-a-remote-design.md).
+
+Kontejnerizace: priklad Dockerfile se nach na koreni repo; zazehni vse
+potrebne a spusti sluzbu jako uzivatel `spravce`.
+
 ## Stav
 
 Rozpracovane. Hotova je souborova vrstva - overeni, rozbaleni skupin,
 anti-replay a cela zapisova pulka vcetne zivotniho cyklu (disable, remove,
-revoke + nove parovani), generace a kontroly principalu (187 testu, bezi bez
-site i bez serveru). Scope: realmy (spravci, platnost QR, klice aplikaci, audit
-a reconcile); sluzba a Access.remote jeste ne.
+revoke + nove parovani), generace a kontroly principalu. Hotova je take
+REST sluzba (flask/waitress za reverse proxy), throttling, a Access.remote
+(271 testu, bezi bez site). Scope: realmy (spravci, platnost QR, klice
+aplikaci, audit a reconcile), REST sluzba (flask/waitress za proxy),
+throttling, Access.remote; konzole jeste ne (vraci 501).
 
 Navrh REST API je v [docs/design.md](docs/design.md) a plati jako zavazny -
 knihovna se pise podle nej, ne naopak.
