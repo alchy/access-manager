@@ -120,7 +120,7 @@ def test_main_reconciles_and_serves(tmp_path):
         with patch("access_manager.server.threading.Thread", MockThread):
             main(["-c", str(conf_dir)])
 
-            # Jen konzole bezi ve vlakne (jako demon) - API se sluchá primo
+            # Jen konzole bezi ve vlakne (jako demon) - API posloucha primo
             # v hlavnim vlakne, bez vlastniho vlakna.
             assert len(thread_creations) == 1
             assert thread_creations[0]["daemon"] is True
