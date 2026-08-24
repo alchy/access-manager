@@ -116,7 +116,7 @@ hlave bez obrazovky k nicemu.
 
 ## Sluzba
 
-Spusteni vlastni instance se slusy:
+Spusteni vlastni instance sluzby:
 
 ```bash
 pip install 'access-manager[server]'
@@ -130,18 +130,20 @@ TLS terminuje reverse proxy pred sluzbou (vzorova konfigurace nginx prijde
 s dokumentaci). Detaily jsou v
 [docs/superpowers/specs/2026-08-24-sluzba-a-remote-design.md](docs/superpowers/specs/2026-08-24-sluzba-a-remote-design.md).
 
-Kontejnerizace: priklad Dockerfile se nach na koreni repo; zazehni vse
+Kontejnerizace: priklad Dockerfile je v koreni repa; zazehni vse
 potrebne a spusti sluzbu jako uzivatel `spravce`.
+
+Poznamka: healthcheck kontejneru pocita s vychozim api listenerem
+127.0.0.1:22000 - kdo listener prevaze, musi prevazit i healthcheck.
 
 ## Stav
 
-Rozpracovane. Hotova je souborova vrstva - overeni, rozbaleni skupin,
-anti-replay a cela zapisova pulka vcetne zivotniho cyklu (disable, remove,
-revoke + nove parovani), generace a kontroly principalu. Hotova je take
-REST sluzba (flask/waitress za reverse proxy), throttling, a Access.remote
-(271 testu, bezi bez site). Scope: realmy (spravci, platnost QR, klice
-aplikaci, audit a reconcile), REST sluzba (flask/waitress za proxy),
-throttling, Access.remote; konzole jeste ne (vraci 501).
+Hotova je souborova vrstva (overeni, rozbaleni skupin, anti-replay, cela
+zapisova pulka vcetne zivotniho cyklu: disable, remove, revoke + nove
+parovani, generace a kontroly principalu), realmy (spravci, platnost QR,
+klice aplikaci, audit, reconcile), REST sluzba (flask/waitress za proxy),
+throttling, a Access.remote (271 testu, bezi bez site). Konzole jeste ne
+(listener vraci 501).
 
 Navrh REST API je v [docs/design.md](docs/design.md) a plati jako zavazny -
 knihovna se pise podle nej, ne naopak.
