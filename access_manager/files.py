@@ -63,6 +63,10 @@ GEN = "gen"
 #: parovanim, kdyz po preruseni zbyde osireny QR bez tajemstvi.
 CREDENTIAL_ARTEFACTS = ("totp.secret", "totp.uri", "totp.txt", "used.json")
 
+#: Prefixy adresaru podle role.
+USER_PREFIX = "user-"
+ADMIN_PREFIX = "admin-"
+
 
 class FileStore:
     """Identita a politika ze souboru pod jednim adresarem."""
@@ -82,11 +86,15 @@ class FileStore:
         self.audit_retention_days = audit_retention_days
         self.actor = actor
 
+    def _dir(self, prefix: str, name: str) -> Path:
+        """Cesta k adresari identifikujici se podle prefixu a jmena."""
+        return self.home / f"{prefix}{name}"
+
     # == cteni =============================================================
 
     def user(self, name: str) -> User | None:
         name = check_identity(name)
-        directory = self.home / f"user-{name}"
+        directory = self._dir(USER_PREFIX, name)
         if not directory.is_dir():
             return None
         groups = {f"group:{g}" for g in self._groups_of(name)}
@@ -99,8 +107,8 @@ class FileStore:
 
     def users(self) -> list[str]:
         return sorted(
-            d.name[len("user-"):]
-            for d in self.home.glob("user-*")
+            d.name[len(USER_PREFIX):]
+            for d in self.home.glob(f"{USER_PREFIX}*")
             if d.is_dir()
         )
 
@@ -146,7 +154,7 @@ class FileStore:
         if kind == "group":
             return name in self._table()
         if kind == "user":
-            return (self.home / f"user-{name}").is_dir()
+            return self._dir(USER_PREFIX, name).is_dir()
         return False
 
     def ready(self) -> str | None:
@@ -169,7 +177,7 @@ class FileStore:
         """Odpoved na "jsi to ty?" - nikdy na "smis to?"."""
         purpose = check_purpose(purpose)
         name = check_identity(username)
-        directory = self.home / f"user-{name}"
+        directory = self._dir(USER_PREFIX, name)
         gen = self.generation()
 
         if not directory.is_dir():
@@ -212,7 +220,7 @@ class FileStore:
         name = check_identity(name)
         _require_pairing()
         with _locked(self.home):
-            directory = self.home / f"user-{name}"
+            directory = self._dir(USER_PREFIX, name)
             if directory.exists():
                 raise ValueError(
                     f"uzivatel {name!r} uz existuje ({directory}); prepsat jeho "
@@ -220,7 +228,7 @@ class FileStore:
                 )
             directory.mkdir(mode=DIR_MODE)
             os.chmod(directory, DIR_MODE)  # mkdir podleha umask, chmod ne
-            enrolment = self._pair(name, directory)
+            enrolment = self._pair(name, directory, role="member")
             self._bump_gen()
         return enrolment
 
@@ -233,26 +241,34 @@ class FileStore:
         _require_pairing()
         with _locked(self.home):
             doplneno = []
-            for directory in sorted(self.home.glob("user-*")):
+            for directory in sorted(self.home.glob(f"{USER_PREFIX}*")):
                 if not directory.is_dir() or (directory / "totp.secret").is_file():
                     continue
                 # Osireny QR z preruseneho revoke (nebo cizi zasah) by jinak
                 # srazil _pair na O_EXCL - viz pair().
                 (directory / "totp.uri").unlink(missing_ok=True)
                 (directory / "totp.txt").unlink(missing_ok=True)
+                name = check_identity(directory.name[len(USER_PREFIX):])
                 doplneno.append(
-                    self._pair(check_identity(directory.name[len("user-"):]), directory)
+                    self._pair(name, directory, role="member")
                 )
             if doplneno:
                 self._bump_gen()
         return doplneno
 
-    def _pair(self, name: str, directory: Path) -> Enrolment:
+    def _pair(self, name: str, directory: Path, role: str) -> Enrolment:
         pyotp = _require_totp()
 
         secret = pyotp.random_base32()
-        label = f"{ISSUER}:user:{name}"
-        uri = pyotp.TOTP(secret).provisioning_uri(name=label, issuer_name=ISSUER)
+        if self.realm:
+            # Stitek <realm>-<role>-<jmeno>: v telefonu je videt realm i role.
+            # Je to napis pro lidske oci - NIKDY se neparsuje zpet.
+            label = f"{self.realm}-{role}-{name}"
+            issuer = self.realm
+        else:
+            label = f"{ISSUER}:user:{name}"
+            issuer = ISSUER
+        uri = pyotp.TOTP(secret).provisioning_uri(name=label, issuer_name=issuer)
         _write(directory / "totp.secret", secret)
         _write(directory / "totp.uri", uri)
         _write(directory / "totp.txt", _qr_text(uri))
@@ -283,7 +299,7 @@ class FileStore:
                 # Preklep by jinak zalozil skupinu, kterou nikdo nikdy nenapsal
                 # do zadneho ACL - clenstvi bez ucinku, ktere vypada hotove.
                 raise ValueError(f"skupina {group!r} neexistuje")
-            if not (self.home / f"user-{name}").is_dir():
+            if not self._dir(USER_PREFIX, name).is_dir():
                 raise ValueError(f"uzivatel {name!r} neexistuje")
             members = set(table[group].get("members", ()))
             members.add(name)
@@ -320,7 +336,7 @@ class FileStore:
         """Docasne vypnuti. Clenstvi i auditni stopa zustavaji."""
         name = check_identity(name)
         with _locked(self.home):
-            directory = self.home / f"user-{name}"
+            directory = self._dir(USER_PREFIX, name)
             if not directory.is_dir():
                 raise ValueError(f"uzivatel {name!r} neexistuje")
             if (directory / "disabled").exists():
@@ -331,7 +347,7 @@ class FileStore:
     def enable_user(self, name: str) -> None:
         name = check_identity(name)
         with _locked(self.home):
-            directory = self.home / f"user-{name}"
+            directory = self._dir(USER_PREFIX, name)
             if not directory.is_dir():
                 raise ValueError(f"uzivatel {name!r} neexistuje")
             if not (directory / "disabled").exists():
@@ -363,7 +379,7 @@ class FileStore:
         """
         name = check_identity(name)
         with _locked(self.home):
-            directory = self.home / f"user-{name}"
+            directory = self._dir(USER_PREFIX, name)
             if not directory.is_dir():
                 raise ValueError(f"uzivatel {name!r} neexistuje")
             table = self._table()
@@ -386,7 +402,7 @@ class FileStore:
             )
         name = check_identity(name)
         with _locked(self.home):
-            directory = self.home / f"user-{name}"
+            directory = self._dir(USER_PREFIX, name)
             if not directory.is_dir():
                 raise ValueError(f"uzivatel {name!r} neexistuje")
             if not any((directory / a).exists() for a in CREDENTIAL_ARTEFACTS):
@@ -401,7 +417,7 @@ class FileStore:
         name = check_identity(name)
         _require_pairing()
         with _locked(self.home):
-            directory = self.home / f"user-{name}"
+            directory = self._dir(USER_PREFIX, name)
             if not directory.is_dir():
                 raise ValueError(f"uzivatel {name!r} neexistuje")
             if (directory / "totp.secret").is_file():
@@ -416,7 +432,94 @@ class FileStore:
             (directory / "used.json").unlink(missing_ok=True)
             (directory / "totp.uri").unlink(missing_ok=True)
             (directory / "totp.txt").unlink(missing_ok=True)
-            enrolment = self._pair(name, directory)
+            enrolment = self._pair(name, directory, role="member")
+            self._bump_gen()
+        return enrolment
+
+    # == zapis: spravci ====================================================
+
+    def add_admin(self, name: str) -> Enrolment:
+        name = check_identity(name)
+        _require_pairing()
+        with _locked(self.home):
+            directory = self._dir(ADMIN_PREFIX, name)
+            if directory.exists():
+                raise ValueError(
+                    f"spravce {name!r} uz existuje ({directory}); prepsat jeho "
+                    f"tajemstvi by ho zamklo ven"
+                )
+            directory.mkdir(mode=DIR_MODE)
+            os.chmod(directory, DIR_MODE)  # mkdir podleha umask, chmod ne
+            enrolment = self._pair(name, directory, role="admin")
+            self._bump_gen()
+        return enrolment
+
+    def admins(self) -> list[str]:
+        return sorted(
+            d.name[len(ADMIN_PREFIX):]
+            for d in self.home.glob(f"{ADMIN_PREFIX}*")
+            if d.is_dir()
+        )
+
+    def _require_not_last_admin(self, name: str) -> None:
+        # Realm nesmi zustat bez spravy; zasah ma jen provozovatel na serveru.
+        if self.admins() == [name]:
+            raise ValueError(
+                f"{name!r} je posledni spravce realmu; odebrat ho ani mu "
+                f"odvolat token nejde"
+            )
+
+    def remove_admin(self, name: str) -> None:
+        """Smaz spravce. Spravci nejsou v skupinach, takze zadny scrub."""
+        name = check_identity(name)
+        with _locked(self.home):
+            self._require_not_last_admin(name)
+            directory = self._dir(ADMIN_PREFIX, name)
+            if not directory.is_dir():
+                raise ValueError(f"spravce {name!r} neexistuje")
+            shutil.rmtree(directory)
+            self._bump_gen()
+
+    def revoke_admin_credential(self, name: str, mechanism: str = "totp") -> None:
+        """Odvolani povereni spravce - reseni ztraceneho telefonu."""
+        if mechanism != "totp":
+            raise ValueError(
+                f"neznamy mechanismus {mechanism!r}; zatim existuje jen 'totp'"
+            )
+        name = check_identity(name)
+        with _locked(self.home):
+            self._require_not_last_admin(name)
+            directory = self._dir(ADMIN_PREFIX, name)
+            if not directory.is_dir():
+                raise ValueError(f"spravce {name!r} neexistuje")
+            if not any((directory / a).exists() for a in CREDENTIAL_ARTEFACTS):
+                # Idempotentni: zadne tajemstvi neni zadny problem
+                return
+            for artefakt in CREDENTIAL_ARTEFACTS:
+                (directory / artefakt).unlink(missing_ok=True)
+            self._bump_gen()
+
+    def pair_admin(self, name: str) -> Enrolment:
+        """Nove parovani spravce. Existujici tajemstvi neprepise."""
+        name = check_identity(name)
+        _require_pairing()
+        with _locked(self.home):
+            directory = self._dir(ADMIN_PREFIX, name)
+            if not directory.is_dir():
+                raise ValueError(f"spravce {name!r} neexistuje")
+            if (directory / "totp.secret").is_file():
+                raise ValueError(
+                    f"spravce {name!r} uz tajemstvi ma; nejdriv "
+                    f"revoke_admin_credential - prepsani by ho zamklo ven"
+                )
+            # Osireny stav z preruseneho revoke (nebo cizi zasah): tajemstvi
+            # chybi, ale used.json/uri/txt patrici STAREMU tajemstvi tu jeste
+            # mohou lezet. Bez uklidu by _pair spadl na O_EXCL a nechal by
+            # pulku stareho QR vedle pulky noveho.
+            (directory / "used.json").unlink(missing_ok=True)
+            (directory / "totp.uri").unlink(missing_ok=True)
+            (directory / "totp.txt").unlink(missing_ok=True)
+            enrolment = self._pair(name, directory, role="admin")
             self._bump_gen()
         return enrolment
 
@@ -430,7 +533,7 @@ class FileStore:
         casem vrati, takze bez prorezavani by seznam nejen rostl, ale po case
         zacal odmitat legitimni kody.
         """
-        path = self.home / f"user-{name}" / "used.json"
+        path = self._dir(USER_PREFIX, name) / "used.json"
         with _locked(self.home):
             if path.is_file():
                 used = json.loads(path.read_text(encoding="utf-8"))

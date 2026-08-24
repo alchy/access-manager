@@ -71,3 +71,25 @@ class Admin:
 
     def remove_member(self, group: str, name: str) -> None:
         self._store.remove_member(group, name)
+
+    # -- spravci -----------------------------------------------------------
+
+    def add_admin(self, name: str) -> Enrolment:
+        """Zalozi spravce realmu s parovacim kodem. Vraci UKAZATEL, ne tajemstvi."""
+        return self._store.add_admin(name)
+
+    def admins(self) -> list[str]:
+        """Seznam vsech spravcu realmu."""
+        return self._store.admins()
+
+    def remove_admin(self, name: str) -> None:
+        """Smazani spravce. Posledniho nejde odebrat - realm nesmi zustat bez spravy."""
+        self._store.remove_admin(name)
+
+    def revoke_admin_credential(self, name: str, mechanism: str = "totp") -> None:
+        """Ztraceny telefon spravce: odvolat, pak `pair_admin` pro novy."""
+        self._store.revoke_admin_credential(name, mechanism)
+
+    def pair_admin(self, name: str) -> Enrolment:
+        """Nove parovani spravce. Existujici tajemstvi neprepise."""
+        return self._store.pair_admin(name)

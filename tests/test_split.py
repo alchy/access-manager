@@ -25,6 +25,10 @@ ZAPISOVE = [
     "pair_missing",
     "revoke_credential",
     "pair",
+    "add_admin",
+    "remove_admin",
+    "revoke_admin_credential",
+    "pair_admin",
 ]
 
 
@@ -40,5 +44,22 @@ def test_admin_can_write(tmp_path, jmeno):
 
 def test_admin_does_not_authenticate(tmp_path):
     # Spravcovsky nastroj neni prihlasovaci cesta. Kdyby umel `authenticate`,
-    # je pokuseni pouzit spravcovsky klic v aplikaci - a ten smi vsechno.
+    # je pokuseni pouzit spravcovsky klic v aplikaci - a ten smi vsechko.
     assert not hasattr(Admin.local(tmp_path, realm=REALM), "authenticate")
+
+
+def test_admin_has_admins(tmp_path):
+    assert hasattr(Admin.local(tmp_path, realm=REALM), "admins")
+
+
+def test_access_does_not_have_admin_methods(tmp_path):
+    access = Access.local(tmp_path, realm=REALM)
+    admin_methods = [
+        "add_admin",
+        "admins",
+        "remove_admin",
+        "revoke_admin_credential",
+        "pair_admin",
+    ]
+    for metoda in admin_methods:
+        assert not hasattr(access, metoda)
