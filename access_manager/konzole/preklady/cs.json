@@ -27,6 +27,7 @@
   "lide.disabled": "Zakázáno",
   "lide.enable": "Povolit",
   "lide.groups": "Skupiny",
+  "lide.no_credential": "Bez pověření",
   "lide.pair": "Spárovat",
   "lide.qr_note": "Naskenujte QR kód svým ověřovacím aplikačním",
   "lide.revoke": "Odvolat",

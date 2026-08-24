@@ -17,7 +17,7 @@ from pathlib import Path
 
 from ..config import ServiceConfig
 from ..files import FileStore
-from ..principals import PUBLIC, USERS, check_realm
+from ..principals import PUBLIC, USERS, check_identity, check_realm
 from ..realms import realm_root
 from . import preklady
 
@@ -201,12 +201,20 @@ def create_console_app(cfg: ServiceConfig):
     # (formular), ktere tu neni potreba.
 
     def _radek_cloveka(store, jmeno: str) -> dict:
-        """Jeden radek vypisu: stav (aktivni/zakazany/cekajici na parovani)
-        a skupinove chipy z plocheho uzaveru principalu.
+        """Jeden radek vypisu: stav (aktivni/zakazany/cekajici na parovani/
+        bez povereni) a skupinove chipy z plocheho uzaveru principalu.
 
-        Cteni `totp.issued`/`totp.paired` je primo pres soubory - jen ke
-        zjisteni "ceka na parovani", bez zamku (cteni, ne zapis; zapis dela
-        vyhradne FileStore).
+        Cteni `totp.secret`/`totp.issued`/`totp.paired` je primo pres
+        soubory - jen ke zjisteni stavu parovani, bez zamku (cteni, ne
+        zapis; zapis dela vyhradne FileStore).
+
+        Ctyri stavy, v tomto poradi:
+        - zakazany: `disable_user` - clovek nesmi, i kdyby povereni mel.
+        - bez povereni: zadne `totp.secret` ani `totp.issued` - typicky po
+          `revoke_credential`, pred novym parovanim. Bez tohohle vetve by
+          takovy clovek spadl do "aktivni", pritom se prihlasit NEMUZE.
+        - ceka na parovani: `totp.issued` je, `totp.paired` jeste neni.
+        - aktivni: zbytek (typicky `totp.paired`).
         """
         clovek = store.user(jmeno)
         skupiny = sorted(
@@ -218,16 +226,21 @@ def create_console_app(cfg: ServiceConfig):
             stav, stav_text = "disabled", _prelozit("lide.disabled")
         else:
             adresar = store.home / f"user-{jmeno}"
+            tajemstvi = adresar / "totp.secret"
             vydano = adresar / "totp.issued"
             sparovano = adresar / "totp.paired"
-            if vydano.is_file() and not sparovano.is_file():
+            if not tajemstvi.is_file() and not vydano.is_file():
+                stav, stav_text = "no_credential", _prelozit("lide.no_credential")
+            elif vydano.is_file() and not sparovano.is_file():
                 try:
                     vydano_ts = int(vydano.read_text(encoding="utf-8").strip())
                 except (ValueError, OSError):
                     # Poskozeny soubor - viz stejna uvaha v
                     # FileStore._enrolment_expired.
                     vydano_ts = 0
-                zbyva = int(store.qr_ttl_days - (time.time() - vydano_ts) // 86400)
+                zbyva = max(
+                    0, int(store.qr_ttl_days - (time.time() - vydano_ts) // 86400)
+                )
                 stav = "waiting"
                 stav_text = _prelozit("lide.waiting").format(dni=zbyva)
             else:
@@ -302,12 +315,23 @@ def create_console_app(cfg: ServiceConfig):
     @app.get("/lide/qr/<jmeno>")
     @prihlasen
     def _lide_qr(jmeno):
+        # Jmeno se sklada do cesty na disku - overit DRIV, nez se ceho
+        # dotkne, stejny vzorec jako knihovni metody (check_identity() prvni
+        # radek). Zdeformovane jmeno je 404, ne 500 z divneho souboroveho
+        # dotazu.
+        try:
+            jmeno = check_identity(jmeno)
+        except ValueError:
+            flask.abort(404)
         store = flask.g.store
-        cesta = store.home / f"user-{jmeno}" / "totp.txt"
+        adresar = store.home / f"user-{jmeno}"
+        cesta = adresar / "totp.txt"
         obrazec = cesta.read_text(encoding="utf-8") if cesta.is_file() else None
+        sparovano = (adresar / "totp.paired").is_file()
         stitek = f"{store.realm}-member-{jmeno}"
         return flask.render_template(
-            "qr.html", jmeno=jmeno, obrazec=obrazec, stitek=stitek
+            "qr.html", jmeno=jmeno, obrazec=obrazec, sparovano=sparovano,
+            stitek=stitek,
         )
 
     return app

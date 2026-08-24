@@ -27,6 +27,7 @@
   "lide.disabled": "Disabled",
   "lide.enable": "Enable",
   "lide.groups": "Groups",
+  "lide.no_credential": "No credentials",
   "lide.pair": "Pair",
   "lide.qr_note": "Scan the QR code with your authenticator app",
   "lide.revoke": "Revoke",

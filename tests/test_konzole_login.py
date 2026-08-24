@@ -2,27 +2,11 @@
 
 Kompletni prihlaseni (POST /login dvema kody) je predmet ukolu 3 - GET /login
 (formular + prepinac jazyka) a strazce nechraneneho pristupu jsou z ukolu 2.
+
+Fixtura `prostredi` je sdilena v `conftest.py` - vsechny stranky konzole ji
+potrebuji stejnou.
 """
-import pytest
 from helpers import REALM, admin_kody
-from test_config import zapis
-
-from access_manager import Admin
-from access_manager.config import load_config
-from access_manager.konzole.app import create_console_app
-
-
-@pytest.fixture
-def prostredi(tmp_path):
-    zapis(tmp_path / "conf.d", "service.json", {"data": str(tmp_path / "data")})
-    zapis(tmp_path / "conf.d" / "realms", f"{REALM}.json",
-          {"name": REALM, "admins": ["jindrich"]})
-    Admin.local(tmp_path / "data", realm=REALM).add_admin("jindrich")
-
-    cfg = load_config(tmp_path / "conf.d")
-    app = create_console_app(cfg)
-    app.config["TESTING"] = True
-    return app.test_client()
 
 
 def test_login_page_renders_in_czech_by_default(prostredi):

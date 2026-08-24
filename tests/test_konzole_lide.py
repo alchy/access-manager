@@ -3,7 +3,8 @@ nove parovani. Tohle je VZOR pro dalsi stranky konzole (skupiny/aplikace/
 spravci/audit) - mutace jsou vzdy POST + CSRF, uspech i chyba se vraci
 flashem zpatky na /lide (Post/Redirect/Get).
 """
-from helpers import REALM
+import pytest
+from helpers import REALM, koren
 
 from access_manager import Admin
 
@@ -25,7 +26,9 @@ def test_the_listing_shows_a_created_user_and_their_group(prihlaseny_klient, tmp
     assert "ucetni" in telo
 
 
-def test_adding_a_user_redirects_to_a_qr_page_with_an_ascii_code(prihlaseny_klient):
+def test_adding_a_user_redirects_to_a_qr_page_with_an_ascii_code(
+    prihlaseny_klient, tmp_path,
+):
     odpoved = _pridej(prihlaseny_klient, "tereza")
     assert odpoved.status_code == 302
     assert odpoved.headers["Location"].endswith("/lide/qr/tereza")
@@ -36,8 +39,16 @@ def test_adding_a_user_redirects_to_a_qr_page_with_an_ascii_code(prihlaseny_klie
     assert "<pre" in telo
     obrazec = telo.split("<pre", 1)[1].split(">", 1)[1].split("</pre>", 1)[0]
     assert obrazec.count("\n") > 10
-    # zadne tajemstvi mimo tenhle ascii QR
+    # zadne tajemstvi mimo tenhle ascii QR - ani jako nazev souboru, ani
+    # (hlavni test) jako SKUTECNA hodnota tajemstvi nikde na strance.
     assert "totp.secret" not in telo.lower()
+    tajemstvi = (
+        koren(tmp_path / "data") / "user-tereza" / "totp.secret"
+    ).read_text(encoding="utf-8").strip()
+    assert tajemstvi not in telo
+
+    seznam = klient.get("/lide").get_data(as_text=True)
+    assert tajemstvi not in seznam
 
 
 def test_disabling_changes_the_state_shown_in_the_listing(prihlaseny_klient):
@@ -84,6 +95,31 @@ def test_revoke_then_pair_produces_a_new_qr(prihlaseny_klient):
     assert druhy_qr != prvni_qr
 
 
+def test_a_revoked_user_shows_no_credential_before_re_pairing(prihlaseny_klient):
+    _pridej(prihlaseny_klient, "tereza")
+    klient, csrf = prihlaseny_klient
+
+    # revoke_credential smaze VSECHNY artefakty (totp.secret i totp.issued),
+    # takze tenhle clovek se nemuze prihlasit vubec - a nesmi to vypadat
+    # jako "aktivni" (viz kriticky nalez z review kola 1).
+    odpoved = klient.post("/lide/tereza/odvolat", data={"csrf": csrf})
+    assert odpoved.status_code == 302
+
+    telo = klient.get("/lide").get_data(as_text=True)
+    assert "Bez pověření" in telo
+    assert "Aktivní" not in telo
+
+    qr = klient.get("/lide/qr/tereza").get_data(as_text=True)
+    assert "Bez pověření" in qr
+    assert "<pre" not in qr
+
+
+def test_qr_page_rejects_an_invalid_identity_with_404(prihlaseny_klient):
+    klient, _ = prihlaseny_klient
+    odpoved = klient.get("/lide/qr/tereza!")
+    assert odpoved.status_code == 404
+
+
 def test_every_mutating_route_without_csrf_is_rejected_and_state_unchanged(
     prihlaseny_klient,
 ):
@@ -108,8 +144,18 @@ def test_every_mutating_route_without_csrf_is_rejected_and_state_unchanged(
     assert "petr" not in telo
 
 
-def test_an_unauthenticated_get_redirects_to_login(prostredi):
-    odpoved = prostredi.get("/lide")
+@pytest.mark.parametrize("metoda,cesta", [
+    ("get", "/lide"),
+    ("get", "/lide/qr/tereza"),
+    ("post", "/lide/pridat"),
+    ("post", "/lide/tereza/vypnout"),
+    ("post", "/lide/tereza/zapnout"),
+    ("post", "/lide/tereza/smazat"),
+    ("post", "/lide/tereza/odvolat"),
+    ("post", "/lide/tereza/parovat"),
+])
+def test_every_route_without_a_session_redirects_to_login(prostredi, metoda, cesta):
+    odpoved = getattr(prostredi, metoda)(cesta)
     assert odpoved.status_code == 302
     assert odpoved.headers["Location"].endswith("/login")
 

@@ -10,8 +10,10 @@
 {% if obrazec %}
 <pre class="qr">{{ obrazec }}</pre>
 <p class="poznamka">{{ t('lide.qr_note') }}</p>
-{% else %}
+{% elif sparovano %}
 <p>{{ t('spravci.paired') }}</p>
+{% else %}
+<p>{{ t('lide.no_credential') }}</p>
 {% endif %}
 
 <p><a href="{{ url_for('_lide_seznam') }}">{{ t('spolecne.back') }}</a></p>

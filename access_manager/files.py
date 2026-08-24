@@ -468,7 +468,7 @@ class FileStore:
             directory = self._dir(USER_PREFIX, name)
             if directory.exists():
                 raise ValueError(
-                    f"uzivatel {name!r} uz existuje ({directory}); prepsat jeho "
+                    f"uzivatel {name!r} uz existuje; prepsat jeho "
                     f"tajemstvi by ho zamklo ven"
                 )
             directory.mkdir(mode=DIR_MODE)
@@ -765,7 +765,7 @@ class FileStore:
             directory = self._dir(ADMIN_PREFIX, name)
             if directory.exists():
                 raise ValueError(
-                    f"spravce {name!r} uz existuje ({directory}); prepsat jeho "
+                    f"spravce {name!r} uz existuje; prepsat jeho "
                     f"tajemstvi by ho zamklo ven"
                 )
             directory.mkdir(mode=DIR_MODE)
