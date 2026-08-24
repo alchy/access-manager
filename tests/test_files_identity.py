@@ -101,3 +101,20 @@ def test_a_missing_home_is_not_ready(tmp_path):
 def test_a_corrupt_groups_file_is_not_ready(tmp_path):
     (tmp_path / "groups.json").write_text("{zlomeno", encoding="utf-8")
     assert "groups.json" in Access.local(tmp_path).ready()
+
+
+def test_names_are_normalized_to_lowercase(tmp_path):
+    zaloz(tmp_path, "hana")
+    assert Access.local(tmp_path).user("Hana") is not None
+
+
+def test_an_email_is_a_valid_user_name(tmp_path):
+    zaloz(tmp_path, "jindrich.nemec@yahoo.com")
+    user = Access.local(tmp_path).user("jindrich.nemec@yahoo.com")
+    assert user is not None
+    assert user.subject_id == "user:jindrich.nemec@yahoo.com"
+
+
+def test_two_ats_are_refused(tmp_path):
+    with pytest.raises(ValueError):
+        Access.local(tmp_path).user("a@b@c")

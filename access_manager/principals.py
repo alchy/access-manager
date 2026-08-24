@@ -28,20 +28,41 @@ RESERVED_GROUPS = frozenset({"users", "public"})
 #: clovek v telefonu jmenuje stejne jako v pravech.
 ISSUER = "viewBase"
 
-#: Jmeno se sklada do cesty i do principalu, takze je to VSTUP a chova se jako
-#: vstup: jen pismena, cislice, tecka uvnitr, pomlcka a podtrzitko.
-_NAME = re.compile(r"^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$")
+#: Jmeno se sklada do cesty i do principalu, takze je to VSTUP a chova se
+#: jako vstup. Vsechna jmena se normalizuji na mala pismena: `Example.com`
+#: a `example.com` nesmi byt dva realmy, `Jindrich` a `jindrich` dva lide.
+_NAME = re.compile(r"^[a-z0-9_-]+(\.[a-z0-9_-]+)*$")
+
+#: Lide a spravci smi mit PRAVE JEDEN zavinac - identifikatorem muze byt
+#: e-mailova adresa. Skupiny a realmy zavinac nemaji.
+_IDENTITY = re.compile(
+    r"^[a-z0-9_-]+(\.[a-z0-9_-]+)*(@[a-z0-9_-]+(\.[a-z0-9_-]+)*)?$"
+)
+
+
+def _checked(name: str, vzor: re.Pattern, druh: str) -> str:
+    text = str(name).strip().lower()
+    if not vzor.match(text):
+        raise ValueError(
+            f"neplatne jmeno {name!r} ({druh}): povolena jsou mala pismena, "
+            f"cislice, '-', '_' a tecka uvnitr"
+        )
+    return text
 
 
 def check_name(name: str) -> str:
-    """Over jmeno driv, nez se z nej stane cesta nebo principal."""
-    text = str(name).strip()
-    if not _NAME.match(text):
-        raise ValueError(
-            f"neplatne jmeno {name!r}: povolena jsou pismena, cislice, '-', '_' "
-            f"a tecka uvnitr"
-        )
-    return text
+    """Jmeno skupiny. Over driv, nez se z nej stane cesta nebo principal."""
+    return _checked(name, _NAME, "skupina")
+
+
+def check_identity(name: str) -> str:
+    """Jmeno cloveka nebo spravce - navic smi mit jeden zavinac."""
+    return _checked(name, _IDENTITY, "identita")
+
+
+def check_realm(name: str) -> str:
+    """Nazev realmu - stejna pravidla jako skupina, FQDN projde."""
+    return _checked(name, _NAME, "realm")
 
 
 @dataclass(frozen=True, slots=True)

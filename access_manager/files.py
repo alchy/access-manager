@@ -36,6 +36,7 @@ from .principals import (
     Enrolment,
     Group,
     User,
+    check_identity,
     check_name,
 )
 from .purpose import check_purpose
@@ -72,7 +73,7 @@ class FileStore:
     # == cteni =============================================================
 
     def user(self, name: str) -> User | None:
-        name = check_name(name)
+        name = check_identity(name)
         directory = self.home / f"user-{name}"
         if not directory.is_dir():
             return None
@@ -124,7 +125,10 @@ class FileStore:
             return True
         kind, _, name = principal.partition(":")
         try:
-            name = check_name(name)
+            if kind == "user":
+                name = check_identity(name)
+            else:
+                name = check_name(name)
         except ValueError:
             return False
         if kind == "group":
@@ -152,7 +156,7 @@ class FileStore:
     def authenticate(self, username: str, credentials, *, purpose: str) -> Verdict:
         """Odpoved na "jsi to ty?" - nikdy na "smis to?"."""
         purpose = check_purpose(purpose)
-        name = check_name(username)
+        name = check_identity(username)
         directory = self.home / f"user-{name}"
         gen = self.generation()
 
@@ -193,7 +197,7 @@ class FileStore:
         _replace(self.home / GEN, str(self.generation() + 1))
 
     def add_user(self, name: str) -> Enrolment:
-        name = check_name(name)
+        name = check_identity(name)
         _require_pairing()
         with _locked(self.home):
             directory = self.home / f"user-{name}"
@@ -225,7 +229,7 @@ class FileStore:
                 (directory / "totp.uri").unlink(missing_ok=True)
                 (directory / "totp.txt").unlink(missing_ok=True)
                 doplneno.append(
-                    self._pair(check_name(directory.name[len("user-"):]), directory)
+                    self._pair(check_identity(directory.name[len("user-"):]), directory)
                 )
             if doplneno:
                 self._bump_gen()
@@ -260,7 +264,7 @@ class FileStore:
             self._bump_gen()
 
     def add_member(self, group: str, name: str) -> None:
-        group, name = check_name(group), check_name(name)
+        group, name = check_name(group), check_identity(name)
         with _locked(self.home):
             table = self._table()
             if group not in table:
@@ -302,7 +306,7 @@ class FileStore:
 
     def disable_user(self, name: str) -> None:
         """Docasne vypnuti. Clenstvi i auditni stopa zustavaji."""
-        name = check_name(name)
+        name = check_identity(name)
         with _locked(self.home):
             directory = self.home / f"user-{name}"
             if not directory.is_dir():
@@ -313,7 +317,7 @@ class FileStore:
             self._bump_gen()
 
     def enable_user(self, name: str) -> None:
-        name = check_name(name)
+        name = check_identity(name)
         with _locked(self.home):
             directory = self.home / f"user-{name}"
             if not directory.is_dir():
@@ -324,7 +328,7 @@ class FileStore:
             self._bump_gen()
 
     def remove_member(self, group: str, name: str) -> None:
-        group, name = check_name(group), check_name(name)
+        group, name = check_name(group), check_identity(name)
         with _locked(self.home):
             table = self._table()
             if group not in table:
@@ -345,7 +349,7 @@ class FileStore:
         smazanim adresare - ale jmeno visici v `groups.json` by matlo kazdy
         audit a jednou by se pod nim zalozil nekdo jiny.
         """
-        name = check_name(name)
+        name = check_identity(name)
         with _locked(self.home):
             directory = self.home / f"user-{name}"
             if not directory.is_dir():
@@ -368,7 +372,7 @@ class FileStore:
             raise ValueError(
                 f"neznamy mechanismus {mechanism!r}; zatim existuje jen 'totp'"
             )
-        name = check_name(name)
+        name = check_identity(name)
         with _locked(self.home):
             directory = self.home / f"user-{name}"
             if not directory.is_dir():
@@ -382,7 +386,7 @@ class FileStore:
 
     def pair(self, name: str) -> Enrolment:
         """Nove parovani JEDNOHO cloveka. Existujici tajemstvi neprepise."""
-        name = check_name(name)
+        name = check_identity(name)
         _require_pairing()
         with _locked(self.home):
             directory = self.home / f"user-{name}"
