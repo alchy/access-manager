@@ -66,6 +66,10 @@ class RemoteStore:
 
         client_kwargs = {}
         if ca is not None:
+            if isinstance(ca, bool):
+                # ca je cesta k CA bundle; bool by byl vypinac overeni -
+                # a ten neexistuje.
+                raise TypeError("ca musi byt cesta k CA bundle, ne bool")
             client_kwargs["verify"] = ca
         if transport is not None:
             client_kwargs["transport"] = transport

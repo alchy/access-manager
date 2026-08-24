@@ -8,7 +8,7 @@ import pytest
 from helpers import REALM
 from test_config import zapis  # helper na zapis fragmentu
 
-from access_manager import Admin
+from access_manager import Access, Admin
 from access_manager.config import load_config
 from access_manager.remote import RemoteStore
 from access_manager.server import create_app
@@ -98,3 +98,12 @@ def test_the_key_never_appears_in_errors(sluzba):
             transport=httpx.WSGITransport(app=app),
         )
     assert spatny_klic not in str(vyjimka.value)
+
+
+def test_ca_refuses_a_bool_killswitch():
+    # ca=False by v httpx vypnulo overeni certifikatu - vypinac neexistuje.
+    # Selhat to ma driv, nez padne prvni pozadavek - zadny transport netreba.
+    with pytest.raises(TypeError):
+        Access.remote("https://example.com", "am_k1_" + "0" * 64, ca=False)
+    with pytest.raises(TypeError):
+        Access.remote("https://example.com", "am_k1_" + "0" * 64, ca=True)
