@@ -251,6 +251,16 @@
     max-width: fit-content;
   }
   .poznamka { font-size: 0.85rem; opacity: 0.75; }
+
+  /* -- klic aplikace: zobrazen prave jednou po registraci --------------- */
+  .klic-hodnota {
+    background: #fff;
+    border: 1px solid var(--hranice);
+    border-radius: 10px;
+    padding: 0.85rem 1rem;
+    word-break: break-all;
+    font-size: 0.95rem;
+  }
 </style>
 </head>
 {% set prihlaseny = session.get('admin') %}

@@ -450,4 +450,66 @@ def create_console_app(cfg: ServiceConfig):
             cil=flask.url_for("_skupiny_seznam", skupina=nazev),
         )
 
+    # == aplikace =============================================================
+    #
+    # Jedina stranka s vyjimkou z PRG: uspesna registrace vraci PLNY klic
+    # PRAVE JEDNOU - misto redirectu se rovnou renderuje vysledkova sablona
+    # `klic.html` primo z teto POST odpovedi. Klic nikdy nejde do session ani
+    # do flashe (obe jsou cookie - klic by tam byl navic a mohl by presahnout
+    # limit velikosti cookie). Neuspech (napr. duplicitni jmeno) naopak
+    # zustava na PRG + flash, presne jako u ostatnich stranek - znovunacteni
+    # po chybe je bezpecne (dalsi pokus zase jen selze na duplicite).
+
+    def _radek_aplikace(komponenta) -> dict:
+        return {
+            "jmeno": komponenta.name,
+            "key_id": komponenta.key_id,
+            "otisk": komponenta.key_hash[:12],
+            "origins": komponenta.origins,
+            "detail": komponenta.detail,
+        }
+
+    @app.get("/aplikace")
+    @prihlasen
+    def _aplikace_seznam():
+        aplikace = [_radek_aplikace(k) for k in flask.g.store.components()]
+        return flask.render_template("aplikace.html", aplikace=aplikace)
+
+    @app.post("/aplikace/pridat")
+    @prihlasen
+    def _aplikace_pridat():
+        over_csrf()
+        jmeno = flask.request.form.get("jmeno", "").strip()
+        origins = [
+            puvod.strip()
+            for puvod in flask.request.form.get("origins", "").split(",")
+            if puvod.strip()
+        ]
+        detail = flask.request.form.get("detail") == "on"
+        try:
+            klic = flask.g.store.register_component(
+                jmeno, origins=origins, detail=detail
+            )
+        except ValueError as chyba:
+            flask.flash(f"{_prelozit('spolecne.error')}: {chyba}", "chyba")
+            return flask.redirect(flask.url_for("_aplikace_seznam"))
+        return flask.render_template("klic.html", jmeno=jmeno, klic=klic)
+
+    def _aplikace_mutace(jmeno, akce):
+        """Stejny tvar jako `_lide_mutace`/`_skupiny_mutace`, jen bez
+        volitelneho presmerovani - odvolani vzdy konci zpet na vypisu."""
+        over_csrf()
+        try:
+            akce(jmeno)
+        except ValueError as chyba:
+            flask.flash(f"{_prelozit('spolecne.error')}: {chyba}", "chyba")
+        else:
+            flask.flash(_prelozit("spolecne.done"), "ok")
+        return flask.redirect(flask.url_for("_aplikace_seznam"))
+
+    @app.post("/aplikace/<jmeno>/odvolat")
+    @prihlasen
+    def _aplikace_odvolat(jmeno):
+        return _aplikace_mutace(jmeno, flask.g.store.revoke_component)
+
     return app

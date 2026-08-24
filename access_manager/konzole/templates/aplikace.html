@@ -1,0 +1,58 @@
+{% extends "layout.html" %}
+{% block content %}
+<h1>{{ t('aplikace.title') }}</h1>
+
+<table class="tabulka">
+  <thead>
+    <tr>
+      <th>{{ t('aplikace.name') }}</th>
+      <th>{{ t('aplikace.key') }}</th>
+      <th>{{ t('aplikace.origins') }}</th>
+      <th>{{ t('aplikace.detail') }}</th>
+      <th>{{ t('spolecne.actions') }}</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for radek in aplikace %}
+    <tr>
+      <td class="mono">{{ radek.jmeno }}</td>
+      <td class="mono">{{ radek.key_id }} &middot; {{ radek.otisk }}</td>
+      <td>
+        {% for puvod in radek.origins %}
+        <span class="chip">{{ puvod }}</span>
+        {% endfor %}
+      </td>
+      <td>
+        {% if radek.detail %}
+        <span class="chip">{{ t('aplikace.detail') }}</span>
+        {% endif %}
+      </td>
+      <td class="akce">
+        <form method="post" action="{{ url_for('_aplikace_odvolat', jmeno=radek.jmeno) }}">
+          {{ csrf_pole() }}
+          <button type="submit">{{ t('aplikace.revoke') }}</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>{{ t('aplikace.register') }}</h2>
+<form method="post" action="{{ url_for('_aplikace_pridat') }}" class="pole-radek">
+  {{ csrf_pole() }}
+  <label>
+    <span>{{ t('aplikace.name') }}</span>
+    <input type="text" name="jmeno" autocomplete="off" required>
+  </label>
+  <label>
+    <span>{{ t('aplikace.origins') }}</span>
+    <input type="text" name="origins" autocomplete="off">
+  </label>
+  <label>
+    <input type="checkbox" name="detail" value="on">
+    <span>{{ t('aplikace.detail') }}</span>
+  </label>
+  <button type="submit" class="odeslat">{{ t('aplikace.register') }}</button>
+</form>
+{% endblock %}
