@@ -47,7 +47,7 @@ def test_console_app_no_flask_dependency():
 
 
 def test_main_missing_config_closes_start(tmp_path):
-    """Chybejici -c volba → SystemExit."""
+    """Chybejici -c volba -> SystemExit."""
     with pytest.raises(SystemExit):
         main([])
 
@@ -81,7 +81,12 @@ def test_main_reconciles_and_serves(tmp_path):
     thread_creations = []
 
     def mock_serve(app_or_callable, host=None, port=None, **kwargs):
-        serve_calls.append({"host": host, "port": port})
+        # Capture app/callable, host, and port
+        serve_calls.append({
+            "app": app_or_callable,
+            "host": host,
+            "port": port
+        })
 
     # Custom Mock Thread class aby zachytavala vytvoreni
     class MockThread:
@@ -102,7 +107,8 @@ def test_main_reconciles_and_serves(tmp_path):
     with patch("access_manager.server._require_server") as mock_require:
         # Vrat mock flask a waitress
         mock_flask = Mock()
-        mock_flask.Flask.return_value = Mock()  # app
+        mock_app = Mock()
+        mock_flask.Flask.return_value = mock_app  # app
         mock_waitress = Mock()
         mock_waitress.serve = mock_serve
         mock_require.return_value = (mock_flask, mock_waitress)
@@ -111,7 +117,7 @@ def test_main_reconciles_and_serves(tmp_path):
         with patch("access_manager.server.threading.Thread", MockThread):
             main(["-c", str(conf_dir)])
 
-            # Overeni, ze se vytvořilo právě 2 vlákna
+            # Overeni, ze se vytvorila prave 2 vlakna
             assert len(thread_creations) == 2
 
     # Overeni, ze reconcile probehl - admin adresar ma vzniknout
@@ -119,10 +125,22 @@ def test_main_reconciles_and_serves(tmp_path):
 
     # Overeni, ze serve byl volan dvakrat (API a konzole)
     assert len(serve_calls) == 2
-    # Prvni je API, druha je konzole
-    hosts_ports = [(c["host"], c["port"]) for c in serve_calls]
-    assert ("127.0.0.1", 22000) in hosts_ports
-    assert ("127.0.0.1", 22001) in hosts_ports
+
+    # Overeni spojeni listeneru s aplikacemi
+    api_call = next((c for c in serve_calls if c["port"] == 22000), None)
+    console_call = next((c for c in serve_calls if c["port"] == 22001), None)
+
+    assert api_call is not None, "API listener (22000) not found"
+    assert console_call is not None, "Console listener (22001) not found"
+
+    # API listener musi mit Flask app
+    assert api_call["app"] is mock_app, "API listener has wrong app"
+    assert hasattr(api_call["app"], "test_client"), (
+        "API listener app lacks Flask attributes"
+    )
+
+    # Console listener musi mit console_app
+    assert console_call["app"] is console_app, "Console listener has wrong app"
 
 
 def test_main_prints_new_enrolments(tmp_path, capsys):

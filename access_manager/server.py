@@ -294,7 +294,7 @@ def create_app(cfg: ServiceConfig):
 def console_app(environ, start_response):
     """Cista WSGI aplikace konzole - zatim vzdy 501.
 
-    Obsah dodá subprojekt 4 (konzole).
+    Obsah doda subprojekt 4 (konzole).
     """
     status = "501 Not Implemented"
     body = json.dumps({"error": "console_not_implemented"})
@@ -312,7 +312,7 @@ def main(argv=None):
 
     Parsuje argumenty, nacte konfiguraci, spusti reconcile,
     zalozi Flask aplikaci a spusti dva waitress listenery
-    (API a konzole) v oddelených vlaknech.
+    (API a konzole) v oddelenych vlaknech.
     """
     if argv is None:
         argv = sys.argv[1:]
