@@ -255,6 +255,11 @@ def create_app(cfg: ServiceConfig):
         )
         if username is None or credentials is None or purpose is None:
             return _bad_request()
+        # JSON dovoli i skalar (cislo, bool, seznam) tam, kde uloziste ceka
+        # mapu - bez tehle kontroly by `dict(credentials or {})` uvnitr
+        # store spadlo na TypeError misto slusneho 400.
+        if not isinstance(credentials, dict):
+            return _bad_request()
         try:
             verdikt = flask.g.store.authenticate(
                 username, credentials, purpose=purpose,

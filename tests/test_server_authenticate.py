@@ -136,6 +136,29 @@ def test_missing_username_is_400(prostredi):
     assert odpoved.get_json() == {"error": "bad_request"}
 
 
+def test_missing_purpose_is_400(prostredi):
+    client, tichy, _, _ = prostredi
+    odpoved = client.post(
+        "/v1/authenticate", headers=hlavicky(tichy),
+        json={"username": "hana", "credentials": {"totp": kod()}},
+    )
+    assert odpoved.status_code == 400
+    assert odpoved.get_json() == {"error": "bad_request"}
+
+
+def test_non_dict_credentials_are_400(prostredi):
+    # JSON dovoli i skalar tam, kde uloziste ceka mapu - to je chyba
+    # volajiciho, ne padajici vyjimka.
+    client, tichy, _, _ = prostredi
+    for spatne in (123, True, 1.5, [1, 2, 3], "retezec"):
+        odpoved = client.post(
+            "/v1/authenticate", headers=hlavicky(tichy),
+            json={"username": "hana", "credentials": spatne, "purpose": "login"},
+        )
+        assert odpoved.status_code == 400
+        assert odpoved.get_json() == {"error": "bad_request"}
+
+
 def test_audit_carries_the_component_name(prostredi):
     client, tichy, _, data = prostredi
     client.post(
