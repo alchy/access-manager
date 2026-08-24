@@ -12,13 +12,18 @@ modul samotny musi jit naimportovat bez extras (`pip install
 """
 from __future__ import annotations
 
+import argparse
 import importlib.metadata
+import json
+import sys
+import threading
 from ipaddress import ip_address, ip_network
+from pathlib import Path
 
-from .config import ServiceConfig
+from .config import ServiceConfig, load_config
 from .files import FileStore
 from .principals import Component
-from .realms import realm_root
+from .realms import realm_root, reconcile
 from .wire import group_to_wire, user_to_wire, verdict_to_wire
 
 #: Provozni cesty projdou bez klice - jinak by si /healthz nemohl overit
@@ -284,3 +289,86 @@ def create_app(cfg: ServiceConfig):
         return flask.jsonify({"gen": flask.g.store.generation()})
 
     return app
+
+
+def console_app(environ, start_response):
+    """Cista WSGI aplikace konzole - zatim vzdy 501.
+
+    Obsah dodá subprojekt 4 (konzole).
+    """
+    status = "501 Not Implemented"
+    body = json.dumps({"error": "console_not_implemented"})
+    response_body = body.encode("utf-8")
+    headers = [
+        ("Content-Type", "application/json"),
+        ("Content-Length", str(len(response_body))),
+    ]
+    start_response(status, headers)
+    return [response_body]
+
+
+def main(argv=None):
+    """Hlavni vstupni bod sluzby.
+
+    Parsuje argumenty, nacte konfiguraci, spusti reconcile,
+    zalozi Flask aplikaci a spusti dva waitress listenery
+    (API a konzole) v oddelených vlaknech.
+    """
+    if argv is None:
+        argv = sys.argv[1:]
+
+    parser = argparse.ArgumentParser(
+        prog="python -m access_manager.server",
+        description="Spustit sluzbu s danou konfiguraci"
+    )
+    parser.add_argument("-c", "--config", required=True, help="Adresar s konfiguraci")
+
+    args = parser.parse_args(argv)
+
+    # Nacti konfiguraci
+    cfg = load_config(Path(args.config))
+
+    # Spusti reconcile a vypise nove zavedeni
+    nova = reconcile(cfg.data, list(cfg.realms))
+    for z in nova:
+        print(f"nove zavedeni: {z.directory / 'totp.txt'}")
+
+    # Zaloz aplikaci
+    app = create_app(cfg)
+
+    # Ziskej waitress (lazy import)
+    flask, waitress = _require_server()
+
+    # Parsuj listener stringy - "host:port" format
+    # Pouzij rsplit(":") jednou - v6 nema podporu
+    api_listener = cfg.listeners.get("api", "127.0.0.1:22000")
+    console_listener = cfg.listeners.get("console", "127.0.0.1:22001")
+
+    api_host, api_port_str = api_listener.rsplit(":", 1)
+    console_host, console_port_str = console_listener.rsplit(":", 1)
+
+    api_port = int(api_port_str)
+    console_port = int(console_port_str)
+
+    # Funkce pro spusteni API serveru
+    def serve_api():
+        waitress.serve(app, host=api_host, port=api_port)
+
+    # Funkce pro spusteni konzole serveru
+    def serve_console():
+        waitress.serve(console_app, host=console_host, port=console_port)
+
+    # Spusti oba servery v oddelenych vlaknech
+    thread1 = threading.Thread(target=serve_api, daemon=False)
+    thread2 = threading.Thread(target=serve_console, daemon=False)
+
+    thread1.start()
+    thread2.start()
+
+    # Cekej na obe vlakna
+    thread1.join()
+    thread2.join()
+
+
+if __name__ == "__main__":
+    main()
