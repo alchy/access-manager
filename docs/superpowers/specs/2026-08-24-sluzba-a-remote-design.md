@@ -39,7 +39,7 @@ conf.d/
 
 ```json
 { "data": "/var/lib/access-manager",
-  "listeners": { "api": "0.0.0.0:8443", "console": "127.0.0.1:8444" },
+  "listeners": { "api": "0.0.0.0:22000", "console": "127.0.0.1:22001" },
   "trusted_proxies": ["10.0.0.0/8"],
   "forwarded_header": "X-Forwarded-For",
   "hops": 1,
