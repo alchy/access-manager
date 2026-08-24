@@ -744,6 +744,27 @@ class FileStore:
                 name=name, mechanism=mechanism,
             )
 
+    def _replace_expired_admin_enrolment(self, name: str) -> None:
+        """Vymena expirovaneho nesparovaneho tajemstvi spravce bez guardu.
+
+        Pouziva se pri sjednoceni z deklarace: tajemstvi nikdo nikdy neuzil,
+        vymena ho nikoho nezamyka a bez vymeny by se realm zasekl. Guard
+        posledniho spravce se na tuto cestu NESMUSI vztahovat.
+        """
+        name = check_identity(name)
+        with _locked(self.home):
+            directory = self._dir(ADMIN_PREFIX, name)
+            if not any((directory / a).exists() for a in CREDENTIAL_ARTEFACTS):
+                # Idempotentni: zadne tajemstvi neni zadny problem
+                return
+            for artefakt in CREDENTIAL_ARTEFACTS:
+                (directory / artefakt).unlink(missing_ok=True)
+            self._bump_gen()
+            self._audit(
+                kind="write", actor=self.actor, op="reconcile_reissue",
+                name=name,
+            )
+
     def pair_admin(self, name: str) -> Enrolment:
         """Nove parovani spravce. Existujici tajemstvi neprepise."""
         name = check_identity(name)
