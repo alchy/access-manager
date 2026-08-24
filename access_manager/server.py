@@ -19,7 +19,7 @@ from .config import ServiceConfig
 from .files import FileStore
 from .principals import Component
 from .realms import realm_root
-from .wire import group_to_wire, user_to_wire
+from .wire import group_to_wire, user_to_wire, verdict_to_wire
 
 #: Provozni cesty projdou bez klice - jinak by si /healthz nemohl overit
 #: zivotnost sam orchestrator bez tajemstvi.
@@ -240,6 +240,30 @@ def create_app(cfg: ServiceConfig):
             return _bad_request()
         return flask.jsonify(
             {"unknown": flask.g.store.unknown_principals(telo["principals"])}
+        )
+
+    @app.post("/v1/authenticate")
+    def _authenticate():
+        # Vzdy 200: ctyri tvary verdiktu jsou VYSLEDEK, ne chyba. 400 patri
+        # jen volajicimu - spatny JSON, chybejici pole nebo neplatny tvar
+        # jmena/ucelu (ValueError z check_identity/check_purpose).
+        telo = flask.request.get_json(silent=True)
+        if not isinstance(telo, dict):
+            return _bad_request()
+        username, credentials, purpose = (
+            telo.get("username"), telo.get("credentials"), telo.get("purpose"),
+        )
+        if username is None or credentials is None or purpose is None:
+            return _bad_request()
+        try:
+            verdikt = flask.g.store.authenticate(
+                username, credentials, purpose=purpose,
+                component=flask.g.component.name,
+            )
+        except ValueError:
+            return _bad_request()
+        return flask.jsonify(
+            verdict_to_wire(verdikt, detail=flask.g.component.detail)
         )
 
     @app.get("/v1/whoami")
