@@ -1,0 +1,27 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="karta">
+  <h1>{{ t('login.title') }}</h1>
+  <form method="post" action="{{ url_for('_prihlasovaci_stranka') }}" class="pole">
+    <label>
+      <span>{{ t('login.realm') }}</span>
+      <input type="text" name="realm" autocomplete="off" required>
+    </label>
+    <label>
+      <span>{{ t('login.name') }}</span>
+      <input type="text" name="jmeno" autocomplete="off" required>
+    </label>
+    <label>
+      <span>{{ t('login.codes') }}</span>
+      <input type="text" name="kod1" class="mono" inputmode="numeric" pattern="[0-9]{6}"
+             placeholder="{{ t('login.codes_hint') }}" autocomplete="off" required>
+    </label>
+    <label>
+      <span class="visually-hidden">{{ t('login.codes') }}</span>
+      <input type="text" name="kod2" class="mono" inputmode="numeric" pattern="[0-9]{6}"
+             placeholder="{{ t('login.codes_hint') }}" autocomplete="off" required>
+    </label>
+    <button type="submit" class="odeslat">{{ t('login.submit') }}</button>
+  </form>
+</div>
+{% endblock %}

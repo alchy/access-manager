@@ -1,0 +1,147 @@
+"""Konzole: Flask app factory, sdileny layout, prihlaseni, strazce relace.
+
+Kazdy pozadavek dostane vlastni `FileStore` (g.store) s `actor` odvozenym od
+prihlaseneho spravce - zadna instance uloziste se nesdili mezi pozadavky,
+takze auditni stopa vzdy nese, kdo skutecne zapsal.
+
+`flask` se importuje az uvnitr `create_console_app` - modul samotny musi jit
+naimportovat bez extras (`pip install 'access-manager[server]'`), stejne jako
+`server.py`.
+"""
+from __future__ import annotations
+
+import functools
+import secrets
+from pathlib import Path
+
+from ..config import ServiceConfig
+from ..files import FileStore
+from ..principals import check_realm
+from ..realms import realm_root
+from . import preklady
+
+#: Sablony jsou soucasti balicku - Flask by je jinak hledal relativne k cwd,
+#: ktery se pri spusteni sluzby muze lisit od umisteni modulu.
+_TEMPLATES = Path(__file__).parent / "templates"
+
+
+def _require_flask():
+    """Vrat `flask`, nebo rekni JAK to doinstalovat."""
+    try:
+        import flask
+    except ImportError as chybi:
+        raise RuntimeError(
+            "konzole potrebuje flask: pip install 'access-manager[server]'"
+        ) from chybi
+    return flask
+
+
+def _realm_store_kwargs(cfg: ServiceConfig) -> dict[str, dict]:
+    """Konstrukcni argumenty `FileStore` pro kazdy realm z `cfg`.
+
+    Zrcadli konstrukci v `server.create_app` - misto hotovych instanci se ale
+    drzi jen argumenty, protoze kazdy pozadavek potrebuje `FileStore` s
+    vlastnim `actor` (viz `prihlasen`).
+    """
+    kwargs: dict[str, dict] = {}
+    videne: set[str] = set()
+    for deklarace in cfg.realms:
+        if "name" not in deklarace:
+            raise ValueError(f"deklarace realmu bez jmena: {deklarace!r}")
+        jmeno = check_realm(deklarace["name"])
+        if jmeno in videne:
+            msg = f"realm {jmeno!r} je deklarovany dvakrat; konflikt zavira start"
+            raise ValueError(msg)
+        videne.add(jmeno)
+        kwargs[jmeno] = {
+            "root": realm_root(cfg.data, jmeno),
+            "realm": jmeno,
+            "qr_ttl_days": int(
+                deklarace.get("qr_ttl_days", cfg.defaults["qr_ttl_days"])
+            ),
+            "audit_retention_days": int(
+                deklarace.get(
+                    "audit_retention_days", cfg.defaults["audit_retention_days"]
+                )
+            ),
+            "throttle_attempts": int(cfg.throttle["attempts"]),
+            "throttle_window_s": int(cfg.throttle["window_s"]),
+        }
+    return kwargs
+
+
+def create_console_app(cfg: ServiceConfig):
+    """Postav Flask aplikaci konzole nad realmy z `cfg`.
+
+    Dalsi ukoly (prihlaseni, sprava lidi/skupin/aplikaci/spravcu, audit) na
+    tuhle tovarnu stavi dal - pridavaji route a pouzivaji `prihlasen`.
+    """
+    flask = _require_flask()
+
+    realmy = _realm_store_kwargs(cfg)
+
+    def _store_pro(jmeno_realmu: str, actor: str) -> FileStore:
+        parametry = dict(realmy[jmeno_realmu])
+        root = parametry.pop("root")
+        return FileStore(root, actor=actor, **parametry)
+
+    app = flask.Flask(__name__, template_folder=str(_TEMPLATES))
+    # Restart = odhlaseni vsech spravcu - zamer, ne nedopatreni. Zadne
+    # tajemstvi se nikam neuklada, klic zije jen po dobu behu procesu.
+    app.secret_key = secrets.token_hex(32)
+    # HttpOnly je flaskovy vychozi stav - jen SameSite je potreba rict sami.
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+
+    @app.before_request
+    def _uloz_jazyk():
+        # Prepinac funguje na kterekoli strance, ne jen na /login - staci
+        # pridat ?lang=cs|en do libovolneho GETu.
+        lang = flask.request.args.get("lang")
+        if lang in ("cs", "en"):
+            flask.session["lang"] = lang
+
+    @app.context_processor
+    def _kontext_prekladu():
+        katalog = preklady.nacti(flask.session.get("lang", "cs"))
+        return {"t": lambda klic: preklady.prelozit(katalog, klic)}
+
+    def prihlasen(view):
+        """Strazce relace: bez platne session presmeruje na `/login`.
+
+        Zaroven priprav g.store s actor odvozenym od prihlaseneho spravce -
+        pouziva se jen uvnitr chranenych view, ne v `/login` samotnem.
+        """
+
+        @functools.wraps(view)
+        def obal(*args, **kwargs):
+            jmeno_realmu = flask.session.get("realm")
+            admin = flask.session.get("admin")
+            if not admin or jmeno_realmu not in realmy:
+                return flask.redirect(flask.url_for("_prihlasovaci_stranka"))
+            flask.g.store = _store_pro(jmeno_realmu, actor=f"admin:{admin}")
+            return view(*args, **kwargs)
+
+        return obal
+
+    @app.get("/login")
+    def _prihlasovaci_stranka():
+        # POST /login (overeni dvema kody) prijde v ukolu 3 - tady jen
+        # formular a prepinac jazyka.
+        return flask.render_template("login.html")
+
+    @app.post("/logout")
+    @prihlasen
+    def _odhlasit():
+        # CSRF kontrola pribyde v ukolu 3 spolu se zbytkem mutaci - tady jen
+        # cisty seam, ktery uz respektuje strazce relace.
+        flask.session.clear()
+        return flask.redirect(flask.url_for("_prihlasovaci_stranka"))
+
+    @app.get("/")
+    @prihlasen
+    def _uvod():
+        # Docasny zastupny cil - ukol 3 z nej udela redirect na /lide, az
+        # bude co zobrazit.
+        return flask.render_template("layout.html")
+
+    return app

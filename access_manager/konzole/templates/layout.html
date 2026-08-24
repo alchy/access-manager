@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="{{ session.get('lang', 'cs') }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{{ t('login.title') if not session.get('admin') else t('nav.people') }}{% endblock %}</title>
+<style>
+  /* Tokeny sdilene celou konzoli - viz Global Constraints v ukolech. */
+  :root {
+    --sidebar: #14352A;
+    --sidebar-text: #E7EFE9;
+    --paper: #F6F7F5;
+    --accent: #166B52;
+    --text: #20241F;
+    --hranice: rgba(20, 36, 31, 0.14);
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: var(--sans);
+    color: var(--text);
+    background: var(--paper);
+    min-height: 100vh;
+  }
+  a { color: var(--accent); }
+  code, .mono { font-family: var(--mono); }
+
+  /* -- spolecna kostra: sidebar (jen prihlaseny) + obsah + pata --------- */
+  body.app, body.anon { display: flex; min-height: 100vh; }
+  body.anon { flex-direction: column; }
+  .sidebar {
+    flex: none;
+    width: 220px;
+    background: var(--sidebar);
+    color: var(--sidebar-text);
+    display: flex;
+    flex-direction: column;
+    padding: 1.5rem 1.1rem;
+    gap: 1.5rem;
+  }
+  .sidebar .realm {
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    opacity: 0.75;
+    word-break: break-all;
+  }
+  .sidebar nav { display: flex; flex-direction: column; gap: 0.2rem; }
+  .sidebar nav a {
+    color: var(--sidebar-text);
+    text-decoration: none;
+    padding: 0.5rem 0.65rem;
+    border-radius: 6px;
+    font-size: 0.95rem;
+  }
+  .sidebar nav a:hover { background: rgba(255, 255, 255, 0.09); }
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .content { flex: 1; padding: 2rem; }
+
+  /* -- anonymni pristup: obsah (karta) vystredeny, bez sidebaru --------- */
+  body.anon .content {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1rem;
+  }
+
+  /* -- pata: prepinac jazyka, identita, odhlaseni ----------------------- */
+  .paticka {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.85rem 1.25rem;
+    border-top: 1px solid var(--hranice);
+    font-size: 0.85rem;
+  }
+  body.anon .paticka { justify-content: center; }
+  .jazyk a { text-decoration: none; padding: 0.15rem 0.35rem; }
+  .jazyk a.aktivni { color: var(--text); font-weight: 600; text-decoration: underline; }
+  .identita { display: flex; align-items: center; gap: 0.75rem; }
+  .identita form { margin: 0; }
+  button {
+    font: inherit;
+    cursor: pointer;
+  }
+  .odhlasit {
+    background: none;
+    border: 1px solid var(--hranice);
+    border-radius: 6px;
+    padding: 0.35rem 0.7rem;
+    color: var(--text);
+  }
+  .odhlasit:hover { border-color: var(--accent); color: var(--accent); }
+
+  @media (max-width: 640px) {
+    body.app { flex-direction: column; }
+    .sidebar { width: auto; }
+  }
+
+  /* -- karta prihlasovaci stranky (a dalsich anonymnich stranek) -------- */
+  .karta {
+    background: #fff;
+    border: 1px solid var(--hranice);
+    border-radius: 12px;
+    padding: 2.25rem;
+    width: 100%;
+    max-width: 360px;
+    box-shadow: 0 1px 2px rgba(20, 36, 31, 0.06);
+  }
+  .karta h1 { margin: 0 0 1.35rem; font-size: 1.25rem; }
+  .pole { display: flex; flex-direction: column; gap: 1rem; }
+  label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.85rem; }
+  input[type="text"] {
+    font: inherit;
+    padding: 0.55rem 0.6rem;
+    border: 1px solid var(--hranice);
+    border-radius: 6px;
+  }
+  input[type="text"]:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    border-color: var(--accent);
+  }
+  .odeslat {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 0.65rem 1rem;
+    font-weight: 600;
+  }
+  .odeslat:hover { filter: brightness(1.06); }
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+</style>
+</head>
+{% set prihlaseny = session.get('admin') %}
+<body class="{{ 'app' if prihlaseny else 'anon' }}">
+  {% if prihlaseny %}
+  <aside class="sidebar">
+    <div class="realm">{{ session.get('realm', '') }}</div>
+    <nav>
+      <a href="/lide">{{ t('nav.people') }}</a>
+      <a href="/skupiny">{{ t('nav.groups') }}</a>
+      <a href="/aplikace">{{ t('nav.apps') }}</a>
+      <a href="/spravci">{{ t('nav.admins') }}</a>
+      <a href="/audit">{{ t('nav.audit') }}</a>
+    </nav>
+  </aside>
+  {% endif %}
+  <div class="main">
+    <main class="content">{% block content %}{% endblock %}</main>
+    <footer class="paticka">
+      <div class="jazyk">
+        <a href="?lang=cs" class="{{ 'aktivni' if session.get('lang', 'cs') == 'cs' else '' }}">CS</a>
+        &middot;
+        <a href="?lang=en" class="{{ 'aktivni' if session.get('lang', 'cs') == 'en' else '' }}">EN</a>
+      </div>
+      {% if prihlaseny %}
+      <div class="identita">
+        <span>{{ t('spravci.identity') }}: <code>{{ session['admin'] }}</code></span>
+        <form method="post" action="{{ url_for('_odhlasit') }}">
+          <button type="submit" class="odhlasit">{{ t('nav.logout') }}</button>
+        </form>
+      </div>
+      {% endif %}
+    </footer>
+  </div>
+</body>
+</html>
