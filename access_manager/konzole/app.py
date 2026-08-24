@@ -650,7 +650,7 @@ def create_console_app(cfg: ServiceConfig):
 
     # == audit ================================================================
     #
-    # Jedina cisté GET stranka konzole: cte auditni stopu (`read_events`),
+    # Jedina ciste GET stranka konzole: cte auditni stopu (`read_events`),
     # nic nemutuje - zadny CSRF. Kazde pole udalosti se cte tolerantne pres
     # `.get` - rucne poskozeny/kusy radek (napr. jen {"t": ..., "kind":
     # "weird"}) nesmi stranku shodit, jen se zobrazi prazdne/surove.

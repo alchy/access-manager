@@ -55,7 +55,7 @@ def test_a_malformed_date_filter_does_not_crash_and_falls_back_to_default(
     klient, _ = prihlaseny_klient
     odpoved = klient.get("/audit?od=nedatum&do=takenetohle")
     assert odpoved.status_code == 200
-    # Padne na vychozi okno - dnesni prihlaseni tam pořad je videt.
+    # Padne na vychozi okno - dnesni prihlaseni tam porad je videt.
     assert "admin:jindrich" in odpoved.get_data(as_text=True)
 
 
