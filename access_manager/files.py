@@ -924,7 +924,9 @@ def _ensure_root(home: Path) -> None:
     """
     rodic = home.parent
     if not rodic.exists():
-        rodic.mkdir(parents=True)
+        # exist_ok kvuli soubehu: dva prvni zapisy tehoz cerstveho domova
+        # se nesmi srazit na FileExistsError.
+        rodic.mkdir(parents=True, exist_ok=True)
         os.chmod(rodic, DIR_MODE)
 
 
