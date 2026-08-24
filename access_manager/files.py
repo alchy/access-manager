@@ -59,9 +59,16 @@ LOCK = ".lock"
 #: Cislo generace. Zvedne ho kazdy administrativni zapis; cteni ho jen cte.
 GEN = "gen"
 
-#: Soubory jednoho povereni: pouziva revoke_credential i uklid pred novym
-#: parovanim, kdyz po preruseni zbyde osireny QR bez tajemstvi.
-CREDENTIAL_ARTEFACTS = ("totp.secret", "totp.uri", "totp.txt", "used.json")
+#: Soubory jednoho povereni: pouziva revoke_credential i revoke_admin_credential,
+#: i uklid pred novym parovanim, kdyz po preruseni zbyde osireny QR bez tajemstvi.
+CREDENTIAL_ARTEFACTS = (
+    "totp.secret",
+    "totp.uri",
+    "totp.txt",
+    "totp.issued",
+    "totp.paired",
+    "used.json",
+)
 
 #: Prefixy adresaru podle role.
 USER_PREFIX = "user-"
@@ -171,6 +178,32 @@ class FileStore:
             return f"{GROUPS} nejde precist: {chyba}"
         return None
 
+    # == platnost ==========================================================
+
+    def _enrolment_expired(self, directory: Path) -> bool:
+        """Nesparovane zavedeni po TTL. Bez `totp.issued` nikdy neexpiruje."""
+        if (directory / "totp.paired").is_file():
+            return False
+        issued = directory / "totp.issued"
+        if not issued.is_file():
+            return False
+        vydano = int(issued.read_text(encoding="utf-8").strip())
+        return time.time() - vydano > self.qr_ttl_days * 86400
+
+    def _complete_pairing(self, directory: Path) -> None:
+        """Prvni uspesne prihlaseni: QR uz neni co ukazovat.
+
+        Tajemstvi zustava a overuje dal; mizi jen jeho zobrazitelna podoba.
+        """
+        if (directory / "totp.paired").is_file():
+            return
+        with _locked(self.home):
+            if (directory / "totp.paired").is_file():
+                return
+            _write(directory / "totp.paired", str(int(time.time())))
+            (directory / "totp.uri").unlink(missing_ok=True)
+            (directory / "totp.txt").unlink(missing_ok=True)
+
     # == overeni ===========================================================
 
     def authenticate(self, username: str, credentials, *, purpose: str) -> Verdict:
@@ -191,6 +224,9 @@ class FileStore:
             # nedokoncene zavedeni a spravce to ma poznat z auditu.
             return Verdict.refused("no_secret", gen=gen)
 
+        if self._enrolment_expired(directory):
+            return Verdict.refused("expired", gen=gen)
+
         # Co je potreba, rozhoduje KOMPONENTA. Nezname jmeno mechanismu se
         # chova, jako by neprislo - jinak si klient vybere ten slabsi.
         code = dict(credentials or {}).get("totp")
@@ -208,6 +244,8 @@ class FileStore:
             # Soubeh: mezi _consume a timhle dotazem stihl remove_user smazat
             # adresar. Spravny kod bez existujiciho uzivatele neni verdikt.
             return Verdict.refused("unknown_user", gen=gen)
+
+        self._complete_pairing(directory)
         return Verdict.ok(user.subject_id, user.principals, gen=gen)
 
     # == zapis: lide =======================================================
@@ -246,8 +284,9 @@ class FileStore:
                     continue
                 # Osireny QR z preruseneho revoke (nebo cizi zasah) by jinak
                 # srazil _pair na O_EXCL - viz pair().
-                (directory / "totp.uri").unlink(missing_ok=True)
-                (directory / "totp.txt").unlink(missing_ok=True)
+                for artefakt in CREDENTIAL_ARTEFACTS:
+                    if artefakt != "totp.secret":
+                        (directory / artefakt).unlink(missing_ok=True)
                 name = check_identity(directory.name[len(USER_PREFIX):])
                 doplneno.append(
                     self._pair(name, directory, role="member")
@@ -272,6 +311,7 @@ class FileStore:
         _write(directory / "totp.secret", secret)
         _write(directory / "totp.uri", uri)
         _write(directory / "totp.txt", _qr_text(uri))
+        _write(directory / "totp.issued", str(int(time.time())))
         return Enrolment(name=name, directory=directory, label=label)
 
     # == zapis: skupiny ====================================================
@@ -429,9 +469,9 @@ class FileStore:
             # chybi, ale used.json/uri/txt patrici STAREMU tajemstvi tu jeste
             # mohou lezet. Bez uklidu by _pair spadl na O_EXCL a nechal by
             # pulku stareho QR vedle pulky noveho.
-            (directory / "used.json").unlink(missing_ok=True)
-            (directory / "totp.uri").unlink(missing_ok=True)
-            (directory / "totp.txt").unlink(missing_ok=True)
+            for artefakt in CREDENTIAL_ARTEFACTS:
+                if artefakt != "totp.secret":
+                    (directory / artefakt).unlink(missing_ok=True)
             enrolment = self._pair(name, directory, role="member")
             self._bump_gen()
         return enrolment
@@ -516,9 +556,9 @@ class FileStore:
             # chybi, ale used.json/uri/txt patrici STAREMU tajemstvi tu jeste
             # mohou lezet. Bez uklidu by _pair spadl na O_EXCL a nechal by
             # pulku stareho QR vedle pulky noveho.
-            (directory / "used.json").unlink(missing_ok=True)
-            (directory / "totp.uri").unlink(missing_ok=True)
-            (directory / "totp.txt").unlink(missing_ok=True)
+            for artefakt in CREDENTIAL_ARTEFACTS:
+                if artefakt != "totp.secret":
+                    (directory / artefakt).unlink(missing_ok=True)
             enrolment = self._pair(name, directory, role="admin")
             self._bump_gen()
         return enrolment
