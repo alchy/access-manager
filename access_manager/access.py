@@ -35,8 +35,17 @@ class Access:
 
     # -- identita ----------------------------------------------------------
 
-    def authenticate(self, username: str, credentials, *, purpose: str) -> Verdict:
-        return self._store.authenticate(username, credentials, purpose=purpose)
+    def authenticate(
+        self,
+        username: str,
+        credentials,
+        *,
+        purpose: str,
+        component: str | None = None,
+    ) -> Verdict:
+        return self._store.authenticate(
+            username, credentials, purpose=purpose, component=component
+        )
 
     def user(self, name: str) -> User | None:
         return self._store.user(name)

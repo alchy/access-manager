@@ -28,8 +28,10 @@ import secrets
 import shutil
 import time
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
+from .audit import append_event
 from .principals import (
     ISSUER,
     PUBLIC,
@@ -102,6 +104,17 @@ class FileStore:
     def _dir(self, prefix: str, name: str) -> Path:
         """Cesta k adresari identifikujici se podle prefixu a jmena."""
         return self.home / f"{prefix}{name}"
+
+    def _audit(self, **pole) -> None:
+        """Zapis jednu auditni udalost. Smi bezet i pod `_locked` - append
+        nezamyka, jen appendem O_APPEND.
+
+        Domov si zalozi sam (stejne jako `_write_table`): "neznamy uzivatel"
+        se overuje i proti realmu, ktery jeste nikdo nezalozil.
+        """
+        self.home.mkdir(parents=True, mode=DIR_MODE, exist_ok=True)
+        udalost = {"t": datetime.now(UTC).isoformat(timespec="seconds"), **pole}
+        append_event(self.home, udalost, self.audit_retention_days)
 
     # == cteni =============================================================
 
@@ -247,10 +260,38 @@ class FileStore:
 
     # == overeni ===========================================================
 
-    def authenticate(self, username: str, credentials, *, purpose: str) -> Verdict:
-        """Odpoved na "jsi to ty?" - nikdy na "smis to?"."""
+    def authenticate(
+        self,
+        username: str,
+        credentials,
+        *,
+        purpose: str,
+        component: str | None = None,
+    ) -> Verdict:
+        """Odpoved na "jsi to ty?" - nikdy na "smis to?".
+
+        `component` jde jen do auditu - o overeni samotnem nerozhoduje.
+        Chyba z `check_purpose`/`check_identity` neni udalost uzivatele
+        (je to chyba volajiciho), takze se neloguje - vyjimka utece drive,
+        nez dojde na vypocet verdiktu.
+        """
         purpose = check_purpose(purpose)
         name = check_identity(username)
+        verdikt = self._authenticate_verdict(name, credentials, purpose)
+        self._audit(
+            kind="authenticate",
+            subject=f"user:{name}",
+            purpose=purpose,
+            component=component,
+            outcome=verdikt.outcome,
+            **({"reason": verdikt.reason} if verdikt.reason else {}),
+            gen=verdikt.gen,
+        )
+        return verdikt
+
+    def _authenticate_verdict(self, name: str, credentials, purpose: str) -> Verdict:
+        """Samotny vypocet verdiktu - jediny vystupni bod dela `authenticate`,
+        aby audit zalogoval kazde volani prave jednou."""
         directory = self._dir(USER_PREFIX, name)
         gen = self.generation()
 
@@ -297,6 +338,20 @@ class FileStore:
         hodin plati pro nalezeni s, ne pro sousednost.
         """
         name = check_identity(name)
+        verdikt = self._authenticate_admin_verdict(name, first, second)
+        self._audit(
+            kind="authenticate",
+            subject=f"admin:{name}",
+            purpose="admin",
+            outcome=verdikt.outcome,
+            **({"reason": verdikt.reason} if verdikt.reason else {}),
+            gen=verdikt.gen,
+        )
+        return verdikt
+
+    def _authenticate_admin_verdict(self, name: str, first, second) -> Verdict:
+        """Samotny vypocet verdiktu - jediny vystupni bod dela
+        `authenticate_admin`, aby audit zalogoval kazde volani prave jednou."""
         directory = self._dir(ADMIN_PREFIX, name)
         gen = self.generation()
 
@@ -340,6 +395,7 @@ class FileStore:
             os.chmod(directory, DIR_MODE)  # mkdir podleha umask, chmod ne
             enrolment = self._pair(name, directory, role="member")
             self._bump_gen()
+            self._audit(kind="write", actor=self.actor, op="add_user", name=name)
         return enrolment
 
     def pair_missing(self) -> list[Enrolment]:
@@ -362,6 +418,9 @@ class FileStore:
                 name = check_identity(directory.name[len(USER_PREFIX):])
                 doplneno.append(
                     self._pair(name, directory, role="member")
+                )
+                self._audit(
+                    kind="write", actor=self.actor, op="pair_missing", name=name,
                 )
             if doplneno:
                 self._bump_gen()
@@ -402,6 +461,7 @@ class FileStore:
             table[name] = {"members": [], "includes": []}
             self._write_table(table)
             self._bump_gen()
+            self._audit(kind="write", actor=self.actor, op="add_group", name=name)
 
     def add_member(self, group: str, name: str) -> None:
         group, name = check_name(group), check_identity(name)
@@ -418,6 +478,10 @@ class FileStore:
             table[group]["members"] = sorted(members)
             self._write_table(table)
             self._bump_gen()
+            self._audit(
+                kind="write", actor=self.actor, op="add_member",
+                group=group, member=name,
+            )
 
     def include(self, parent: str, child: str) -> None:
         """`parent` OBSAHUJE `child`: kdo je v child, je i v parent."""
@@ -441,6 +505,10 @@ class FileStore:
             table[parent]["includes"] = sorted(includes)
             self._write_table(table)
             self._bump_gen()
+            self._audit(
+                kind="write", actor=self.actor, op="include",
+                parent=parent, child=child,
+            )
 
     # == zapis: komponenty ================================================
 
@@ -468,6 +536,11 @@ class FileStore:
             }
             _replace(self.home / COMPONENTS, json.dumps(data, indent=2, sort_keys=True))
             self._bump_gen()
+            # Nikdy klic - jen jmeno a key_id, ktery ho identifikuje bez odhaleni.
+            self._audit(
+                kind="write", actor=self.actor, op="register_component",
+                name=name, key_id=key_id,
+            )
         return klic
 
     def revoke_component(self, name: str) -> None:
@@ -480,6 +553,9 @@ class FileStore:
             del data["components"][name]
             _replace(self.home / COMPONENTS, json.dumps(data, indent=2, sort_keys=True))
             self._bump_gen()
+            self._audit(
+                kind="write", actor=self.actor, op="revoke_component", name=name,
+            )
 
     # == zapis: zivotni cyklus =============================================
 
@@ -494,6 +570,7 @@ class FileStore:
                 return
             _write(directory / "disabled", "")
             self._bump_gen()
+            self._audit(kind="write", actor=self.actor, op="disable_user", name=name)
 
     def enable_user(self, name: str) -> None:
         name = check_identity(name)
@@ -505,6 +582,7 @@ class FileStore:
                 return
             (directory / "disabled").unlink(missing_ok=True)
             self._bump_gen()
+            self._audit(kind="write", actor=self.actor, op="enable_user", name=name)
 
     def remove_member(self, group: str, name: str) -> None:
         group, name = check_name(group), check_identity(name)
@@ -520,6 +598,10 @@ class FileStore:
             table[group]["members"] = sorted(members)
             self._write_table(table)
             self._bump_gen()
+            self._audit(
+                kind="write", actor=self.actor, op="remove_member",
+                group=group, member=name,
+            )
 
     def remove_user(self, name: str) -> None:
         """Smaz cloveka VCETNE jmena v seznamech clenu.
@@ -540,6 +622,7 @@ class FileStore:
             self._write_table(table)
             shutil.rmtree(directory)
             self._bump_gen()
+            self._audit(kind="write", actor=self.actor, op="remove_user", name=name)
 
     def revoke_credential(self, name: str, mechanism: str = "totp") -> None:
         """Odvolani povereni - reseni ztraceneho telefonu.
@@ -562,6 +645,10 @@ class FileStore:
             for artefakt in CREDENTIAL_ARTEFACTS:
                 (directory / artefakt).unlink(missing_ok=True)
             self._bump_gen()
+            self._audit(
+                kind="write", actor=self.actor, op="revoke_credential",
+                name=name, mechanism=mechanism,
+            )
 
     def pair(self, name: str) -> Enrolment:
         """Nove parovani JEDNOHO cloveka. Existujici tajemstvi neprepise."""
@@ -585,6 +672,7 @@ class FileStore:
                     (directory / artefakt).unlink(missing_ok=True)
             enrolment = self._pair(name, directory, role="member")
             self._bump_gen()
+            self._audit(kind="write", actor=self.actor, op="pair", name=name)
         return enrolment
 
     # == zapis: spravci ====================================================
@@ -603,6 +691,7 @@ class FileStore:
             os.chmod(directory, DIR_MODE)  # mkdir podleha umask, chmod ne
             enrolment = self._pair(name, directory, role="admin")
             self._bump_gen()
+            self._audit(kind="write", actor=self.actor, op="add_admin", name=name)
         return enrolment
 
     def admins(self) -> list[str]:
@@ -630,6 +719,7 @@ class FileStore:
                 raise ValueError(f"spravce {name!r} neexistuje")
             shutil.rmtree(directory)
             self._bump_gen()
+            self._audit(kind="write", actor=self.actor, op="remove_admin", name=name)
 
     def revoke_admin_credential(self, name: str, mechanism: str = "totp") -> None:
         """Odvolani povereni spravce - reseni ztraceneho telefonu."""
@@ -649,6 +739,10 @@ class FileStore:
             for artefakt in CREDENTIAL_ARTEFACTS:
                 (directory / artefakt).unlink(missing_ok=True)
             self._bump_gen()
+            self._audit(
+                kind="write", actor=self.actor, op="revoke_admin_credential",
+                name=name, mechanism=mechanism,
+            )
 
     def pair_admin(self, name: str) -> Enrolment:
         """Nove parovani spravce. Existujici tajemstvi neprepise."""
@@ -672,6 +766,7 @@ class FileStore:
                     (directory / artefakt).unlink(missing_ok=True)
             enrolment = self._pair(name, directory, role="admin")
             self._bump_gen()
+            self._audit(kind="write", actor=self.actor, op="pair_admin", name=name)
         return enrolment
 
     # == anti-replay =======================================================
