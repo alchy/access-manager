@@ -188,7 +188,7 @@ def create_app(cfg: ServiceConfig):
 
         if not _origin_allowed(component, origin):
             # 403 a NIC dal: zadny throttle, zadne parsovani tela.
-            stores[realm]._audit(
+            stores[realm].audit_event(
                 kind="origin_denied", component=component.name,
                 key_id=component.key_id, origin=origin,
             )

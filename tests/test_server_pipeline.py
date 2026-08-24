@@ -128,6 +128,14 @@ def test_a_denied_origin_is_audited(prostredi, tmp_path):
     assert "key_id" in udalosti[0]
 
 
+def test_audit_event_is_public_api(tmp_path):
+    from access_manager.files import FileStore
+    store = FileStore(tmp_path / "realm-x", realm="x")
+    store.audit_event(kind="write", actor="operator", op="test")
+    from access_manager.audit import read_events
+    assert read_events(tmp_path / "realm-x")[0]["op"] == "test"
+
+
 def test_a_realm_without_a_name_is_a_worded_value_error(tmp_path):
     zapis(tmp_path / "conf.d", "service.json", {"data": str(tmp_path / "data")})
     zapis(tmp_path / "conf.d" / "realms", "bez-jmena.json", {"admins": []})

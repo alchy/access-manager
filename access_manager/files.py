@@ -112,6 +112,14 @@ class FileStore:
         """Cesta k adresari identifikujici se podle prefixu a jmena."""
         return self.home / f"{prefix}{name}"
 
+    def audit_event(self, **pole) -> None:
+        """Vstup pro sluzbu a konzoli. NIKDY tajemstvi, kody, klice.
+
+        Verejny obal nad _audit: zapisuje auditni udalost dostupnou sluzbe
+        i jeho klientum.
+        """
+        self._audit(**pole)
+
     def _audit(self, **pole) -> None:
         """Zapis jednu auditni udalost. Smi bezet i pod `_locked` - append
         nezamyka, jen appendem O_APPEND.
