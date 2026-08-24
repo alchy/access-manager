@@ -12,11 +12,12 @@ from __future__ import annotations
 
 import functools
 import secrets
+import time
 from pathlib import Path
 
 from ..config import ServiceConfig
 from ..files import FileStore
-from ..principals import check_realm
+from ..principals import PUBLIC, USERS, check_realm
 from ..realms import realm_root
 from . import preklady
 
@@ -188,8 +189,125 @@ def create_console_app(cfg: ServiceConfig):
     @app.get("/")
     @prihlasen
     def _uvod():
-        # /lide prijde az v ukolu 4 - url_for by tu selhalo (endpoint jeste
-        # neexistuje), takze cesta je zatim natvrdo.
-        return flask.redirect("/lide")
+        return flask.redirect(flask.url_for("_lide_seznam"))
+
+    # == lide ===============================================================
+    #
+    # VZOR pro dalsi stranky (skupiny/aplikace/spravci/audit): kazda mutace
+    # je @prihlasen + POST, prvni radek je over_csrf(), knihovni volani bezi
+    # v try/except ValueError, uspech i chyba konci flashem a redirectem
+    # (Post/Redirect/Get). `_lide_mutace` tenhle tvar nese za vsechny
+    # jednoduche akce - vyjimkou je jen `/lide/pridat` s vlastnim GET view
+    # (formular), ktere tu neni potreba.
+
+    def _radek_cloveka(store, jmeno: str) -> dict:
+        """Jeden radek vypisu: stav (aktivni/zakazany/cekajici na parovani)
+        a skupinove chipy z plocheho uzaveru principalu.
+
+        Cteni `totp.issued`/`totp.paired` je primo pres soubory - jen ke
+        zjisteni "ceka na parovani", bez zamku (cteni, ne zapis; zapis dela
+        vyhradne FileStore).
+        """
+        clovek = store.user(jmeno)
+        skupiny = sorted(
+            principal[len("group:"):]
+            for principal in clovek.principals
+            if principal.startswith("group:") and principal not in (PUBLIC, USERS)
+        )
+        if not clovek.enabled:
+            stav, stav_text = "disabled", _prelozit("lide.disabled")
+        else:
+            adresar = store.home / f"user-{jmeno}"
+            vydano = adresar / "totp.issued"
+            sparovano = adresar / "totp.paired"
+            if vydano.is_file() and not sparovano.is_file():
+                try:
+                    vydano_ts = int(vydano.read_text(encoding="utf-8").strip())
+                except (ValueError, OSError):
+                    # Poskozeny soubor - viz stejna uvaha v
+                    # FileStore._enrolment_expired.
+                    vydano_ts = 0
+                zbyva = int(store.qr_ttl_days - (time.time() - vydano_ts) // 86400)
+                stav = "waiting"
+                stav_text = _prelozit("lide.waiting").format(dni=zbyva)
+            else:
+                stav, stav_text = "active", _prelozit("lide.active")
+        return {
+            "jmeno": jmeno, "stav": stav, "stav_text": stav_text, "skupiny": skupiny,
+        }
+
+    @app.get("/lide")
+    @prihlasen
+    def _lide_seznam():
+        store = flask.g.store
+        lide = [_radek_cloveka(store, jmeno) for jmeno in store.users()]
+        return flask.render_template("lide.html", lide=lide)
+
+    def _lide_mutace(jmeno, akce, presmerovani=None):
+        """Spolecny tvar mutaci lidi: CSRF -> knihovni volani -> flash ->
+        redirect. `presmerovani(vysledek)` urcuje cil PRI USPECHU (napr. na
+        stranku QR) - vychozi je zpet na /lide. Chyba vzdy konci na /lide,
+        `presmerovani` se pak nevola."""
+        over_csrf()
+        try:
+            vysledek = akce(jmeno)
+        except ValueError as chyba:
+            flask.flash(f"{_prelozit('spolecne.error')}: {chyba}", "chyba")
+            return flask.redirect(flask.url_for("_lide_seznam"))
+        flask.flash(_prelozit("spolecne.done"), "ok")
+        cil = presmerovani(vysledek) if presmerovani else flask.url_for("_lide_seznam")
+        return flask.redirect(cil)
+
+    @app.post("/lide/pridat")
+    @prihlasen
+    def _lide_pridat():
+        jmeno = flask.request.form.get("jmeno", "")
+        return _lide_mutace(
+            jmeno, flask.g.store.add_user,
+            presmerovani=lambda zavedeni: flask.url_for(
+                "_lide_qr", jmeno=zavedeni.name
+            ),
+        )
+
+    @app.post("/lide/<jmeno>/vypnout")
+    @prihlasen
+    def _lide_vypnout(jmeno):
+        return _lide_mutace(jmeno, flask.g.store.disable_user)
+
+    @app.post("/lide/<jmeno>/zapnout")
+    @prihlasen
+    def _lide_zapnout(jmeno):
+        return _lide_mutace(jmeno, flask.g.store.enable_user)
+
+    @app.post("/lide/<jmeno>/smazat")
+    @prihlasen
+    def _lide_smazat(jmeno):
+        return _lide_mutace(jmeno, flask.g.store.remove_user)
+
+    @app.post("/lide/<jmeno>/odvolat")
+    @prihlasen
+    def _lide_odvolat(jmeno):
+        return _lide_mutace(jmeno, flask.g.store.revoke_credential)
+
+    @app.post("/lide/<jmeno>/parovat")
+    @prihlasen
+    def _lide_parovat(jmeno):
+        return _lide_mutace(
+            jmeno, flask.g.store.pair,
+            presmerovani=lambda zavedeni: flask.url_for(
+                "_lide_qr", jmeno=zavedeni.name
+            ),
+        )
+
+    @app.get("/lide/qr/<jmeno>")
+    @prihlasen
+    def _lide_qr(jmeno):
+        store = flask.g.store
+        cesta = store.home / f"user-{jmeno}" / "totp.txt"
+        obrazec = cesta.read_text(encoding="utf-8") if cesta.is_file() else None
+        stitek = f"{store.realm}-member-{jmeno}"
+        return flask.render_template(
+            "qr.html", jmeno=jmeno, obrazec=obrazec, stitek=stitek
+        )
 
     return app

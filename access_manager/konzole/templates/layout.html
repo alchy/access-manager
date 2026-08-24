@@ -153,6 +153,102 @@
     clip: rect(0, 0, 0, 0);
     white-space: nowrap;
   }
+
+  /* -- obsah prihlasenych stranek: nadpisy, flash zpravy ---------------- */
+  .content h1 { margin: 0 0 1.25rem; font-size: 1.4rem; }
+  .content h2 { margin: 2rem 0 0.9rem; font-size: 1.1rem; }
+  .zpravy { margin: 0 0 1.25rem; display: flex; flex-direction: column; gap: 0.5rem; }
+  .zprava {
+    margin: 0;
+    padding: 0.6rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    border: 1px solid var(--hranice);
+  }
+  .zprava-chyba { border-color: var(--chyba); color: var(--chyba); }
+  .zprava-ok { border-color: var(--accent); color: var(--accent); }
+
+  /* -- tabulky (lide, skupiny, aplikace, spravci, audit) ----------------- */
+  .tabulka {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+    border: 1px solid var(--hranice);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .tabulka th, .tabulka td {
+    text-align: left;
+    padding: 0.65rem 0.85rem;
+    border-bottom: 1px solid var(--hranice);
+    font-size: 0.9rem;
+    vertical-align: middle;
+  }
+  .tabulka th {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text);
+    opacity: 0.65;
+    background: rgba(20, 36, 31, 0.03);
+  }
+  .tabulka tbody tr:last-child td { border-bottom: none; }
+
+  /* -- stavovy stitek (aktivni/zakazany/cekajici) ------------------------ */
+  .stav {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+  .stav-active { background: rgba(22, 107, 82, 0.12); color: var(--accent); }
+  .stav-disabled { background: rgba(179, 38, 30, 0.1); color: var(--chyba); }
+  .stav-waiting { background: rgba(20, 36, 31, 0.08); color: var(--text); }
+
+  /* -- skupinove chipy ---------------------------------------------------- */
+  .chip {
+    display: inline-block;
+    margin: 0 0.3rem 0.2rem 0;
+    padding: 0.1rem 0.5rem;
+    border: 1px solid var(--hranice);
+    border-radius: 999px;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+  }
+
+  /* -- akce v radku tabulky: kratke formulare vedle sebe ------------------ */
+  .akce { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
+  .akce form { margin: 0; }
+  .akce button, .akce a {
+    background: none;
+    border: 1px solid var(--hranice);
+    border-radius: 6px;
+    padding: 0.3rem 0.6rem;
+    font-size: 0.82rem;
+    color: var(--text);
+    text-decoration: none;
+  }
+  .akce button:hover, .akce a:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* -- radkovy formular (zalozeni cloveka/skupiny/aplikace/spravce) ------ */
+  .pole-radek { display: flex; align-items: flex-end; gap: 0.75rem; }
+  .pole-radek label { flex: none; }
+  .pole-radek input[type="text"] { min-width: 14rem; }
+
+  /* -- QR jako text (jedine misto, kde smi byt na strance) ---------------- */
+  pre.qr {
+    background: #fff;
+    border: 1px solid var(--hranice);
+    border-radius: 10px;
+    padding: 1rem;
+    font-family: var(--mono);
+    font-size: 0.62rem;
+    line-height: 1.05;
+    overflow-x: auto;
+    max-width: fit-content;
+  }
+  .poznamka { font-size: 0.85rem; opacity: 0.75; }
 </style>
 </head>
 {% set prihlaseny = session.get('admin') %}
@@ -170,7 +266,18 @@
   </aside>
   {% endif %}
   <div class="main">
-    <main class="content">{% block content %}{% endblock %}</main>
+    <main class="content">
+      {% with zpravy = get_flashed_messages(with_categories=true) %}
+        {% if zpravy %}
+        <div class="zpravy">
+          {% for kategorie, zprava in zpravy %}
+          <p class="zprava zprava-{{ kategorie }}" role="alert">{{ zprava }}</p>
+          {% endfor %}
+        </div>
+        {% endif %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </main>
     <footer class="paticka">
       <div class="jazyk">
         <a href="?lang=cs" class="{{ 'aktivni' if session.get('lang', 'cs') == 'cs' else '' }}">CS</a>
