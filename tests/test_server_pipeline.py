@@ -4,10 +4,11 @@
 pada driv, nez se cokoli cte; prazdne origins znamena jen smycku.
 """
 import pytest
-from helpers import REALM
+from helpers import REALM, koren
 from test_config import zapis  # helper na zapis fragmentu
 
 from access_manager import Admin
+from access_manager.audit import read_events
 from access_manager.config import load_config
 from access_manager.server import create_app
 
@@ -98,3 +99,24 @@ def test_readyz_reports_unready_realms(tmp_path):
     app = create_app(cfg)
     odpoved = app.test_client().get("/readyz")
     assert odpoved.status_code == 503          # realm jeste nema uloziste
+
+
+def test_a_denied_origin_is_audited(prostredi, tmp_path):
+    client, klic, _ = prostredi
+    client.get(
+        "/v1/users", headers={"Authorization": f"Bearer {klic}"},
+        environ_overrides={"REMOTE_ADDR": "203.0.113.9"},
+    )
+    udalosti = read_events(koren(tmp_path / "data"), kind="origin_denied")
+    assert len(udalosti) == 1
+    assert udalosti[0]["component"] == "app:test"
+    assert udalosti[0]["origin"] == "203.0.113.9"
+    assert "key_id" in udalosti[0]
+
+
+def test_a_realm_without_a_name_is_a_worded_value_error(tmp_path):
+    zapis(tmp_path / "conf.d", "service.json", {"data": str(tmp_path / "data")})
+    zapis(tmp_path / "conf.d" / "realms", "bez-jmena.json", {"admins": []})
+    cfg = load_config(tmp_path / "conf.d")
+    with pytest.raises(ValueError, match="deklarace realmu bez jmena"):
+        create_app(cfg)

@@ -19,6 +19,7 @@ from .config import ServiceConfig
 from .files import FileStore
 from .principals import Component
 from .realms import realm_root
+from .wire import group_to_wire, user_to_wire
 
 #: Provozni cesty projdou bez klice - jinak by si /healthz nemohl overit
 #: zivotnost sam orchestrator bez tajemstvi.
@@ -126,6 +127,10 @@ def create_app(cfg: ServiceConfig):
 
     stores: dict[str, FileStore] = {}
     for deklarace in cfg.realms:
+        if "name" not in deklarace:
+            # Stejna chyba a stejne zneni jako v realms.reconcile - deklarace
+            # je zmatena a start se ma zastavit driv, nez neco napulku zalozi.
+            raise ValueError(f"deklarace realmu bez jmena: {deklarace!r}")
         jmeno = deklarace["name"]
         stores[jmeno] = FileStore(
             realm_root(cfg.data, jmeno),
@@ -198,13 +203,55 @@ def create_app(cfg: ServiceConfig):
             "build": importlib.metadata.version("access-manager"),
         })
 
-    @app.route("/v1/<path:cesta>")
-    def _docasny_cil(cesta):
-        """Zastupny cil pro overeni bezpecnostni pipeline.
+    def _bad_request():
+        # Chyba volajiciho (zdeformovane jmeno, chybejici pole) - ne verdikt.
+        return flask.jsonify({"error": "bad_request"}), 400
 
-        Skutecne endpointy pridaji ukoly 5, 6 a 9 jako presnejsi pravidla -
-        Werkzeug pri shode uprednostni presnou cestu pred timhle wildcardem.
-        """
-        return flask.jsonify({})
+    @app.get("/v1/users/<path:name>")
+    def _user(name):
+        try:
+            telo = user_to_wire(flask.g.store.user(name))
+        except ValueError:
+            return _bad_request()
+        return flask.jsonify(telo)
+
+    @app.get("/v1/users")
+    def _users():
+        return flask.jsonify({"users": flask.g.store.users()})
+
+    @app.get("/v1/groups")
+    def _groups():
+        return flask.jsonify({"groups": flask.g.store.groups()})
+
+    @app.get("/v1/groups/<path:name>")
+    def _group(name):
+        try:
+            telo = group_to_wire(name, flask.g.store.group(name))
+        except ValueError:
+            return _bad_request()
+        return flask.jsonify(telo)
+
+    @app.post("/v1/principals/check")
+    def _principals_check():
+        telo = flask.request.get_json(silent=True)
+        if not isinstance(telo, dict) or not isinstance(
+            telo.get("principals"), list
+        ):
+            return _bad_request()
+        return flask.jsonify(
+            {"unknown": flask.g.store.unknown_principals(telo["principals"])}
+        )
+
+    @app.get("/v1/whoami")
+    def _whoami():
+        return flask.jsonify({
+            "component": flask.g.component.name,
+            "realm": flask.g.realm,
+            "key_id": flask.g.component.key_id,
+        })
+
+    @app.get("/v1/generation")
+    def _generation():
+        return flask.jsonify({"gen": flask.g.store.generation()})
 
     return app

@@ -65,7 +65,10 @@ def load_config(conf_dir: Path) -> ServiceConfig:
         listeners_config["console"] = "127.0.0.1:22001"
 
     forwarded_header = config.get("forwarded_header", "X-Forwarded-For")
-    hops = config.get("hops", 1)
+    try:
+        hops = int(config.get("hops", 1))
+    except (TypeError, ValueError) as chyba:
+        raise ValueError(f"hops musi byt cislo: {config.get('hops')!r}") from chyba
 
     throttle_config = config.get("throttle", {})
     if "attempts" not in throttle_config:

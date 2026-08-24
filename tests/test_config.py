@@ -53,3 +53,17 @@ def test_a_corrupt_fragment_closes_the_start(tmp_path):
     (tmp_path / "conf.d" / "service.json").write_text("{zlomeno", encoding="utf-8")
     with pytest.raises(ValueError):
         load_config(tmp_path / "conf.d")
+
+
+def test_hops_as_a_json_string_is_coerced_to_int(tmp_path):
+    zapis(tmp_path / "conf.d", "service.json",
+          {"data": str(tmp_path / "d"), "hops": "2"})
+    cfg = load_config(tmp_path / "conf.d")
+    assert cfg.hops == 2
+
+
+def test_a_non_numeric_hops_closes_the_start(tmp_path):
+    zapis(tmp_path / "conf.d", "service.json",
+          {"data": str(tmp_path / "d"), "hops": "mnoho"})
+    with pytest.raises(ValueError):
+        load_config(tmp_path / "conf.d")
