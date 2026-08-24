@@ -1,0 +1,53 @@
+{% extends "layout.html" %}
+{% block content %}
+<h1>{{ t('audit.title') }}</h1>
+
+<h2>{{ t('audit.filter') }}</h2>
+<form method="get" action="{{ url_for('_audit_seznam') }}" class="pole-radek">
+  <label>
+    <span>{{ t('audit.from') }}</span>
+    <input type="date" name="od" value="{{ od }}">
+  </label>
+  <label>
+    <span>{{ t('audit.to') }}</span>
+    <input type="date" name="do" value="{{ do }}">
+  </label>
+  <label>
+    <span>{{ t('audit.subject') }}</span>
+    <input type="text" name="subjekt" value="{{ subjekt }}" autocomplete="off">
+  </label>
+  <label>
+    <span>{{ t('audit.kind') }}</span>
+    <input type="text" name="kind" value="{{ kind }}" autocomplete="off">
+  </label>
+  <label>
+    <span>{{ t('audit.outcome') }}</span>
+    <input type="text" name="outcome" value="{{ outcome }}" autocomplete="off">
+  </label>
+  <button type="submit" class="odeslat">{{ t('audit.filter') }}</button>
+</form>
+
+<table class="tabulka">
+  <thead>
+    <tr>
+      <th>{{ t('audit.time') }}</th>
+      <th>{{ t('audit.event') }}</th>
+      <th>{{ t('audit.who') }}</th>
+      <th>{{ t('audit.result') }}</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for radek in udalosti %}
+    <tr>
+      <td class="mono">{{ radek.cas }}</td>
+      <td>{{ radek.udalost }}</td>
+      <td class="mono">{{ radek.kdo }}</td>
+      <td>
+        <span class="vysledek {{ radek.vysledek_trida }}">{{ radek.vysledek_text }}</span>
+        {% if radek.reason %}<span class="poznamka">({{ radek.reason }})</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

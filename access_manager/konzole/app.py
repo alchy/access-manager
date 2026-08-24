@@ -13,8 +13,10 @@ from __future__ import annotations
 import functools
 import secrets
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from ..audit import read_events
 from ..config import ServiceConfig
 from ..files import FileStore
 from ..principals import PUBLIC, USERS, check_identity, check_name, check_realm
@@ -24,6 +26,10 @@ from . import preklady
 #: Sablony jsou soucasti balicku - Flask by je jinak hledal relativne k cwd,
 #: ktery se pri spusteni sluzby muze lisit od umisteni modulu.
 _TEMPLATES = Path(__file__).parent / "templates"
+
+#: Vychozi sirka okna auditu bez filtru - "nedavne udalosti", ne cela
+#: historie (retence je typicky 90 dni, cely vypis by byl neprehledny).
+_AUDIT_VYCHOZI_DNI = 7
 
 
 def _require_flask():
@@ -640,6 +646,89 @@ def create_console_app(cfg: ServiceConfig):
         return flask.render_template(
             "qr.html", jmeno=jmeno, obrazec=obrazec, sparovano=sparovano,
             stitek=stitek, zpet=flask.url_for("_spravci_seznam"),
+        )
+
+    # == audit ================================================================
+    #
+    # Jedina cisté GET stranka konzole: cte auditni stopu (`read_events`),
+    # nic nemutuje - zadny CSRF. Kazde pole udalosti se cte tolerantne pres
+    # `.get` - rucne poskozeny/kusy radek (napr. jen {"t": ..., "kind":
+    # "weird"}) nesmi stranku shodit, jen se zobrazi prazdne/surove.
+
+    def _validni_den(text: str) -> str | None:
+        """`text` jako 'RRRR-MM-DD', jinak None (= pouzij vychozi den).
+
+        HTML date input muze dorazit prazdny nebo rucne poskozeny (upraveny
+        dotaz v adresnim radku primo) - nikdy nesmi shodit stranku, jen se
+        tise nahradi vychozim oknem.
+        """
+        if not text:
+            return None
+        try:
+            datetime.strptime(text, "%Y-%m-%d")
+        except ValueError:
+            return None
+        return text
+
+    def _radek_udalosti(udalost: dict) -> dict:
+        """Jeden radek auditu - vsechna pole tolerantne pres `.get`.
+
+        `vysledek` ma tri barvy: `ok` zelene, `denied` cervene (+ `reason`
+        vedle), zapisy (`kind == "write"`, ktere `outcome` vubec nemaji)
+        modre; cokoli jine (`need_factor`, `throttled`, chybejici) neutralne.
+        Neznamy `kind` se do udalosti propise surove - zadny seznam znamych
+        hodnot, zadna vyjimka.
+        """
+        kind = udalost.get("kind", "")
+        outcome = udalost.get("outcome")
+        if outcome == "ok":
+            trida, text = "vysledek-ok", outcome
+        elif outcome == "denied":
+            trida, text = "vysledek-denied", outcome
+        elif outcome:
+            trida, text = "vysledek-jiny", outcome
+        elif kind == "write":
+            trida, text = "vysledek-write", kind
+        else:
+            trida, text = "vysledek-jiny", ""
+        udalost_text = " ".join(
+            kus for kus in (kind, udalost.get("op") or udalost.get("purpose")) if kus
+        )
+        kdo = (
+            udalost.get("subject") or udalost.get("actor")
+            or udalost.get("component") or ""
+        )
+        return {
+            "cas": udalost.get("t", ""),
+            "udalost": udalost_text,
+            "kdo": kdo,
+            "vysledek_text": text,
+            "vysledek_trida": trida,
+            "reason": udalost.get("reason", ""),
+        }
+
+    @app.get("/audit")
+    @prihlasen
+    def _audit_seznam():
+        store = flask.g.store
+        dnes = datetime.now(UTC).date()
+        vychozi_od = (dnes - timedelta(days=_AUDIT_VYCHOZI_DNI)).isoformat()
+        vychozi_do = dnes.isoformat()
+        od = _validni_den(flask.request.args.get("od", "")) or vychozi_od
+        do = _validni_den(flask.request.args.get("do", "")) or vychozi_do
+        subjekt = flask.request.args.get("subjekt", "").strip() or None
+        kind = flask.request.args.get("kind", "").strip() or None
+        outcome = flask.request.args.get("outcome", "").strip() or None
+        udalosti = read_events(
+            store.home, day_from=od, day_to=do,
+            subject=subjekt, outcome=outcome, kind=kind,
+        )
+        # Nejnovejsi nahoru - `read_events` vraci chronologicky (soubor po
+        # souboru, radek po radku), coz je pro cteni logu pozpatku.
+        radky = [_radek_udalosti(u) for u in reversed(udalosti)]
+        return flask.render_template(
+            "audit.html", udalosti=radky, od=od, do=do,
+            subjekt=subjekt or "", kind=kind or "", outcome=outcome or "",
         )
 
     return app
