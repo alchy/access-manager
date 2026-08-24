@@ -35,7 +35,7 @@
 <form method="post" action="{{ url_for('_skupiny_pridat') }}" class="pole-radek">
   {{ csrf_pole() }}
   <label>
-    <span>{{ t('skupiny.title') }}</span>
+    <span>{{ t('aplikace.name') }}</span>
     <input type="text" name="nazev" autocomplete="off" required>
   </label>
   <button type="submit" class="odeslat">{{ t('skupiny.add_group') }}</button>
