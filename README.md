@@ -1,156 +1,120 @@
 # access-manager
 
-**Autentikator a adresar skupin.** Odpovi na jednu otazku a rovnou k ni
-prida, kam ten clovek patri:
+**An authenticator and a group directory.** It answers one question and
+attaches, in the same breath, where that person belongs:
 
-    "jsi to ty?"  ->  ok, user:jindrich, [group:mzdy, group:ucetni, ...]
+    "is this you?"  ->  ok, user:jindrich, [group:mzdy, group:ucetni, ...]
 
-Dnes je mechanismus jediny: autentikator v telefonu (TOTP).
+Today there is a single mechanism: a phone authenticator (TOTP).
 
-Na otazku *"smi to?"* **neodpovida zamerne** - a od te otazky uz nedrzi ani
-zadna ACL. Prava patri tomu, kdo sve objekty zna; access-manager je nezna
-a znat je nema. Duvod je v [docs/design.md](docs/design.md), par. 5.
+It **deliberately does not answer** *"may they?"* — and holds no ACLs for
+that question either. Permissions belong to whoever knows their own objects;
+access-manager does not know them and is not supposed to. The reasoning
+lives in [docs/design.md](docs/design.md) (Czech), §5.
 
-Zretezeni skupin rozbaluje SERVER a vraci plochy uzaver. Klasicka bolest
-LDAPu je prave tohle - zanorene clenstvi se necha dopocitat klientovi
-a pulka klientu to udela spatne.
+Group chaining is expanded **server-side** and returned as a flat transitive
+closure — the classic LDAP pain of clients re-computing nested membership
+(half of them incorrectly) does not exist here.
 
-Ma vlastni proces a vlastni REST API, protoze ho pouziva **jak jadro, tak
-aplikace** - nemuze tedy bydlet uvnitr ani jednoho. Muze bezet v jinem
-kontejneru nez oba.
+Two things worth knowing up front:
 
-## Pouziti
+1. **You get a verdict, not a session.** Access-manager keeps nobody logged
+   in — otherwise its 3 a.m. restart would log everyone out. Keeping people
+   signed in is the caller's job.
+2. **`group:users` and `group:public` are reserved** — "anyone
+   authenticated" and "anyone"; every person carries them and they cannot
+   be taken away.
 
-### Lokalne
+## Realms
 
-Aplikace, ktera jen prihlasuje lidi, potrebuje tohle a nic vic:
+A single instance serves many **realms** — strict namespaces, typically
+named by FQDN. Users, groups, admins, application keys and the audit trail
+all live inside a realm; nothing crosses the boundary, and the same name in
+two realms is two different identities. Realms are declared in the
+configuration; on startup a *reconcile* pass creates only what is missing.
+Realm admins are separate identities (pairing label
+`<realm>-<role>-<name>`) with a two-consecutive-codes login. Application
+keys are shown exactly once at registration; the server stores only their
+sha256 fingerprint. The audit log is per realm.
+
+## Installation
+
+```bash
+pip install git+https://github.com/alchy/access-manager
+```
+
+The client has **no mandatory dependencies**. Extras by role:
+`[remote]` (httpx) to talk to a service, `[totp]` (pyotp, qrcode) to enrol
+identities, `[server]` (flask, waitress) to run the service.
+
+## Quick start
 
 ```python
 from access_manager import Access
 
+# same machine, no service (development, single-host):
 access = Access.local("~/.access-manager", realm="example.com")
 
-verdikt = access.authenticate("jindrich", {"totp": kod}, purpose="login")
+# against a running service:
+access = Access.remote("https://auth.example.com",
+                       key=os.environ["ACCESS_MANAGER_KEY"],
+                       realm="example.com")
 
-if verdikt.outcome == "need_factor":
-    ...                                   # co chybi, rekla komponenta
-if not verdikt:
-    ...                                   # ven JEDNA hlaska, do logu duvod
+verdict = access.authenticate("jindrich", {"totp": code}, purpose="login")
 
-verdikt.subject_id     # "user:jindrich"
-verdikt.principals     # {"user:jindrich", "group:users", "group:public"}
+if verdict.outcome == "need_factor":
+    ...                        # verdict.required says what is missing
+if not verdict:                # only outcome "ok" is truthy
+    ...                        # one message to the user; reasons go to audit
+
+verdict.subject_id             # "user:jindrich"
+verdict.principals             # frozenset — the flat closure for allowed()
 ```
 
-### Vzdalenosti (REST)
+Both wirings return the same types; switching from local to remote changes
+one line. `Access.remote` requires `https://` (loopback excepted for
+development), verifies the certificate with no off-switch, checks the API
+version and the key's realm loudly at startup, and retries transient
+failures with backoff.
 
-Chces-li se pripojit k bezici sluzbe:
-
-```python
-from access_manager import Access
-
-access = Access.remote(
-    url="https://auth.example.com:22000",
-    key="tajny-klic-aplikace",
-    realm="example.com"
-)
-
-verdikt = access.authenticate("jindrich", {"totp": kod}, purpose="login")
-```
-
-### Obecne
-
-Dve veci, ktere je treba vedet predem:
-
-1. **Nedostanete relaci, dostanete verdikt.** Access-manager nedrzi
-   prihlasene lidi - kdyby ano, jeho restart ve 3 rano odhlasi vsechny.
-   Drzet cloveka prihlaseneho je prace volajiciho.
-2. **`group:users` a `group:public` jsou vyhrazene.** Znamenaji "kdokoli
-   overeny" a "kdokoli"; clovek je dostane tak jako tak a nejdou mu odebrat.
-3. **Realm je povinny.** Kazdy uzivatel a kazda skupina zije jen v ramci sveho
-   realmu; clovek z jednoho se nikdy nesetka s druhym.
-
-## Realmy
-
-Realm je subadresar a jmenny prostor. Instance je vzdy per-realm: vsichni
-uzivatele jedne instance patri do stejneho realmu. Vznik deklaraci (kdo patri
-kam) se resi externim systemem, access-manager jen splni `reconcile`, tj.
-doplni z uloziste jen to, co chybi. Spravci jsou oddelene identity se stitkem
-`<realm>-<role>-<jmeno>` a maji dvoukodovy vstup do budouci provozovatelske
-konzole. Klice aplikaci se vydavaji jednou, na serveru si drzi jen otisk.
-Audit je per-realm.
-
-## Instalace
+## Running the service
 
 ```bash
-pip install access-manager          # klient
-pip install access-manager[totp]    # + zakladani TOTP identit
-```
-
-Klient nema zadne povinne zavislosti. HTTP vrstva a TOTP jsou volitelne
-extra, takze apka, ktera jen vola `authenticate`, si netahne nic.
-
-## Sprava
-
-Zakladani a clenstvi jsou na samostatnem objektu, se samostatnym klicem:
-
-```python
-from access_manager import Admin
-
-admin = Admin.local("~/.access-manager", realm="example.com")
-
-admin.add_user("jindrich")            # + tajemstvi, URI a QR JAKO TEXT
-admin.pair_missing()                  # doplni jen tem, kdo parovaci kod nemaji
-
-admin.add_group("mzdy")
-admin.add_member("mzdy", "jindrich")
-admin.include("ucetni", "mzdy")       # ucetni OBSAHUJE mzdy; cyklus odmitne
-```
-
-`Access` zapisove operace **nema** a `Admin` neumi `authenticate`. Kdyby
-zavadeni viselo na tomtez objektu, umi kazda apka se svym klicem zalozit
-uzivatele a strcit ho do `group:spravci`.
-
-QR se zaklada jako text (`totp.txt`): na server se clovek dostane pres ssh,
-`cat` vypise kod do terminalu a telefon ho sejme z obrazovky. Obrazek je na
-hlave bez obrazovky k nicemu.
-
-## Sluzba
-
-Spusteni vlastni instance sluzby:
-
-```bash
-pip install 'access-manager[server]'
+pip install 'access-manager[server,totp]'
 python -m access_manager.server -c conf.d/
 ```
 
-Sluzba vyposlouchava na portu 22000 (REST API). Vicemene casu se bude zdat,
-ze veci nefunguje - vice v konzoli (port 22001), zatim ale vraci 501.
+The REST API listens on port 22000, the management console on 22001 (the
+console ships in the next stage; its listener currently returns 501). TLS
+is terminated by a reverse proxy in front of the service — the proxy must
+be listed in `trusted_proxies` so the origin ACL measures real client
+addresses. A `Dockerfile` sits at the repository root; in a container,
+bind `listeners.api` to `0.0.0.0:22000` (EXPOSE alone is not enough) and
+adjust the healthcheck if you rebind.
 
-TLS terminuje reverse proxy pred sluzbou (vzorova konfigurace nginx prijde
-s dokumentaci). Detaily jsou v
-[docs/superpowers/specs/2026-08-24-sluzba-a-remote-design.md](docs/superpowers/specs/2026-08-24-sluzba-a-remote-design.md).
+Administration (users, groups, application keys) is done on the server via
+the `Admin` library object for now; pairing QR codes are stored as text so
+`cat totp.txt` over ssh works on headless machines.
 
-Kontejnerizace: priklad Dockerfile je v koreni repa; zazehni vse
-potrebne a spusti sluzbu jako uzivatel `spravce`.
+## Documentation (Czech)
 
-Poznamka: healthcheck kontejneru pocita s vychozim api listenerem
-127.0.0.1:22000 - kdo listener prevaze, musi prevazit i healthcheck.
+| document | contents |
+|---|---|
+| [docs/instalace.md](docs/instalace.md) | installation, service, nginx/trusted-proxy sample, Docker |
+| [docs/admin.md](docs/admin.md) | realms, admins, application keys, QR validity, audit |
+| [docs/aplikace.md](docs/aplikace.md) | connecting an application, usage examples |
+| [docs/api.md](docs/api.md) | REST API and the trust model |
+| [docs/design.md](docs/design.md) | the normative design and its reasoning |
 
-V kontejneru je treba nastavit `listeners.api` na `0.0.0.0:22000`, jinak
-sluzba neni zvenku dosazitelna (EXPOSE sam nestaci).
+## Status
 
-## Stav
+Complete: the file storage layer (verification, group expansion,
+anti-replay per purpose, full write half with identity lifecycle), realms
+(admins, QR validity, application keys, per-realm audit, reconcile), the
+REST service (flask/waitress behind a proxy, throttling) and
+`Access.remote` — 275 tests, all running without network or server. Not
+yet: the web console (its listener returns 501).
 
-Hotova je souborova vrstva (overeni, rozbaleni skupin, anti-replay, cela
-zapisova pulka vcetne zivotniho cyklu: disable, remove, revoke + nove
-parovani, generace a kontroly principalu), realmy (spravci, platnost QR,
-klice aplikaci, audit, reconcile), REST sluzba (flask/waitress za proxy),
-throttling, a Access.remote (271 testu, bezi bez site). Konzole jeste ne
-(listener vraci 501).
+## License
 
-Navrh REST API je v [docs/design.md](docs/design.md) a plati jako zavazny -
-knihovna se pise podle nej, ne naopak.
-
-## Licence
-
-Apache 2.0, viz [LICENSE](LICENSE).
+Apache 2.0, see [LICENSE](LICENSE).
