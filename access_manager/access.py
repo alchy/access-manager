@@ -11,7 +11,8 @@ to, protoze je to jednodussi.
 from __future__ import annotations
 
 from .files import FileStore
-from .principals import Group, User
+from .principals import Group, User, check_realm
+from .realms import realm_root
 from .verdicts import Verdict
 
 
@@ -24,13 +25,13 @@ class Access:
         self._store = store
 
     @classmethod
-    def local(cls, home) -> Access:
-        """V jednom procese, primo ze souboru.
+    def local(cls, home, *, realm: str) -> Access:
+        """V jednom procesu, primo ze souboru realmu.
 
-        Pro vyvoj na jednom stroji a pro sluzbu samotnou. Obchazi sit - a tim
+        Realm je povinny - zadny vychozi neexistuje. Obchazi sit, a tim
         i vsechno, co se na siti kontroluje.
         """
-        return cls(FileStore(home))
+        return cls(FileStore(realm_root(home, realm), realm=check_realm(realm)))
 
     # -- identita ----------------------------------------------------------
 

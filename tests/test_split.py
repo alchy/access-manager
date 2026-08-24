@@ -9,6 +9,7 @@ Tenhle soubor hlida TVAR. Skutecne vynuceni je na sluzbe, ktera se diva na
 rozsah klice - tady jde o to, aby to nesel nikdo zavolat omylem.
 """
 import pytest
+from helpers import REALM
 
 from access_manager import Access, Admin
 
@@ -29,15 +30,15 @@ ZAPISOVE = [
 
 @pytest.mark.parametrize("jmeno", ZAPISOVE)
 def test_access_cannot_write(tmp_path, jmeno):
-    assert not hasattr(Access.local(tmp_path), jmeno)
+    assert not hasattr(Access.local(tmp_path, realm=REALM), jmeno)
 
 
 @pytest.mark.parametrize("jmeno", ZAPISOVE)
 def test_admin_can_write(tmp_path, jmeno):
-    assert hasattr(Admin.local(tmp_path), jmeno)
+    assert hasattr(Admin.local(tmp_path, realm=REALM), jmeno)
 
 
 def test_admin_does_not_authenticate(tmp_path):
     # Spravcovsky nastroj neni prihlasovaci cesta. Kdyby umel `authenticate`,
     # je pokuseni pouzit spravcovsky klic v aplikaci - a ten smi vsechno.
-    assert not hasattr(Admin.local(tmp_path), "authenticate")
+    assert not hasattr(Admin.local(tmp_path, realm=REALM), "authenticate")

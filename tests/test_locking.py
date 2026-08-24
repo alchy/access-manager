@@ -8,7 +8,7 @@ ztracenym zapisem.
 import threading
 import time
 
-from helpers import kod, zaloz
+from helpers import REALM, kod, koren, zaloz
 
 from access_manager import Access, Admin
 from access_manager.files import _locked
@@ -19,14 +19,14 @@ def test_the_lock_is_exclusive(tmp_path):
     drzim = threading.Event()
 
     def drzitel():
-        with _locked(tmp_path):
+        with _locked(koren(tmp_path)):
             drzim.set()
             time.sleep(0.2)
             poradi.append("drzitel")
 
     def cekatel():
         assert drzim.wait(timeout=5), "timeout: drzitel nikdy nenapsal event"
-        with _locked(tmp_path):
+        with _locked(koren(tmp_path)):
             poradi.append("cekatel")
 
     vlakna = [threading.Thread(target=drzitel), threading.Thread(target=cekatel)]
@@ -40,7 +40,7 @@ def test_the_lock_is_exclusive(tmp_path):
 
 def test_a_burst_of_the_same_code_passes_exactly_once(tmp_path):
     zaloz(tmp_path, "hana")
-    access = Access.local(tmp_path)
+    access = Access.local(tmp_path, realm=REALM)
     stejny = kod()
     zavora = threading.Barrier(8, timeout=5)
     verdikty = []
@@ -61,7 +61,7 @@ def test_a_burst_of_the_same_code_passes_exactly_once(tmp_path):
 
 
 def test_two_writers_do_not_lose_each_others_members(tmp_path):
-    admin = Admin.local(tmp_path)
+    admin = Admin.local(tmp_path, realm=REALM)
     admin.add_group("ucetni")
     admin.add_user("hana")
     admin.add_user("petr")
@@ -80,4 +80,5 @@ def test_two_writers_do_not_lose_each_others_members(tmp_path):
     for v in vlakna:
         v.join(timeout=10)
         assert not v.is_alive(), f"thread {v.name} se neukoncilo"
-    assert Access.local(tmp_path).group("ucetni").members == ("hana", "petr")
+    access = Access.local(tmp_path, realm=REALM)
+    assert access.group("ucetni").members == ("hana", "petr")

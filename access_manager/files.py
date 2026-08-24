@@ -67,8 +67,20 @@ CREDENTIAL_ARTEFACTS = ("totp.secret", "totp.uri", "totp.txt", "used.json")
 class FileStore:
     """Identita a politika ze souboru pod jednim adresarem."""
 
-    def __init__(self, home) -> None:
-        self.home = Path(home).expanduser()
+    def __init__(
+        self,
+        root,
+        *,
+        realm: str | None = None,
+        qr_ttl_days: int = 14,
+        audit_retention_days: int = 90,
+        actor: str = "operator",
+    ) -> None:
+        self.home = Path(root).expanduser()
+        self.realm = realm
+        self.qr_ttl_days = qr_ttl_days
+        self.audit_retention_days = audit_retention_days
+        self.actor = actor
 
     # == cteni =============================================================
 

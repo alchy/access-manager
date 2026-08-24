@@ -10,7 +10,8 @@ omylem.
 from __future__ import annotations
 
 from .files import FileStore
-from .principals import Enrolment
+from .principals import Enrolment, check_realm
+from .realms import realm_root
 
 
 class Admin:
@@ -22,8 +23,10 @@ class Admin:
         self._store = store
 
     @classmethod
-    def local(cls, home) -> Admin:
-        return cls(FileStore(home))
+    def local(cls, home, *, realm: str, actor: str = "operator") -> Admin:
+        return cls(
+            FileStore(realm_root(home, realm), realm=check_realm(realm), actor=actor)
+        )
 
     # -- lide --------------------------------------------------------------
 
