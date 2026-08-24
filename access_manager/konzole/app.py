@@ -17,7 +17,7 @@ from pathlib import Path
 
 from ..config import ServiceConfig
 from ..files import FileStore
-from ..principals import PUBLIC, USERS, check_identity, check_realm
+from ..principals import PUBLIC, USERS, check_identity, check_name, check_realm
 from ..realms import realm_root
 from . import preklady
 
@@ -332,6 +332,122 @@ def create_console_app(cfg: ServiceConfig):
         return flask.render_template(
             "qr.html", jmeno=jmeno, obrazec=obrazec, sparovano=sparovano,
             stitek=stitek,
+        )
+
+    # == skupiny =============================================================
+    #
+    # Na rozdil od `_lide_mutace` bere `_skupiny_mutace` cil presmerovani
+    # VZDY explicitne (`cil=`) - mutace clenu/zretezeni maji po chybe
+    # i po uspechu zustat na detailu prave upravovane skupiny, ne skocit
+    # zpatky na holy vypis (jedina vyjimka je smazani skupiny samotne,
+    # po kterem uz detail nedava smysl).
+
+    def _radek_skupiny(store, nazev: str) -> dict:
+        skupina = store.group(nazev)
+        return {
+            "nazev": nazev,
+            "pocet_clenu": len(skupina.members),
+            "pocet_zahrnuti": len(skupina.includes),
+        }
+
+    def _detail_skupiny(store, nazev: str) -> dict | None:
+        """Detail jedne skupiny: prime cleny, zahrnute skupiny a kdo do ni
+        patri jen pres zretezeni (uzaver principalu minus prime clenstvi -
+        cteni bez zamku, stejne jako `_radek_cloveka`)."""
+        skupina = store.group(nazev)
+        if skupina is None:
+            return None
+        principal = f"group:{nazev}"
+        pres_zretezeni = sorted(
+            jmeno for jmeno in store.users()
+            if jmeno not in skupina.members
+            and principal in store.user(jmeno).principals
+        )
+        return {
+            "nazev": nazev,
+            "clenove": skupina.members,
+            "zahrnute": skupina.includes,
+            "pres_zretezeni": pres_zretezeni,
+            "kandidati_clenove": [
+                j for j in store.users() if j not in skupina.members
+            ],
+            "ostatni_skupiny": [
+                g for g in store.groups()
+                if g != nazev and g not in skupina.includes
+            ],
+        }
+
+    @app.get("/skupiny")
+    @prihlasen
+    def _skupiny_seznam():
+        store = flask.g.store
+        skupiny = [_radek_skupiny(store, nazev) for nazev in store.groups()]
+        detail = None
+        pozadovana = flask.request.args.get("skupina")
+        if pozadovana:
+            try:
+                pozadovana = check_name(pozadovana)
+            except ValueError:
+                pozadovana = None
+            if pozadovana:
+                detail = _detail_skupiny(store, pozadovana)
+        return flask.render_template("skupiny.html", skupiny=skupiny, detail=detail)
+
+    def _skupiny_mutace(akce, *args, cil, presmerovani=None):
+        """Spolecny tvar mutaci skupin: CSRF -> knihovni volani -> flash ->
+        redirect na `cil` (chyba i vychozi uspech) nebo `presmerovani(vysledek)`
+        (uspech, kdyz ma jit jinam)."""
+        over_csrf()
+        try:
+            vysledek = akce(*args)
+        except ValueError as chyba:
+            flask.flash(f"{_prelozit('spolecne.error')}: {chyba}", "chyba")
+            return flask.redirect(cil)
+        flask.flash(_prelozit("spolecne.done"), "ok")
+        return flask.redirect(presmerovani(vysledek) if presmerovani else cil)
+
+    @app.post("/skupiny/pridat")
+    @prihlasen
+    def _skupiny_pridat():
+        nazev = flask.request.form.get("nazev", "")
+        return _skupiny_mutace(
+            flask.g.store.add_group, nazev,
+            cil=flask.url_for("_skupiny_seznam"),
+            presmerovani=lambda _: flask.url_for("_skupiny_seznam", skupina=nazev),
+        )
+
+    @app.post("/skupiny/<nazev>/smazat")
+    @prihlasen
+    def _skupiny_smazat(nazev):
+        return _skupiny_mutace(
+            flask.g.store.remove_group, nazev,
+            cil=flask.url_for("_skupiny_seznam"),
+        )
+
+    @app.post("/skupiny/<nazev>/clen")
+    @prihlasen
+    def _skupiny_clen_pridat(nazev):
+        clen = flask.request.form.get("clen", "")
+        return _skupiny_mutace(
+            flask.g.store.add_member, nazev, clen,
+            cil=flask.url_for("_skupiny_seznam", skupina=nazev),
+        )
+
+    @app.post("/skupiny/<nazev>/clen/<clen>/odebrat")
+    @prihlasen
+    def _skupiny_clen_odebrat(nazev, clen):
+        return _skupiny_mutace(
+            flask.g.store.remove_member, nazev, clen,
+            cil=flask.url_for("_skupiny_seznam", skupina=nazev),
+        )
+
+    @app.post("/skupiny/<nazev>/zretezit")
+    @prihlasen
+    def _skupiny_zretezit(nazev):
+        zahrnuti = flask.request.form.get("zahrnuti", "")
+        return _skupiny_mutace(
+            flask.g.store.include, nazev, zahrnuti,
+            cil=flask.url_for("_skupiny_seznam", skupina=nazev),
         )
 
     return app

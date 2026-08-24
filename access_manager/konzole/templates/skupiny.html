@@ -1,0 +1,114 @@
+{% extends "layout.html" %}
+{% block content %}
+<h1>{{ t('skupiny.title') }}</h1>
+
+<table class="tabulka">
+  <thead>
+    <tr>
+      <th>{{ t('skupiny.title') }}</th>
+      <th>{{ t('skupiny.members') }}</th>
+      <th>{{ t('skupiny.includes') }}</th>
+      <th>{{ t('spolecne.actions') }}</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for radek in skupiny %}
+    <tr>
+      <td class="mono">
+        <a href="{{ url_for('_skupiny_seznam', skupina=radek.nazev) }}">{{ radek.nazev }}</a>
+      </td>
+      <td>{{ radek.pocet_clenu }}</td>
+      <td>{{ radek.pocet_zahrnuti }}</td>
+      <td class="akce">
+        <form method="post" action="{{ url_for('_skupiny_smazat', nazev=radek.nazev) }}">
+          {{ csrf_pole() }}
+          <button type="submit">{{ t('skupiny.remove_group') }}</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="poznamka">{{ t('skupiny.reserved_note') }}</p>
+
+<h2>{{ t('skupiny.add_group') }}</h2>
+<form method="post" action="{{ url_for('_skupiny_pridat') }}" class="pole-radek">
+  {{ csrf_pole() }}
+  <label>
+    <span>{{ t('skupiny.title') }}</span>
+    <input type="text" name="nazev" autocomplete="off" required>
+  </label>
+  <button type="submit" class="odeslat">{{ t('skupiny.add_group') }}</button>
+</form>
+
+{% if detail %}
+<h2 class="mono">{{ detail.nazev }}</h2>
+
+<h3>{{ t('skupiny.members') }}</h3>
+<table class="tabulka">
+  <thead>
+    <tr>
+      <th>{{ t('lide.subject') }}</th>
+      <th>{{ t('spolecne.actions') }}</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for clen in detail.clenove %}
+    <tr>
+      <td class="mono">{{ clen }}</td>
+      <td class="akce">
+        <form method="post" action="{{ url_for('_skupiny_clen_odebrat', nazev=detail.nazev, clen=clen) }}">
+          {{ csrf_pole() }}
+          <button type="submit">{{ t('spolecne.remove') }}</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if detail.kandidati_clenove %}
+<form method="post" action="{{ url_for('_skupiny_clen_pridat', nazev=detail.nazev) }}" class="pole-radek">
+  {{ csrf_pole() }}
+  <label>
+    <span>{{ t('skupiny.add_member') }}</span>
+    <select name="clen" required>
+      {% for kandidat in detail.kandidati_clenove %}
+      <option value="{{ kandidat }}">{{ kandidat }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit" class="odeslat">{{ t('skupiny.add_member') }}</button>
+</form>
+{% endif %}
+
+<h3>{{ t('skupiny.includes') }}</h3>
+<p>
+  {% for zahrnuta in detail.zahrnute %}
+  <span class="chip">{{ zahrnuta }}</span>
+  {% endfor %}
+</p>
+
+{% if detail.ostatni_skupiny %}
+<form method="post" action="{{ url_for('_skupiny_zretezit', nazev=detail.nazev) }}" class="pole-radek">
+  {{ csrf_pole() }}
+  <label>
+    <span>{{ t('skupiny.add_include') }}</span>
+    <select name="zahrnuti" required>
+      {% for kandidat in detail.ostatni_skupiny %}
+      <option value="{{ kandidat }}">{{ kandidat }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit" class="odeslat">{{ t('skupiny.add_include') }}</button>
+</form>
+{% endif %}
+
+<h3>{{ t('skupiny.via_chain') }}</h3>
+<p>
+  {% for jmeno in detail.pres_zretezeni %}
+  <span class="chip">{{ jmeno }}</span>
+  {% endfor %}
+</p>
+{% endif %}
+{% endblock %}

@@ -204,6 +204,34 @@ def test_including_an_unknown_group_is_refused(tmp_path):
 
 
 # ===========================================================================
+# Odstraneni skupiny
+# ===========================================================================
+
+
+def test_a_removed_group_is_gone(tmp_path):
+    admin = Admin.local(tmp_path, realm=REALM)
+    admin.add_group("ucetni")
+    admin.remove_group("ucetni")
+    assert "ucetni" not in Access.local(tmp_path, realm=REALM).groups()
+
+
+def test_removing_an_unknown_group_is_refused(tmp_path):
+    with pytest.raises(ValueError):
+        Admin.local(tmp_path, realm=REALM).remove_group("ucetni")
+
+
+def test_removing_a_group_drops_it_from_other_groups_includes(tmp_path):
+    # Osireny odkaz ve zretezeni by jinak visel na jmeno, ktere uz nikam
+    # nevede.
+    admin = Admin.local(tmp_path, realm=REALM)
+    admin.add_group("mzdy")
+    admin.add_group("ucetni")
+    admin.include("ucetni", "mzdy")
+    admin.remove_group("mzdy")
+    assert Access.local(tmp_path, realm=REALM).group("ucetni").includes == ()
+
+
+# ===========================================================================
 # Chyby pri chybejicich zavislostich
 # ===========================================================================
 

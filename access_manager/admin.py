@@ -69,6 +69,10 @@ class Admin:
         """`parent` obsahuje `child`: kdo je v child, je i v parent."""
         self._store.include(parent, child)
 
+    def remove_group(self, name: str) -> None:
+        """Smaz skupinu vcetne odkazu v cizim zretezeni."""
+        self._store.remove_group(name)
+
     def remove_member(self, group: str, name: str) -> None:
         self._store.remove_member(group, name)
 

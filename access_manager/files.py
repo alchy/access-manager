@@ -664,6 +664,28 @@ class FileStore:
             self._bump_gen()
             self._audit(kind="write", actor=self.actor, op="enable_user", name=name)
 
+    def remove_group(self, name: str) -> None:
+        """Smaz skupinu VCETNE odkazu v cizim zretezeni.
+
+        Prime clenstvi zanikaji spolu se skupinou samotnou; odkaz na ni
+        v cizim `includes` by jinak zustal viset na jmeno, ktere uz nikam
+        nevede - stejna uvaha jako `remove_user` scrubuje jmeno ze seznamu
+        clenu.
+        """
+        name = check_name(name)
+        with _locked(self.home):
+            table = self._table()
+            if name not in table:
+                raise ValueError(f"skupina {name!r} neexistuje")
+            del table[name]
+            for data in table.values():
+                includes = set(data.get("includes", ()))
+                if name in includes:
+                    data["includes"] = sorted(includes - {name})
+            self._write_table(table)
+            self._bump_gen()
+            self._audit(kind="write", actor=self.actor, op="remove_group", name=name)
+
     def remove_member(self, group: str, name: str) -> None:
         group, name = check_name(group), check_identity(name)
         with _locked(self.home):
