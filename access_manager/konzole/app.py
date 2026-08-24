@@ -92,6 +92,20 @@ def create_console_app(cfg: ServiceConfig):
     # HttpOnly je flaskovy vychozi stav - jen SameSite je potreba rict sami.
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
+    def _prelozit(klic: str) -> str:
+        katalog = preklady.nacti(flask.session.get("lang", "cs"))
+        return preklady.prelozit(katalog, klic)
+
+    def over_csrf() -> None:
+        """Kazda mutace nese `csrf` shodny se session, jinak 400 a zadny zapis.
+
+        POST /login je vyjimka: session (a tedy token) jeste neexistuje, takze
+        se overuje az od prvni mutace PO prihlaseni (napr. /logout).
+        """
+        posilany = flask.request.form.get("csrf")
+        if not posilany or posilany != flask.session.get("csrf"):
+            flask.abort(400)
+
     @app.before_request
     def _uloz_jazyk():
         # Prepinac funguje na kterekoli strance, ne jen na /login - staci
@@ -102,8 +116,7 @@ def create_console_app(cfg: ServiceConfig):
 
     @app.context_processor
     def _kontext_prekladu():
-        katalog = preklady.nacti(flask.session.get("lang", "cs"))
-        return {"t": lambda klic: preklady.prelozit(katalog, klic)}
+        return {"t": _prelozit}
 
     def prihlasen(view):
         """Strazce relace: bez platne session presmeruje na `/login`.
@@ -125,23 +138,49 @@ def create_console_app(cfg: ServiceConfig):
 
     @app.get("/login")
     def _prihlasovaci_stranka():
-        # POST /login (overeni dvema kody) prijde v ukolu 3 - tady jen
-        # formular a prepinac jazyka.
         return flask.render_template("login.html")
+
+    @app.post("/login")
+    def _prihlasit():
+        # POST /login je pred existenci session - neni co porovnat s CSRF
+        # tokenem, takze se tady over_csrf() zamerne nevola (viz jeho
+        # docstring). Neznamy realm i spatne kody hlasi TOTOZNOU hlasku -
+        # zadny postranni kanal, ktery by prozradil, ze realm neexistuje.
+        jmeno_realmu = flask.request.form.get("realm", "")
+        jmeno = flask.request.form.get("jmeno", "")
+        kod1 = flask.request.form.get("kod1", "")
+        kod2 = flask.request.form.get("kod2", "")
+
+        if jmeno_realmu not in realmy:
+            return flask.render_template("login.html", chyba=_prelozit("login.failed"))
+
+        store = _store_pro(jmeno_realmu, actor=f"admin:{jmeno}")
+        verdikt = store.authenticate_admin(jmeno, kod1, kod2)
+
+        if verdikt.outcome == "throttled":
+            chyba = _prelozit("login.throttled").format(s=verdikt.retry_after)
+            return flask.render_template("login.html", chyba=chyba)
+        if not verdikt:
+            return flask.render_template("login.html", chyba=_prelozit("login.failed"))
+
+        flask.session["realm"] = jmeno_realmu
+        flask.session["admin"] = jmeno
+        flask.session["lang"] = flask.session.get("lang", "cs")
+        flask.session["csrf"] = secrets.token_hex(16)
+        return flask.redirect(flask.url_for("_uvod"))
 
     @app.post("/logout")
     @prihlasen
     def _odhlasit():
-        # CSRF kontrola pribyde v ukolu 3 spolu se zbytkem mutaci - tady jen
-        # cisty seam, ktery uz respektuje strazce relace.
+        over_csrf()
         flask.session.clear()
         return flask.redirect(flask.url_for("_prihlasovaci_stranka"))
 
     @app.get("/")
     @prihlasen
     def _uvod():
-        # Docasny zastupny cil - ukol 3 z nej udela redirect na /lide, az
-        # bude co zobrazit.
-        return flask.render_template("layout.html")
+        # /lide prijde az v ukolu 4 - url_for by tu selhalo (endpoint jeste
+        # neexistuje), takze cesta je zatim natvrdo.
+        return flask.redirect("/lide")
 
     return app

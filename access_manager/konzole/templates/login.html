@@ -2,6 +2,9 @@
 {% block content %}
 <div class="karta">
   <h1>{{ t('login.title') }}</h1>
+  {% if chyba %}
+  <p class="chyba" role="alert">{{ chyba }}</p>
+  {% endif %}
   <form method="post" action="{{ url_for('_prihlasovaci_stranka') }}" class="pole">
     <label>
       <span>{{ t('login.realm') }}</span>

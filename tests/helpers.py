@@ -39,3 +39,15 @@ def principaly(home, name):
     from access_manager import Access
 
     return Access.local(home, realm=REALM).user(name).principals
+
+
+def admin_kody(home, jmeno="jindrich", offset=0):
+    """Dva sousedni kody spravce pro prihlaseni do konzole."""
+    import time as _time
+
+    import pyotp
+
+    secret = (koren(home) / f"admin-{jmeno}" / "totp.secret").read_text().strip()
+    totp = pyotp.TOTP(secret)
+    ted = _time.time() + offset * totp.interval
+    return totp.at(ted), totp.at(ted + totp.interval)
