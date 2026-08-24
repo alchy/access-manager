@@ -100,10 +100,14 @@ def create_console_app(cfg: ServiceConfig):
         """Kazda mutace nese `csrf` shodny se session, jinak 400 a zadny zapis.
 
         POST /login je vyjimka: session (a tedy token) jeste neexistuje, takze
-        se overuje az od prvni mutace PO prihlaseni (napr. /logout).
+        se overuje az od prvni mutace PO prihlaseni (napr. /logout). Porovnani
+        je casove konstantni (`secrets.compare_digest`) - drive nez se na nej
+        dostane, jsou oba chybejici stavy (nic poslano/nic v session) osetreny
+        rovnou abortem, aby compare_digest vzdycky dostal dva stringy.
         """
         posilany = flask.request.form.get("csrf")
-        if not posilany or posilany != flask.session.get("csrf"):
+        ulozeny = flask.session.get("csrf")
+        if not posilany or not ulozeny or not secrets.compare_digest(posilany, ulozeny):
             flask.abort(400)
 
     @app.before_request
@@ -163,9 +167,14 @@ def create_console_app(cfg: ServiceConfig):
         if not verdikt:
             return flask.render_template("login.html", chyba=_prelozit("login.failed"))
 
+        # Cista relace: zadny stav z doby pred prihlasenim (treba rozdelane
+        # necekane klice) neprezije do prihlasene session - jen jazyk se
+        # vedome prenese.
+        lang = flask.session.get("lang", "cs")
+        flask.session.clear()
         flask.session["realm"] = jmeno_realmu
         flask.session["admin"] = jmeno
-        flask.session["lang"] = flask.session.get("lang", "cs")
+        flask.session["lang"] = lang
         flask.session["csrf"] = secrets.token_hex(16)
         return flask.redirect(flask.url_for("_uvod"))
 

@@ -47,6 +47,9 @@ def test_a_guarded_page_redirects_to_login(prostredi):
 
 
 def test_a_successful_login_sets_the_session_and_redirects(prostredi, tmp_path):
+    with prostredi.session_transaction() as relace:
+        relace["neco_stareho"] = "melo by zmizet"
+
     prvni, druhy = admin_kody(tmp_path / "data")
     odpoved = prostredi.post(
         "/login",
@@ -59,6 +62,8 @@ def test_a_successful_login_sets_the_session_and_redirects(prostredi, tmp_path):
         assert relace["realm"] == REALM
         assert relace["admin"] == "jindrich"
         assert "csrf" in relace
+        # Stav pred prihlasenim relaci nepreziva - session.clear() v _prihlasit.
+        assert "neco_stareho" not in relace
 
     # Ukol 4 teprve dodava /lide - overujeme jen cil presmerovani, ne obsah.
     dalsi = prostredi.get("/")
