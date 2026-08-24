@@ -56,3 +56,11 @@ def test_a_group_shape_matches_the_design():
         "exists": True, "members": ["hana"], "includes": ["group:mzdy"],
     }
     assert group_to_wire("neni", None) == {"exists": False}
+
+
+def test_detail_never_leaks_a_reason_onto_ok_or_bare_denied():
+    # Pojistka poradi vetvi: detail=True nesmi pridat "reason" tam, kam nepatri.
+    ok = Verdict.ok("user:hana", {"user:hana"}, gen=1)
+    assert "reason" not in verdict_to_wire(ok, detail=True)
+    holy = Verdict(outcome="denied", gen=1)
+    assert verdict_to_wire(holy, detail=True) == {"outcome": "denied", "gen": 1}
