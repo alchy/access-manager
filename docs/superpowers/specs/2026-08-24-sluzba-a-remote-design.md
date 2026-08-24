@@ -151,6 +151,12 @@ plochu navíc bez zisku. Pojistku drží klient: `Access.remote` vyžaduje
 `https://` (výjimka jen loopback), takže holé HTTP přes síť nejde zapnout
 omylem.
 
+Uživatelská dokumentace („instalace“, viz plánované `docs/`) MUSÍ obsahovat
+vzorovou konfiguraci nginx (či jiné důvěryhodné proxy): `proxy_pass` na
+`127.0.0.1:22000`, předávání `X-Forwarded-For`, TLS/ACME — a k tomu párový
+záznam `trusted_proxies` ve `service.json`. Bez toho origin ACL měří proxy
+místo klienta a vypadá funkční, i když nerozlišuje nic.
+
 ## 8. Testování (tvrdé pravidlo: bez sítě)
 
 - Služba se testuje přes **WSGI test client** (flask `test_client()`) — celé
