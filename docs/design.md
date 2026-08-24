@@ -417,6 +417,7 @@ admin.pair_missing()                                   -> list[Enrolment]
 admin.add_group(name)
 admin.add_member(group, name)
 admin.include(parent, child)
+admin.remove_group(name)                              # včetně odkazů v zřetězení
 ```
 
 Kdyby zavádění viselo na témž objektu, umí každá apka se svým klíčem založit

@@ -69,6 +69,18 @@ def test_registering_with_a_duplicate_name_flashes_an_error_and_leaves_state_unc
     assert vypis.count(">core<") == 1
 
 
+def test_registering_with_a_bad_cidr_origin_flashes_an_error_and_is_not_registered(
+    prihlaseny_klient,
+):
+    odpoved = _zaregistruj(prihlaseny_klient, "core", origins="not-a-cidr")
+    assert odpoved.status_code == 302
+
+    klient, _ = prihlaseny_klient
+    vypis = klient.get("/aplikace").get_data(as_text=True)
+    assert "zprava-chyba" in vypis
+    assert "core" not in vypis
+
+
 def test_revoking_an_application_removes_it_from_the_listing(prihlaseny_klient):
     _zaregistruj(prihlaseny_klient, "core")
     klient, csrf = prihlaseny_klient
@@ -121,6 +133,26 @@ def test_every_route_without_a_session_redirects_to_login(prostredi, metoda, ces
     odpoved = getattr(prostredi, metoda)(cesta)
     assert odpoved.status_code == 302
     assert odpoved.headers["Location"].endswith("/login")
+
+
+def test_the_key_once_page_has_no_language_switch_link(prihlaseny_klient):
+    odpoved = _zaregistruj(prihlaseny_klient, "core")
+    telo = odpoved.get_data(as_text=True)
+    assert "/lang?to=" not in telo
+
+
+def test_secret_bearing_pages_send_cache_control_no_store(prihlaseny_klient, tmp_path):
+    Admin.local(tmp_path / "data", realm=REALM).add_user("tereza")
+    klient, _ = prihlaseny_klient
+
+    qr = klient.get("/lide/qr/tereza")
+    assert qr.headers.get("Cache-Control") == "no-store"
+
+    klic_odpoved = _zaregistruj(prihlaseny_klient, "core")
+    assert klic_odpoved.headers.get("Cache-Control") == "no-store"
+
+    normalni = klient.get("/lide")
+    assert normalni.headers.get("Cache-Control") != "no-store"
 
 
 def test_the_english_language_switches_table_texts(prihlaseny_klient):

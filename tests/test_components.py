@@ -48,6 +48,12 @@ def test_a_revoked_key_stops_working(tmp_path):
     assert FileStore(koren(tmp_path), realm=REALM).component_for_key(klic) is None
 
 
+def test_an_invalid_cidr_origin_is_refused(tmp_path):
+    with pytest.raises(ValueError, match="not-a-cidr"):
+        admin(tmp_path).register_component("core", origins=("not-a-cidr",))
+    assert admin(tmp_path).components() == []
+
+
 def test_a_duplicate_component_name_is_refused(tmp_path):
     a = admin(tmp_path)
     a.register_component("core")

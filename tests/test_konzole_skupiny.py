@@ -58,6 +58,11 @@ def test_a_missing_or_malformed_group_query_shows_the_listing_without_a_crash(
     klient, _ = prihlaseny_klient
     odpoved = klient.get(f"/skupiny?skupina={skupina}")
     assert odpoved.status_code == 200
+    telo = odpoved.get_data(as_text=True)
+    # Detailova sekce (nazev skupiny, cleny, zretezeni) se vubec
+    # nerenderuje - zustava jen holy vypis.
+    assert "<h3" not in telo
+    assert '<h2 class="mono">' not in telo
 
 
 def test_membership_added_via_the_console_shows_up_in_the_users_closure(

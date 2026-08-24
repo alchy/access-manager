@@ -22,6 +22,7 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import secrets
@@ -598,6 +599,16 @@ class FileStore:
         Klic se VRACI JEDNOU a nikde se neuklada - jen jeho sha256 otisk.
         """
         name = _check_component_name(name)
+        origins = tuple(origins)
+        for origin in origins:
+            # Preklep v CIDR by jinak zapadl tise - origin se ulozi verbatim
+            # a proste nikdy nic nematchne (viz `_origin_allowed`).
+            try:
+                ipaddress.ip_network(origin, strict=False)
+            except ValueError as chyba:
+                raise ValueError(
+                    f"neplatny origin {origin!r}: neni to platna IP adresa ani CIDR"
+                ) from chyba
         with _locked(self.home):
             data = self._components_table()
             if name in data["components"]:
@@ -673,6 +684,14 @@ class FileStore:
         clenu.
         """
         name = check_name(name)
+        if name in RESERVED_GROUPS:
+            # Vyhrazena skupina nikdy neni v tabulce - bez tohohle by nize
+            # padlo zavadejici "neexistuje", jako by sla proste zalozit
+            # znovu.
+            raise ValueError(
+                f"skupina {name!r} je vyhrazena: clenstvi v ni je automaticke "
+                f"a nejde spravovat"
+            )
         with _locked(self.home):
             table = self._table()
             if name not in table:

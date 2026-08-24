@@ -29,6 +29,7 @@ class ServiceConfig:
     defaults: dict
     throttle: dict
     realms: tuple[dict, ...]
+    console_secure_cookie: bool
 
 
 def load_config(conf_dir: Path) -> ServiceConfig:
@@ -76,6 +77,11 @@ def load_config(conf_dir: Path) -> ServiceConfig:
     if "window_s" not in throttle_config:
         throttle_config["window_s"] = 60
 
+    # Vychozi False - Secure cookie bez TLS by prohlizec zahodil rovnou a
+    # konzole by nikdy neprihlasila nikoho; kdo bezi za TLS proxy, zapne to
+    # sam (viz instalace.md).
+    console_secure_cookie = bool(config.get("console_secure_cookie", False))
+
     trusted_proxies_list = config.get("trusted_proxies", [])
     if not isinstance(trusted_proxies_list, list):
         trusted_proxies_list = [trusted_proxies_list]
@@ -106,4 +112,5 @@ def load_config(conf_dir: Path) -> ServiceConfig:
         defaults=defaults_config,
         throttle=throttle_config,
         realms=realms,
+        console_secure_cookie=console_secure_cookie,
     )

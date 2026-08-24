@@ -7,6 +7,11 @@ Fixtura `prostredi` je sdilena v `conftest.py` - vsechny stranky konzole ji
 potrebuji stejnou.
 """
 from helpers import REALM, admin_kody
+from test_config import zapis
+
+from access_manager import Admin
+from access_manager.config import load_config
+from access_manager.konzole.app import create_console_app
 
 
 def test_login_page_renders_in_czech_by_default(prostredi):
@@ -53,6 +58,39 @@ def test_a_successful_login_sets_the_session_and_redirects(prostredi, tmp_path):
     dalsi = prostredi.get("/")
     assert dalsi.status_code == 302
     assert dalsi.headers["Location"].endswith("/lide")
+
+
+def test_login_with_mismatched_case_and_whitespace_stays_logged_in(prostredi, tmp_path):
+    # Kriticky nalez opravneho kola: authenticate_admin normalizuje jmeno
+    # pres check_identity uvnitr sebe, ale bez normalizace TADY by se do
+    # session ulozilo syrove "Jindrich " - strazce (prihlasen) ho porovnava
+    # proti normalizovanym admins() a kazdy DALSI pozadavek by odrazel zpet
+    # na /login, i kdyz samotne prihlaseni prave uspelo.
+    prvni, druhy = admin_kody(tmp_path / "data")
+    odpoved = prostredi.post(
+        "/login",
+        data={"realm": REALM, "jmeno": "Jindrich ", "kod1": prvni, "kod2": druhy},
+    )
+    assert odpoved.status_code == 302
+    assert odpoved.headers["Location"].endswith("/")
+
+    dalsi = prostredi.get("/lide")
+    assert dalsi.status_code == 200
+
+
+def test_login_with_an_uppercase_realm_variant_succeeds(prostredi, tmp_path):
+    prvni, druhy = admin_kody(tmp_path / "data")
+    odpoved = prostredi.post(
+        "/login",
+        data={
+            "realm": REALM.upper(), "jmeno": "jindrich", "kod1": prvni, "kod2": druhy,
+        },
+    )
+    assert odpoved.status_code == 302
+    assert odpoved.headers["Location"].endswith("/")
+
+    dalsi = prostredi.get("/lide")
+    assert dalsi.status_code == 200
 
 
 def test_wrong_codes_show_a_single_failure_message(prostredi):
@@ -105,6 +143,28 @@ def test_logout_logs_out(prostredi, tmp_path):
 
     with prostredi.session_transaction() as relace:
         assert "admin" not in relace
+
+
+def test_console_secure_cookie_config_sets_the_secure_flag(tmp_path):
+    zapis(tmp_path / "conf.d", "service.json", {
+        "data": str(tmp_path / "data"), "console_secure_cookie": True,
+    })
+    zapis(tmp_path / "conf.d" / "realms", f"{REALM}.json",
+          {"name": REALM, "admins": ["jindrich"]})
+    Admin.local(tmp_path / "data", realm=REALM).add_admin("jindrich")
+
+    cfg = load_config(tmp_path / "conf.d")
+    app = create_console_app(cfg)
+    app.config["TESTING"] = True
+    klient = app.test_client()
+
+    prvni, druhy = admin_kody(tmp_path / "data")
+    odpoved = klient.post(
+        "/login",
+        data={"realm": REALM, "jmeno": "jindrich", "kod1": prvni, "kod2": druhy},
+    )
+    cookies = odpoved.headers.get_all("Set-Cookie")
+    assert any("Secure" in c for c in cookies)
 
 
 def test_logout_without_csrf_is_rejected(prostredi, tmp_path):

@@ -49,6 +49,22 @@ def test_a_hand_written_minimal_event_does_not_crash_the_page(
     assert "weird" in odpoved.get_data(as_text=True)
 
 
+def test_a_malformed_line_does_not_crash_the_page_and_valid_events_still_show(
+    prihlaseny_klient, tmp_path,
+):
+    domov = koren(tmp_path / "data")
+    kus = {"t": datetime.now(UTC).isoformat(timespec="seconds"), "kind": "weird2"}
+    append_event(domov, kus, retention_days=90)
+    soubor = next((domov / "audit").glob("*.jsonl"))
+    with soubor.open("a", encoding="utf-8") as f:
+        f.write("this is not json\n")
+
+    klient, _ = prihlaseny_klient
+    odpoved = klient.get("/audit")
+    assert odpoved.status_code == 200
+    assert "weird2" in odpoved.get_data(as_text=True)
+
+
 def test_a_malformed_date_filter_does_not_crash_and_falls_back_to_default(
     prihlaseny_klient,
 ):

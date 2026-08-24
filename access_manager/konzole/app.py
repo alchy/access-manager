@@ -98,6 +98,9 @@ def create_console_app(cfg: ServiceConfig):
     app.secret_key = secrets.token_hex(32)
     # HttpOnly je flaskovy vychozi stav - jen SameSite je potreba rict sami.
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    # Vychozi False (viz config.py) - za TLS terminujici proxy si to
+    # provozovatel zapne (spec §3, konfigurace console_secure_cookie).
+    app.config["SESSION_COOKIE_SECURE"] = cfg.console_secure_cookie
 
     def _prelozit(klic: str) -> str:
         katalog = preklady.nacti(flask.session.get("lang", "cs"))
@@ -159,6 +162,37 @@ def create_console_app(cfg: ServiceConfig):
 
         return obal
 
+    def _bez_ukladani(vysledek):
+        """Obal render_template odpovedi hlavickou `Cache-Control: no-store`.
+
+        Pro stranky, ktere nesou tajemstvi presne jednou (QR kod, klic
+        aplikace) - bez tehle hlavicky by je sdilena mezipamet (proxy,
+        prohlizec pri Zpet/Vpred) mohla ulozit a zobrazit znovu i po tom,
+        co uz je clovek nema videt.
+        """
+        odpoved = flask.make_response(vysledek)
+        odpoved.headers["Cache-Control"] = "no-store"
+        return odpoved
+
+    @app.get("/lang")
+    def _jazyk():
+        """Prepinac jazyka, ktery umi presmerovat ZPET na puvodni stranku.
+
+        Doplnuje starsi mechanismus `?lang=cs|en` (viz `_uloz_jazyk`), ktery
+        na strankach vyrenderovanych primo z POST (klic.html) skonci 405
+        (jina metoda) a na strankach s vlastnim dotazem (filtrovany /audit,
+        /skupiny?skupina=...) dotaz zahodi. `next` se pousti dal JEN kdyz je
+        to relativni cesta zacinajici jednim '/' - '//host/...' by prohlizec
+        vzal jako absolutni URL na cizi host (open redirect).
+        """
+        to = flask.request.args.get("to")
+        if to in ("cs", "en"):
+            flask.session["lang"] = to
+        dalsi = flask.request.args.get("next", "")
+        if dalsi.startswith("/") and not dalsi.startswith("//"):
+            return flask.redirect(dalsi)
+        return flask.redirect("/")
+
     @app.get("/login")
     def _prihlasovaci_stranka():
         return flask.render_template("login.html")
@@ -173,6 +207,20 @@ def create_console_app(cfg: ServiceConfig):
         jmeno = flask.request.form.get("jmeno", "")
         kod1 = flask.request.form.get("kod1", "")
         kod2 = flask.request.form.get("kod2", "")
+
+        # Normalizace DRIV, nez se cokoli porovna nebo ulozi do session:
+        # authenticate_admin normalizuje jmeno pres check_identity uvnitr
+        # sebe, ale strazce (prihlasen) porovnava syrove session["admin"]
+        # proti uz normalizovanym admins() - bez tehle normalizace by
+        # "Jindrich " (velke pismeno, mezera navic) prihlaseni uspelo, ale
+        # KAZDY dalsi pozadavek by strazce odrazel zpatky na /login. Zdeformo-
+        # vane jmeno/realm hlasi STEJNOU hlasku jako spatny kod - zadny
+        # postranni kanal.
+        try:
+            jmeno_realmu = check_realm(jmeno_realmu)
+            jmeno = check_identity(jmeno)
+        except ValueError:
+            return flask.render_template("login.html", chyba=_prelozit("login.failed"))
 
         if jmeno_realmu not in realmy:
             return flask.render_template("login.html", chyba=_prelozit("login.failed"))
@@ -347,10 +395,10 @@ def create_console_app(cfg: ServiceConfig):
         obrazec = cesta.read_text(encoding="utf-8") if cesta.is_file() else None
         sparovano = (adresar / "totp.paired").is_file()
         stitek = f"{store.realm}-member-{jmeno}"
-        return flask.render_template(
+        return _bez_ukladani(flask.render_template(
             "qr.html", jmeno=jmeno, obrazec=obrazec, sparovano=sparovano,
             stitek=stitek, zpet=flask.url_for("_lide_seznam"),
-        )
+        ))
 
     # == skupiny =============================================================
     #
@@ -511,7 +559,9 @@ def create_console_app(cfg: ServiceConfig):
         except ValueError as chyba:
             flask.flash(f"{_prelozit('spolecne.error')}: {chyba}", "chyba")
             return flask.redirect(flask.url_for("_aplikace_seznam"))
-        return flask.render_template("klic.html", jmeno=jmeno, klic=klic)
+        return _bez_ukladani(
+            flask.render_template("klic.html", jmeno=jmeno, klic=klic)
+        )
 
     def _aplikace_mutace(jmeno, akce):
         """Stejny tvar jako `_lide_mutace`/`_skupiny_mutace`, jen bez
@@ -643,10 +693,10 @@ def create_console_app(cfg: ServiceConfig):
         obrazec = cesta.read_text(encoding="utf-8") if cesta.is_file() else None
         sparovano = (adresar / "totp.paired").is_file()
         stitek = f"{store.realm}-admin-{jmeno}"
-        return flask.render_template(
+        return _bez_ukladani(flask.render_template(
             "qr.html", jmeno=jmeno, obrazec=obrazec, sparovano=sparovano,
             stitek=stitek, zpet=flask.url_for("_spravci_seznam"),
-        )
+        ))
 
     # == audit ================================================================
     #

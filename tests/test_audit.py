@@ -80,3 +80,14 @@ def test_every_line_is_valid_json(tmp_path):
     for soubor in (koren(tmp_path) / "audit").glob("*.jsonl"):
         for radek in soubor.read_text(encoding="utf-8").splitlines():
             json.loads(radek)
+
+
+def test_a_malformed_line_is_skipped_and_the_rest_still_reads(tmp_path):
+    Admin.local(tmp_path, realm=REALM).add_group("ucetni")
+    soubor = next((koren(tmp_path) / "audit").glob("*.jsonl"))
+    with soubor.open("a", encoding="utf-8") as f:
+        f.write("this is not json\n")
+
+    udalosti = read_events(koren(tmp_path))
+    assert len(udalosti) == 1               # jen ta platna, poskozeny radek zmizel
+    assert udalosti[0]["op"] == "add_group"

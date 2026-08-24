@@ -305,11 +305,13 @@
       {% block content %}{% endblock %}
     </main>
     <footer class="paticka">
+      {% block prepinac_jazyka %}
       <div class="jazyk">
-        <a href="?lang=cs" class="{{ 'aktivni' if session.get('lang', 'cs') == 'cs' else '' }}">CS</a>
+        <a href="{{ url_for('_jazyk', to='cs', next=request.full_path) }}" class="{{ 'aktivni' if session.get('lang', 'cs') == 'cs' else '' }}">CS</a>
         &middot;
-        <a href="?lang=en" class="{{ 'aktivni' if session.get('lang', 'cs') == 'en' else '' }}">EN</a>
+        <a href="{{ url_for('_jazyk', to='en', next=request.full_path) }}" class="{{ 'aktivni' if session.get('lang', 'cs') == 'en' else '' }}">EN</a>
       </div>
+      {% endblock %}
       {% if prihlaseny %}
       <div class="identita">
         <span>{{ t('spravci.identity') }}: <code>{{ session['admin'] }}</code></span>

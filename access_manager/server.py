@@ -307,9 +307,9 @@ def create_app(cfg: ServiceConfig):
 def main(argv=None):
     """Hlavni vstupni bod sluzby.
 
-    Parsuje argumenty, nacte konfiguraci, spusti reconcile, zalozi Flask
-    aplikaci, spusti konzoli v demonskem vlakne a API primo v hlavnim
-    vlakne.
+    Parsuje argumenty, nacte konfiguraci, spusti reconcile, zalozi obe Flask
+    aplikace (API a konzoli), spusti konzoli v demonskem vlakne a API primo
+    v hlavnim vlakne.
     """
     if argv is None:
         argv = sys.argv[1:]

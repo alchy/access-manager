@@ -64,7 +64,13 @@ def read_events(root, day_from=None, day_to=None, *, subject=None,
         if day_to and den > day_to:
             continue
         for radek in soubor.read_text(encoding="utf-8").splitlines():
-            udalost = json.loads(radek)
+            try:
+                udalost = json.loads(radek)
+            except json.JSONDecodeError:
+                # Poskozeny/rucne pripsany radek nesmi shodit konzoli (jedineho
+                # ctenare) - jeden spatny radek se jen preskoci, zbytek dne
+                # se precte dal.
+                continue
             if subject and udalost.get("subject") != subject:
                 continue
             if outcome and udalost.get("outcome") != outcome:

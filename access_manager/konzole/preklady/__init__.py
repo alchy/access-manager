@@ -6,10 +6,15 @@ samotny - preklep v sablone je videt, ne 500.
 from __future__ import annotations
 
 import json
+from functools import cache
 from importlib import resources
 
 
+@cache
 def nacti(lang: str) -> dict[str, str]:
+    # Cache sdili navraceny slovnik mezi vsemi volajicimi - kdo ho dostane,
+    # smi jen cist, NIKDY nemenit na miste (jinak by zmena unikla vsem
+    # ostatnim strankam i pozadavkum).
     jazyk = lang if lang in ("cs", "en") else "cs"
     zdroj = resources.files("access_manager.konzole.preklady") / f"{jazyk}.json"
     return json.loads(zdroj.read_text(encoding="utf-8"))

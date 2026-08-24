@@ -220,6 +220,15 @@ def test_removing_an_unknown_group_is_refused(tmp_path):
         Admin.local(tmp_path, realm=REALM).remove_group("ucetni")
 
 
+@pytest.mark.parametrize("jmeno", ["users", "public"])
+def test_a_reserved_group_cannot_be_removed_and_the_message_is_honest(tmp_path, jmeno):
+    # Vyhrazene skupiny nikdy nejsou v tabulce, takze bez tohohle guardu by
+    # remove_group hlasilo zavadejici "neexistuje" - clovek by si mohl
+    # myslet, ze si muze skupinu proste zalozit znovu.
+    with pytest.raises(ValueError, match="je vyhrazena"):
+        Admin.local(tmp_path, realm=REALM).remove_group(jmeno)
+
+
 def test_removing_a_group_drops_it_from_other_groups_includes(tmp_path):
     # Osireny odkaz ve zretezeni by jinak visel na jmeno, ktere uz nikam
     # nevede.

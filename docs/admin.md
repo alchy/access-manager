@@ -65,6 +65,7 @@ admin.add_user("hana")            # -> Enrolment; QR: cat .../user-hana/totp.txt
 admin.add_group("ucetni")
 admin.add_member("ucetni", "hana")
 admin.include("ucetni", "mzdy")   # ucetni OBSAHUJE mzdy; cyklus se odmitne
+admin.remove_group("ucetni")      # smaže i odkazy v cizím zřetězení
 
 admin.disable_user("hana")        # docasne; clenstvi i audit zustavaji
 admin.enable_user("hana")

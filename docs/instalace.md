@@ -92,6 +92,10 @@ i když nerozlišuje nic):
 `hops` říká, kolikátý prvek **zprava** v hlavičce je pravda — klient si totiž
 může poslat vlastní `X-Forwarded-For` a proxy svůj údaj připojuje zprava.
 
+Běží-li webová konzole za touto TLS proxy, zapněte `console_secure_cookie`
+(výchozí `false`) — cookie relace pak ponese příznak `Secure` a neopustí
+šifrované spojení.
+
 ## Kontejner
 
 `Dockerfile` je v kořeni repozitáře:

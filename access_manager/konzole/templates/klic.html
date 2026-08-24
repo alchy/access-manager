@@ -1,4 +1,8 @@
 {% extends "layout.html" %}
+{% block title %}{{ t('aplikace.key_once') }}{% endblock %}
+{# Stranka nese klic PRAVE JEDNOU - neni ji kam znovu vyrenderovat, takze
+   tu neni ani prepinac jazyka (prepnuti by klic proste ztratilo). #}
+{% block prepinac_jazyka %}{% endblock %}
 {% block content %}
 <h1>{{ t('aplikace.key_once') }}</h1>
 <p class="poznamka">{{ t('aplikace.key_note') }}</p>
