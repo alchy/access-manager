@@ -331,7 +331,7 @@ def create_console_app(cfg: ServiceConfig):
         stitek = f"{store.realm}-member-{jmeno}"
         return flask.render_template(
             "qr.html", jmeno=jmeno, obrazec=obrazec, sparovano=sparovano,
-            stitek=stitek,
+            stitek=stitek, zpet=flask.url_for("_lide_seznam"),
         )
 
     # == skupiny =============================================================
@@ -511,5 +511,123 @@ def create_console_app(cfg: ServiceConfig):
     @prihlasen
     def _aplikace_odvolat(jmeno):
         return _aplikace_mutace(jmeno, flask.g.store.revoke_component)
+
+    # == spravci ==============================================================
+    #
+    # Zrcadli lide (`_lide_mutace`/`_radek_cloveka`), jen bez "zakazany" -
+    # spravci nemaji disable_admin/enable_admin, takze ten stav pro ne
+    # neexistuje. `qr.html` je SDILENA s lide - `_spravci_qr` je tenka route
+    # nad stejnou sablonou, jen cte z `admin-<jmeno>` a posila jiny stitek
+    # a jiny "zpet" cil.
+
+    def _radek_spravce(store, jmeno: str) -> dict:
+        """Jeden radek vypisu spravcu: stitek pro parovani a stav.
+
+        Tri stavy, v tomto poradi (stejna uvaha jako `_radek_cloveka`, jen bez
+        vetve "zakazany" - ta pro spravce v konzoli neexistuje):
+        - bez povereni: zadne `totp.secret` ani `totp.issued` - typicky po
+          `revoke_admin_credential`, pred novym parovanim.
+        - ceka na parovani: `totp.issued` je, `totp.paired` jeste neni.
+        - sparovano: zbytek (typicky `totp.paired`) - vizualne stejna trida
+          jako "aktivni" u lidi (`stav-active`), text z `spravci.paired`.
+        """
+        adresar = store.home / f"admin-{jmeno}"
+        tajemstvi = adresar / "totp.secret"
+        vydano = adresar / "totp.issued"
+        sparovano = adresar / "totp.paired"
+        if not tajemstvi.is_file() and not vydano.is_file():
+            stav, stav_text = "no_credential", _prelozit("lide.no_credential")
+        elif vydano.is_file() and not sparovano.is_file():
+            try:
+                vydano_ts = int(vydano.read_text(encoding="utf-8").strip())
+            except (ValueError, OSError):
+                # Poskozeny soubor - viz stejna uvaha v FileStore._enrolment_expired.
+                vydano_ts = 0
+            zbyva = max(
+                0, int(store.qr_ttl_days - (time.time() - vydano_ts) // 86400)
+            )
+            stav = "waiting"
+            stav_text = _prelozit("lide.waiting").format(dni=zbyva)
+        else:
+            stav, stav_text = "active", _prelozit("spravci.paired")
+        return {
+            "jmeno": jmeno, "stitek": f"{store.realm}-admin-{jmeno}",
+            "stav": stav, "stav_text": stav_text,
+        }
+
+    @app.get("/spravci")
+    @prihlasen
+    def _spravci_seznam():
+        store = flask.g.store
+        spravci = [_radek_spravce(store, jmeno) for jmeno in store.admins()]
+        return flask.render_template("spravci.html", spravci=spravci)
+
+    def _spravci_mutace(jmeno, akce, presmerovani=None):
+        """Stejny tvar jako `_lide_mutace` - CSRF -> knihovni volani -> flash ->
+        redirect. Guard posledniho spravce (`_require_not_last_admin`) hlasi
+        `ValueError` s presnym textem z knihovny, zobrazenym surove."""
+        over_csrf()
+        try:
+            vysledek = akce(jmeno)
+        except ValueError as chyba:
+            flask.flash(f"{_prelozit('spolecne.error')}: {chyba}", "chyba")
+            return flask.redirect(flask.url_for("_spravci_seznam"))
+        flask.flash(_prelozit("spolecne.done"), "ok")
+        cil = (
+            presmerovani(vysledek) if presmerovani
+            else flask.url_for("_spravci_seznam")
+        )
+        return flask.redirect(cil)
+
+    @app.post("/spravci/pridat")
+    @prihlasen
+    def _spravci_pridat():
+        jmeno = flask.request.form.get("jmeno", "")
+        return _spravci_mutace(
+            jmeno, flask.g.store.add_admin,
+            presmerovani=lambda zavedeni: flask.url_for(
+                "_spravci_qr", jmeno=zavedeni.name
+            ),
+        )
+
+    @app.post("/spravci/<jmeno>/odebrat")
+    @prihlasen
+    def _spravci_odebrat(jmeno):
+        return _spravci_mutace(jmeno, flask.g.store.remove_admin)
+
+    @app.post("/spravci/<jmeno>/odvolat")
+    @prihlasen
+    def _spravci_odvolat(jmeno):
+        return _spravci_mutace(jmeno, flask.g.store.revoke_admin_credential)
+
+    @app.post("/spravci/<jmeno>/parovat")
+    @prihlasen
+    def _spravci_parovat(jmeno):
+        return _spravci_mutace(
+            jmeno, flask.g.store.pair_admin,
+            presmerovani=lambda zavedeni: flask.url_for(
+                "_spravci_qr", jmeno=zavedeni.name
+            ),
+        )
+
+    @app.get("/spravci/qr/<jmeno>")
+    @prihlasen
+    def _spravci_qr(jmeno):
+        # Stejna uvaha jako u `_lide_qr`: jmeno overit DRIV, nez se ceho na
+        # disku dotkne - zdeformovane jmeno je 404, ne 500.
+        try:
+            jmeno = check_identity(jmeno)
+        except ValueError:
+            flask.abort(404)
+        store = flask.g.store
+        adresar = store.home / f"admin-{jmeno}"
+        cesta = adresar / "totp.txt"
+        obrazec = cesta.read_text(encoding="utf-8") if cesta.is_file() else None
+        sparovano = (adresar / "totp.paired").is_file()
+        stitek = f"{store.realm}-admin-{jmeno}"
+        return flask.render_template(
+            "qr.html", jmeno=jmeno, obrazec=obrazec, sparovano=sparovano,
+            stitek=stitek, zpet=flask.url_for("_spravci_seznam"),
+        )
 
     return app

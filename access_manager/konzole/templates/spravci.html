@@ -1,0 +1,48 @@
+{% extends "layout.html" %}
+{% block content %}
+<h1>{{ t('spravci.title') }}</h1>
+
+<table class="tabulka">
+  <thead>
+    <tr>
+      <th>{{ t('spravci.identity') }}</th>
+      <th>{{ t('spravci.status') }}</th>
+      <th>{{ t('spolecne.actions') }}</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for radek in spravci %}
+    <tr>
+      <td class="mono">{{ radek.stitek }}</td>
+      <td><span class="stav stav-{{ radek.stav }}">{{ radek.stav_text }}</span></td>
+      <td class="akce">
+        <a href="{{ url_for('_spravci_qr', jmeno=radek.jmeno) }}">{{ t('lide.show_qr') }}</a>
+        <form method="post" action="{{ url_for('_spravci_parovat', jmeno=radek.jmeno) }}">
+          {{ csrf_pole() }}
+          <button type="submit">{{ t('spravci.pair') }}</button>
+        </form>
+        <form method="post" action="{{ url_for('_spravci_odvolat', jmeno=radek.jmeno) }}">
+          {{ csrf_pole() }}
+          <button type="submit">{{ t('spravci.revoke') }}</button>
+        </form>
+        <form method="post" action="{{ url_for('_spravci_odebrat', jmeno=radek.jmeno) }}">
+          {{ csrf_pole() }}
+          <button type="submit">{{ t('spravci.remove') }}</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="poznamka">{{ t('spravci.last_note') }}</p>
+
+<h2>{{ t('spravci.add') }}</h2>
+<form method="post" action="{{ url_for('_spravci_pridat') }}" class="pole-radek">
+  {{ csrf_pole() }}
+  <label>
+    <span>{{ t('spravci.identity') }}</span>
+    <input type="text" name="jmeno" autocomplete="off" required>
+  </label>
+  <button type="submit" class="odeslat">{{ t('spravci.add') }}</button>
+</form>
+{% endblock %}
