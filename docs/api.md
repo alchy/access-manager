@@ -40,7 +40,8 @@ Kontroly běží v neporušitelném pořadí:
 | `GET /healthz` · `/readyz` · `/v1/version` | provoz (bez klíče); readyz `503` s důvody per realm |
 
 Veřejné API **nemá jediný zapisovací endpoint** — veškerá správa patří
-konzoli (zatím 501) a knihovně na serveru. Neznámá cesta pod `/v1/` je
+webové konzoli (port 22001, viz [admin.md](admin.md)) a knihovně na serveru.
+Neznámá cesta pod `/v1/` je
 `404` (s platným klíčem), chybný tvar požadavku `400 {"error": "bad_request"}`.
 
 ## Čtyři tvary odpovědi na `authenticate`

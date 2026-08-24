@@ -283,11 +283,11 @@
   <aside class="sidebar">
     <div class="realm">{{ session.get('realm', '') }}</div>
     <nav>
-      <a href="/lide">{{ t('nav.people') }}</a>
-      <a href="/skupiny">{{ t('nav.groups') }}</a>
-      <a href="/aplikace">{{ t('nav.apps') }}</a>
-      <a href="/spravci">{{ t('nav.admins') }}</a>
-      <a href="/audit">{{ t('nav.audit') }}</a>
+      <a href="{{ url_for('_lide_seznam') }}">{{ t('nav.people') }}</a>
+      <a href="{{ url_for('_skupiny_seznam') }}">{{ t('nav.groups') }}</a>
+      <a href="{{ url_for('_aplikace_seznam') }}">{{ t('nav.apps') }}</a>
+      <a href="{{ url_for('_spravci_seznam') }}">{{ t('nav.admins') }}</a>
+      <a href="{{ url_for('_audit_seznam') }}">{{ t('nav.audit') }}</a>
     </nav>
   </aside>
   {% endif %}

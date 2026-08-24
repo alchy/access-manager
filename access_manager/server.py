@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import importlib.metadata
-import json
 import sys
 import threading
 from ipaddress import ip_address, ip_network
@@ -22,6 +21,7 @@ from pathlib import Path
 
 from .config import ServiceConfig, load_config
 from .files import FileStore
+from .konzole.app import create_console_app
 from .principals import Component, check_realm
 from .realms import realm_root, reconcile
 from .wire import group_to_wire, user_to_wire, verdict_to_wire
@@ -304,22 +304,6 @@ def create_app(cfg: ServiceConfig):
     return app
 
 
-def console_app(environ, start_response):
-    """Cista WSGI aplikace konzole - zatim vzdy 501.
-
-    Obsah doda subprojekt 4 (konzole).
-    """
-    status = "501 Not Implemented"
-    body = json.dumps({"error": "console_not_implemented"})
-    response_body = body.encode("utf-8")
-    headers = [
-        ("Content-Type", "application/json"),
-        ("Content-Length", str(len(response_body))),
-    ]
-    start_response(status, headers)
-    return [response_body]
-
-
 def main(argv=None):
     """Hlavni vstupni bod sluzby.
 
@@ -353,8 +337,10 @@ def main(argv=None):
     for z in nova:
         print(f"nove zavedeni: {z.directory / 'totp.txt'}")
 
-    # Zaloz aplikaci
+    # Zaloz aplikace - API i konzole se stavi tady, v hlavnim vlakne;
+    # konzole pak jen svou serve() spousti v demonskem vlakne nize.
     app = create_app(cfg)
+    console = create_console_app(cfg)
 
     # Ziskej waitress (lazy import)
     flask, waitress = _require_server()
@@ -372,7 +358,7 @@ def main(argv=None):
 
     # Funkce pro spusteni konzole serveru
     def serve_console():
-        waitress.serve(console_app, host=console_host, port=console_port)
+        waitress.serve(console, host=console_host, port=console_port)
 
     # Konzole je demon - kdyz spadne API (hlavni vlakno), proces skonci
     # cely, nezustane napulku bezici proces bez API. Ctrl+C/SIGTERM ukonci

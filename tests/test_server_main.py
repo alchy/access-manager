@@ -1,49 +1,10 @@
-"""Server entrypoint a konzole 501."""
+"""Server entrypoint: reconcile, konzole i API zalozeni a spusteni."""
 import json
 from unittest.mock import Mock, patch
 
 import pytest
 
-from access_manager.server import console_app, main
-
-
-def test_console_app_returns_501_with_json(tmp_path):
-    """WSGI konzole vzdy vraci 501 a JSON s chybou."""
-    # Primy WSGI vyzyvac - bez Flasku
-    environ = {
-        "REQUEST_METHOD": "GET",
-        "SERVER_NAME": "localhost",
-        "SERVER_PORT": "22001",
-        "wsgi.url_scheme": "http",
-    }
-    response_data = []
-    status = None
-    headers = None
-
-    def start_response(stat, hdrs):
-        nonlocal status, headers
-        status = stat
-        headers = hdrs
-
-    # Zavola aplikaci
-    result = console_app(environ, start_response)
-    if isinstance(result, (list, tuple)):
-        response_data = b"".join(result)
-    else:
-        response_data = b"".join(result)
-
-    # Overeni odpovedi
-    assert status == "501 Not Implemented"
-    body = json.loads(response_data)
-    assert body == {"error": "console_not_implemented"}
-
-
-def test_console_app_no_flask_dependency():
-    """console_app se importuje bez flask."""
-    # Testovani, ze modul lze naimportovat
-    from access_manager import server
-    assert hasattr(server, "console_app")
-    assert callable(server.console_app)
+from access_manager.server import main
 
 
 def test_main_missing_config_closes_start(tmp_path):
@@ -107,7 +68,15 @@ def test_main_reconciles_and_serves(tmp_path):
         def join(self):
             pass
 
-    with patch("access_manager.server._require_server") as mock_require:
+    # Sentinel misto skutecne konzolove Flask aplikace - overuje se, ze
+    # PRAVE tenhle navrat z create_console_app skonci na konzolovem serve.
+    mock_console_app = Mock(name="console_app")
+
+    with patch("access_manager.server._require_server") as mock_require, \
+            patch(
+                "access_manager.server.create_console_app",
+                return_value=mock_console_app,
+            ) as mock_create_console_app:
         # Vrat mock flask a waitress
         mock_flask = Mock()
         mock_app = Mock()
@@ -124,6 +93,12 @@ def test_main_reconciles_and_serves(tmp_path):
             # v hlavnim vlakne, bez vlastniho vlakna.
             assert len(thread_creations) == 1
             assert thread_creations[0]["daemon"] is True
+
+    # create_console_app dostal konfiguraci sluzby (cfg) - overeni na
+    # cfg.data, ktere zna i test (Path stejny jako data_dir).
+    mock_create_console_app.assert_called_once()
+    (predana_cfg,), _ = mock_create_console_app.call_args
+    assert predana_cfg.data == data_dir
 
     # Overeni, ze reconcile probehl - admin adresar ma vzniknout
     assert (data_dir / "realm-example.com" / "admin-jindrich").is_dir()
@@ -144,8 +119,8 @@ def test_main_reconciles_and_serves(tmp_path):
         "API listener app lacks Flask attributes"
     )
 
-    # Console listener musi mit console_app
-    assert console_call["app"] is console_app, "Console listener has wrong app"
+    # Console listener musi mit prave to, co vratil create_console_app(cfg)
+    assert console_call["app"] is mock_console_app, "Console listener has wrong app"
 
 
 def test_main_merges_instance_defaults_into_declarations(tmp_path):

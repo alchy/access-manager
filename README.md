@@ -84,17 +84,18 @@ pip install 'access-manager[server,totp]'
 python -m access_manager.server -c conf.d/
 ```
 
-The REST API listens on port 22000, the management console on 22001 (the
-console ships in the next stage; its listener currently returns 501). TLS
+The REST API listens on port 22000, the management console on 22001. TLS
 is terminated by a reverse proxy in front of the service — the proxy must
 be listed in `trusted_proxies` so the origin ACL measures real client
 addresses. A `Dockerfile` sits at the repository root; in a container,
 bind `listeners.api` to `0.0.0.0:22000` (EXPOSE alone is not enough) and
 adjust the healthcheck if you rebind.
 
-Administration (users, groups, application keys) is done on the server via
-the `Admin` library object for now; pairing QR codes are stored as text so
-`cat totp.txt` over ssh works on headless machines.
+Administration (users, groups, application keys, admins, audit) is done
+through the web console (port 22001) as the primary path; the `Admin`
+library object on the server remains available for operators over ssh.
+Pairing QR codes are stored as text so `cat totp.txt` over ssh works on
+headless machines.
 
 ## Documentation (Czech)
 
@@ -111,9 +112,11 @@ the `Admin` library object for now; pairing QR codes are stored as text so
 Complete: the file storage layer (verification, group expansion,
 anti-replay per purpose, full write half with identity lifecycle), realms
 (admins, QR validity, application keys, per-realm audit, reconcile), the
-REST service (flask/waitress behind a proxy, throttling) and
-`Access.remote` — 275 tests, all running without network or server. Not
-yet: the web console (its listener returns 501).
+REST service (flask/waitress behind a proxy, throttling), `Access.remote`
+and the web console (all five pages — people, groups, applications, admins,
+audit — CZ/EN switch, CSRF on every mutation, sessions die on service
+restart by design) — 359 tests, all running without network or a live
+server (the console is driven through `create_console_app(cfg).test_client()`).
 
 ## License
 

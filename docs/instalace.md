@@ -27,9 +27,9 @@ python -m access_manager.server -c conf.d/
 
 Při startu služba načte konfiguraci, provede **reconcile** deklarovaných realmů
 (doplní jen to, co chybí — nová párovací QR vypíše na stdout jako cesty
-k `totp.txt`) a začne poslouchat: **API na portu 22000**, správcovská konzole
-na 22001 (zatím vrací 501 — dodá ji další etapa). Neautorizované pokusy (401)
-se logují na stderr.
+k `totp.txt`) a začne poslouchat: **API na portu 22000**, správcovská webová
+konzole na portu 22001 (přihlášení a správu realmů popisuje
+[admin.md](admin.md)). Neautorizované pokusy (401) se logují na stderr.
 
 ## Konfigurace (`conf.d/`)
 

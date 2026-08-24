@@ -18,6 +18,26 @@ kdo žádné nemají. Restart ve 3 ráno nikomu nic nevymění.
 Všechna jména se normalizují na **malá písmena**; uživatelé a správci smí mít
 jeden `@`, takže identifikátorem může být e-mailová adresa.
 
+## Webová konzole
+
+**Primární cesta ke správě** je webová konzole na portu **22001**
+(`listeners.console` v konfiguraci, viz [instalace.md](instalace.md)).
+Přihlášení vyžaduje realm, jméno správce a **dva kódy z po sobě jdoucích
+oken** autentikátoru — stejně jako u knihovny níže. Konzole pokrývá všechny
+běžné úkony: lidi (založení, zákaz, smazání, odvolání a nové párování),
+skupiny (členy i zřetězení), aplikace (registrace včetně jednorázového
+zobrazení klíče a odvolání), správce (založení, odebrání, odvolání a
+párování) a auditní stopu. Rozhraní přepíná mezi češtinou a angličtinou
+(CS/EN v patě stránky).
+
+Relace správce žije jen v paměti procesu — **restart služby odhlásí všechny
+správce** (záměr, ne nedopatření: žádné tajemství session se nikam
+neukládá).
+
+Knihovna popsaná níže zůstává k dispozici provozovateli přímo na serveru
+(např. přes ssh) — pro skriptování, automatizaci nebo když konzole zrovna
+není po ruce.
+
 ## Správci realmu
 
 Správce je **oddělená identita** (`admin-<jméno>/`): není uživatel, nemá
@@ -26,14 +46,14 @@ dvě tajemství a dvě položky v autentikátoru se štítky
 `example.com-admin-jindrich` a `example.com-member-jindrich` — odvolání
 jedné se druhé nedotkne.
 
-Vstup správce (do budoucí konzole) vyžaduje **dva kódy z po sobě jdoucích
-oken** autentikátoru: opíšete aktuální kód, počkáte na přetočení a opíšete
-i následující. Jedno odkoukané číslo nestačí.
+Vstup správce (do konzole i přes knihovnu) vyžaduje **dva kódy z po sobě
+jdoucích oken** autentikátoru: opíšete aktuální kód, počkáte na přetočení
+a opíšete i následující. Jedno odkoukané číslo nestačí.
 
 **Pojistka:** posledního správce realmu nejde odebrat ani mu odvolat token —
 realm nesmí zůstat bez správy. Zásah má jen provozovatel na serveru.
 
-Dokud není webová konzole (další etapa), správa běží na serveru knihovnou:
+Tatáž správa přímo na serveru, knihovnou (viz výše — provozovatel přes ssh):
 
 ```python
 from access_manager import Admin
