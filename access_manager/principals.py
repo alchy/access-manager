@@ -115,3 +115,19 @@ class Enrolment:
     @property
     def principal(self) -> str:
         return f"user:{self.name}"
+
+
+@dataclass(frozen=True, slots=True)
+class Component:
+    """Komponenta (aplikace) registrovana v realmu.
+
+    Otisk klice se ulozi, samy klice se neulozuji. Klic se vraci pouze pri
+    registraci a nikde se neuklada - ztracenych klicu se nevzpomin, vydaji se
+    nove. Otisk klice neni tajemstvi a je viditelny i v repr.
+    """
+
+    name: str
+    key_id: str
+    key_hash: str
+    origins: tuple[str, ...] = ()
+    detail: bool = False

@@ -20,9 +20,11 @@ Format navazuje na to, co uz zaklada `python -m viewbase.admin adduser`:
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import hmac
 import json
 import os
+import secrets
 import shutil
 import time
 from contextlib import contextmanager
@@ -33,6 +35,7 @@ from .principals import (
     PUBLIC,
     RESERVED_GROUPS,
     USERS,
+    Component,
     Enrolment,
     Group,
     User,
@@ -44,6 +47,9 @@ from .verdicts import Verdict
 
 #: Kde skupiny bydli. Jeden soubor, protoze zatim staci jeden.
 GROUPS = "groups.json"
+
+#: Kde komponenty (aplikace) bydli. Jeden soubor, protoze zatim staci jeden.
+COMPONENTS = "components.json"
 
 #: Kolik kroku dozadu a dopredu se kod jeste uzna. Hodiny telefonu se rozchazi.
 WINDOW = 1
@@ -132,6 +138,44 @@ class FileStore:
             members=tuple(sorted(data.get("members", ()))),
             includes=tuple(sorted(data.get("includes", ()))),
         )
+
+    def components(self) -> list[Component]:
+        """Vsechny registrovane komponenty v realmu, setridene podle jmena."""
+        data = self._components_table()
+        result = []
+        for name, info in sorted(data.get("components", {}).items()):
+            result.append(
+                Component(
+                    name=name,
+                    key_id=info["key_id"],
+                    key_hash=info["key_hash"],
+                    origins=tuple(info.get("origins", ())),
+                    detail=bool(info.get("detail", False)),
+                )
+            )
+        return result
+
+    def component_for_key(self, key: str) -> Component | None:
+        """Komponenta soucasne se svedenim klice. Konstantni cas pres hmac."""
+        if not key.startswith("am_"):
+            return None
+        try:
+            key_hash = hashlib.sha256(key.encode()).hexdigest()
+        except Exception:
+            return None
+
+        data = self._components_table()
+        for name, info in data.get("components", {}).items():
+            stored_hash = info.get("key_hash", "")
+            if hmac.compare_digest(key_hash, stored_hash):
+                return Component(
+                    name=name,
+                    key_id=info["key_id"],
+                    key_hash=stored_hash,
+                    origins=tuple(info.get("origins", ())),
+                    detail=bool(info.get("detail", False)),
+                )
+        return None
 
     def generation(self) -> int:
         """Cislo generace: zvedne ho kazdy administrativni zapis. Cache plati,
@@ -401,6 +445,45 @@ class FileStore:
             self._write_table(table)
             self._bump_gen()
 
+    # == zapis: komponenty ================================================
+
+    def register_component(self, name: str, origins=(), detail=False) -> str:
+        """Registrace aplikace = udeleni pristupu k verejnemu API realmu.
+
+        Klic se VRACI JEDNOU a nikde se neuklada - jen jeho sha256 otisk.
+        """
+        name = _check_component_name(name)
+        with _locked(self.home):
+            data = self._components_table()
+            if name in data["components"]:
+                raise ValueError(
+                    f"komponenta {name!r} uz existuje; klic se nevzpomina, "
+                    f"odvolej a registruj znovu"
+                )
+            key_id = f"k{data['next_key_id']}"
+            data["next_key_id"] += 1
+            klic = f"am_{key_id}_{secrets.token_hex(32)}"
+            data["components"][name] = {
+                "key_id": key_id,
+                "key_hash": hashlib.sha256(klic.encode()).hexdigest(),
+                "origins": sorted(origins),
+                "detail": bool(detail),
+            }
+            _replace(self.home / COMPONENTS, json.dumps(data, indent=2, sort_keys=True))
+            self._bump_gen()
+        return klic
+
+    def revoke_component(self, name: str) -> None:
+        """Odvolani komponenty. Nasledne registrace ma novy klic."""
+        name = _check_component_name(name)
+        with _locked(self.home):
+            data = self._components_table()
+            if name not in data["components"]:
+                raise ValueError(f"komponenta {name!r} neexistuje")
+            del data["components"][name]
+            _replace(self.home / COMPONENTS, json.dumps(data, indent=2, sort_keys=True))
+            self._bump_gen()
+
     # == zapis: zivotni cyklus =============================================
 
     def disable_user(self, name: str) -> None:
@@ -645,6 +728,13 @@ class FileStore:
         self.home.mkdir(parents=True, mode=DIR_MODE, exist_ok=True)
         _replace(self.home / GROUPS, json.dumps(table, indent=2, sort_keys=True))
 
+    def _components_table(self) -> dict:
+        """Tabulka komponent: next_key_id a components."""
+        path = self.home / COMPONENTS
+        if not path.is_file():
+            return {"next_key_id": 1, "components": {}}
+        return json.loads(path.read_text(encoding="utf-8"))
+
     def _groups_of(self, name: str) -> set[str]:
         """Tranzitivni uzaver smerem NAHORU: kdo je v mzdach, je i v ucetni.
 
@@ -804,3 +894,28 @@ def _code_at_step(secret: str, step: int, code) -> bool:
     pyotp = _require_totp()
     totp = pyotp.TOTP(secret)
     return hmac.compare_digest(totp.at(step * totp.interval), str(code))
+
+
+def _check_component_name(name: str) -> str:
+    """Jmeno komponenty: nepruhledne, bez bileho mista a rizicich znaku.
+
+    Neni to cesta - jen opaque jmeno. Musi byt neprazdne, bez bileho mista
+    a bez rizicich znaku.
+    """
+    text = str(name).strip()
+    if not text:
+        raise ValueError("jmeno komponenty nesmi byt prazdne")
+    if text != name.strip():
+        # Vnitrni bile znaky
+        if any(c.isspace() for c in text):
+            raise ValueError(
+                f"neplatne jmeno komponenty {name!r}: nesmuje obsahovat bile znaky"
+            )
+    # Kontrola na bile znaky a rizici znaky
+    for c in text:
+        if c.isspace() or ord(c) < 32:
+            raise ValueError(
+                f"neplatne jmeno komponenty {name!r}: nesmuje obsahovat bile znaky "
+                f"nebo rizici znaky"
+            )
+    return text

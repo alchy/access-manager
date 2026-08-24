@@ -29,6 +29,8 @@ ZAPISOVE = [
     "remove_admin",
     "revoke_admin_credential",
     "pair_admin",
+    "register_component",
+    "revoke_component",
 ]
 
 
@@ -70,3 +72,12 @@ def test_access_does_not_have_admin_methods(tmp_path):
     ]
     for metoda in admin_methods:
         assert not hasattr(access, metoda)
+
+
+def test_access_does_not_have_component_methods(tmp_path):
+    access = Access.local(tmp_path, realm=REALM)
+    # component_for_key je pro sluzbu - ne pro aplikaci
+    assert not hasattr(access, "component_for_key")
+    assert not hasattr(access, "register_component")
+    assert not hasattr(access, "revoke_component")
+    assert not hasattr(access, "components")

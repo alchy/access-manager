@@ -10,7 +10,7 @@ omylem.
 from __future__ import annotations
 
 from .files import FileStore
-from .principals import Enrolment, check_realm
+from .principals import Component, Enrolment, check_realm
 from .realms import realm_root
 
 
@@ -93,3 +93,20 @@ class Admin:
     def pair_admin(self, name: str) -> Enrolment:
         """Nove parovani spravce. Existujici tajemstvi neprepise."""
         return self._store.pair_admin(name)
+
+    # -- komponenty --------------------------------------------------------
+
+    def register_component(self, name: str, origins=(), detail=False) -> str:
+        """Registrace aplikace = udeleni pristupu k verejnemu API realmu.
+
+        Klic se vraci JEDNOU a nikde se neuklada - jen jeho sha256 otisk.
+        """
+        return self._store.register_component(name, origins=origins, detail=detail)
+
+    def components(self) -> list[Component]:
+        """Vsechny registrovane komponenty v realmu, setridene podle jmena."""
+        return self._store.components()
+
+    def revoke_component(self, name: str) -> None:
+        """Odvolani komponenty. Nasledne registrace ma novy klic."""
+        self._store.revoke_component(name)
