@@ -160,6 +160,41 @@ def test_a_newly_added_admin_can_complete_the_full_login_round(
     ).is_file()
 
 
+def test_removing_an_admin_kills_their_live_session(prihlaseny_klient, tmp_path):
+    # Kriticky nalez opravneho kola 1: strazce relace (`prihlasen`) drive
+    # overoval jen "je v session neco" + "existuje realm", nikdy "existuje
+    # ten spravce jeste?" - odebrany spravce si tak drzel plnou pravomoc
+    # az do odhlaseni/restartu.
+    odpoved = _pridej(prihlaseny_klient, "marie")
+    assert odpoved.status_code == 302
+
+    prvni, druhy = admin_kody(tmp_path / "data", jmeno="marie")
+    klient, csrf = prihlaseny_klient
+    marie_klient = klient.application.test_client()
+    prihlaseni = marie_klient.post(
+        "/login",
+        data={"realm": REALM, "jmeno": "marie", "kod1": prvni, "kod2": druhy},
+    )
+    assert prihlaseni.status_code == 302
+
+    # marie ma otevrenou relaci a funguje - overeno pred odebranim.
+    assert marie_klient.get("/spravci").status_code == 200
+
+    odebrani = klient.post("/spravci/marie/odebrat", data={"csrf": csrf})
+    assert odebrani.status_code == 302
+
+    dalsi_pozadavek = marie_klient.get("/spravci")
+    assert dalsi_pozadavek.status_code == 302
+    assert dalsi_pozadavek.headers["Location"].endswith("/login")
+
+    with marie_klient.session_transaction() as relace:
+        assert "admin" not in relace
+
+    # Prezijici spravce (jindrich) neni zasahem dotcen - jeho relace
+    # funguje dal.
+    assert klient.get("/spravci").status_code == 200
+
+
 def test_every_mutating_route_without_csrf_is_rejected_and_state_unchanged(
     prihlaseny_klient, tmp_path,
 ):

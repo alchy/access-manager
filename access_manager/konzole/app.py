@@ -136,7 +136,19 @@ def create_console_app(cfg: ServiceConfig):
             admin = flask.session.get("admin")
             if not admin or jmeno_realmu not in realmy:
                 return flask.redirect(flask.url_for("_prihlasovaci_stranka"))
-            flask.g.store = _store_pro(jmeno_realmu, actor=f"admin:{admin}")
+            store = _store_pro(jmeno_realmu, actor=f"admin:{admin}")
+            if admin not in store.admins():
+                # Spravce mezitim nekdo odebral (remove_admin) - bez tohohle
+                # by jeho jiz otevrena relace zustala plne funkcni az do
+                # odhlaseni/restartu. POZOR: jen NEEXISTENCE konci relaci -
+                # pouhe odvolani tokenu (revoke_admin_credential) session
+                # NEKONCI (zamerne, viz ruling opravneho kola) - odvolani
+                # konci BUDOUCI prihlaseni, ne roli; zabiti session by
+                # rozbilo tok odvolej-vlastni-token -> zobraz novy QR ->
+                # znovu sparuj.
+                flask.session.clear()
+                return flask.redirect(flask.url_for("_prihlasovaci_stranka"))
+            flask.g.store = store
             return view(*args, **kwargs)
 
         return obal
