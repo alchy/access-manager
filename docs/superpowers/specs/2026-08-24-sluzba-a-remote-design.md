@@ -132,6 +132,25 @@ access = Access.remote(url, key=klic, *, realm=None, ca=None,
   volume na `data`, `HEALTHCHECK /healthz`, běží pod neprivilegovaným
   uživatelem. TLS terminuje proxy před ním.
 
+### Nasazení a TLS
+
+Služba mluví holým HTTP; certifikáty drží reverse proxy provozovatele. Dva
+zdravé vzory:
+
+1. **Jeden stroj:** API bind `127.0.0.1:22000`, nginx/caddy na 443
+   s certifikáty proxuje dovnitř — nešifrovaný provoz neopustí stroj.
+2. **Kontejner/K8s:** API bind `0.0.0.0:22000` v síti podu, TLS terminuje
+   ingress; holé HTTP jen uvnitř clusterové sítě.
+
+Proxy MUSÍ být v `trusted_proxies`, jinak se `X-Forwarded-For` ignoruje
+a origin ACL měří adresu proxy místo klienta (§2b design.md). Konzole je
+default jen na smyčce — vystavení správy je vědomý úkon provozovatele.
+Proč TLS není ve službě: životní cyklus certifikátů (ACME, obnova, reload)
+je vyřešený v proxy vrstvě; duplikovat ho znamená bezpečnostně kritickou
+plochu navíc bez zisku. Pojistku drží klient: `Access.remote` vyžaduje
+`https://` (výjimka jen loopback), takže holé HTTP přes síť nejde zapnout
+omylem.
+
 ## 8. Testování (tvrdé pravidlo: bez sítě)
 
 - Služba se testuje přes **WSGI test client** (flask `test_client()`) — celé
