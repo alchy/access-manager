@@ -11,7 +11,7 @@ OUTCOMES = frozenset({"ok", "denied", "need_factor", "throttled"})
 #: Podrobny duvod odmitnuti - patri do AUDITU a duveryhodnym volajicim.
 #: Ve viewBase2 se tri ruzne priciny hlasily stejnou hlaskou a stalo to
 #: hodinu hledani (chyba 3.6); ta hodina se hledala v logu, takze rozdil
-#: musi byt tam. `expired` jmenuje navrh par. 3.1; zatim ho nic nevyrabi.
+#: musi byt tam. `expired` vyrabi TTL nesparovaneho zavedeni (QR platnost).
 REASONS = frozenset({
     "bad_code",
     "replay",

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .files import FileStore
+from .files import ADMIN_PREFIX, FileStore
 from .principals import Enrolment, check_identity, check_realm
 
 #: Prefix adresare realmu. `realm-example.com/` je koren, na ktery se stavi
@@ -45,7 +45,7 @@ def reconcile(home, declarations) -> list[Enrolment]:
         )
         for jmeno in deklarace.get("admins", ()):
             jmeno = check_identity(jmeno)
-            adresar = store.home / f"admin-{jmeno}"
+            adresar = store.home / f"{ADMIN_PREFIX}{jmeno}"
             if not adresar.is_dir():
                 nova.append(store.add_admin(jmeno))
             elif not (adresar / "totp.secret").is_file():

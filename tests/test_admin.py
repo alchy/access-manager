@@ -35,7 +35,7 @@ def test_a_new_user_gets_a_pairing_secret(tmp_path):
 
 
 def test_a_new_user_gets_a_pairing_qr_as_text(tmp_path):
-    # Na hlave bez obrazovky se QR ctě `cat`em.
+    # Na hlave bez obrazovky se QR cte `cat`em.
     Admin.local(tmp_path, realm=REALM).add_user("jindrich")
     qr = (koren(tmp_path) / "user-jindrich" / "totp.txt").read_text(encoding="utf-8")
     assert qr.count("\n") > 10          # je to obrazec, ne radka

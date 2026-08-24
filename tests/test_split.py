@@ -46,7 +46,7 @@ def test_admin_can_write(tmp_path, jmeno):
 
 def test_admin_does_not_authenticate(tmp_path):
     # Spravcovsky nastroj neni prihlasovaci cesta. Kdyby umel `authenticate`,
-    # je pokuseni pouzit spravcovsky klic v aplikaci - a ten smi vsechko.
+    # je pokuseni pouzit spravcovsky klic v aplikaci - a ten smi vsechno.
     assert not hasattr(Admin.local(tmp_path, realm=REALM), "authenticate")
 
 

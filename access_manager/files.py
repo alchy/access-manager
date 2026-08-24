@@ -399,7 +399,7 @@ class FileStore:
         return enrolment
 
     def pair_missing(self) -> list[Enrolment]:
-        """Doplň parovaci kod tem, kdo zadny nemaji. Ostatnich se nedotykej.
+        """Doplni parovaci kod tem, kdo zadny nemaji. Ostatnich se nedotykej.
 
         Sluzba restartovana ve 3 rano nesmi vymenit tajemstvi lidem, kteri uz
         je maji - autentikator by dal vydaval kody, ktere uz nikam nepatri.
@@ -627,8 +627,9 @@ class FileStore:
     def revoke_credential(self, name: str, mechanism: str = "totp") -> None:
         """Odvolani povereni - reseni ztraceneho telefonu.
 
-        Maze i `used.json`: cisla spotrebovanych kroku patri ke staremu
-        tajemstvi a s novym by tyz krok byl falesny replay.
+        Maze celou sadu CREDENTIAL_ARTEFACTS: totp.secret, totp.uri, totp.txt,
+        totp.issued, totp.paired i used.json. Cisla spotrebovanych kroku patri
+        ke staremu tajemstvi a s novym by tyz krok byl falesny replay.
         """
         if mechanism != "totp":
             raise ValueError(
@@ -747,9 +748,9 @@ class FileStore:
     def _replace_expired_admin_enrolment(self, name: str) -> None:
         """Vymena expirovaneho nesparovaneho tajemstvi spravce bez guardu.
 
-        Pouziva se pri sjednoceni z deklarace: tajemstvi nikdo nikdy neuzil,
+        Pouziva se pri sjednoceni z deklarace: tajemstvi nikdo nikdy nepouzil,
         vymena ho nikoho nezamyka a bez vymeny by se realm zasekl. Guard
-        posledniho spravce se na tuto cestu NESMUSI vztahovat.
+        posledniho spravce se na tuto cestu nesmi vztahovat.
         """
         name = check_identity(name)
         with _locked(self.home):
@@ -816,8 +817,8 @@ class FileStore:
 
             nejstarsi = max(steps) - (2 * WINDOW + 1)
             used = {
-                klic: [s for s in staved if s > nejstarsi]
-                for klic, staved in used.items()
+                klic: [s for s in ponechane if s > nejstarsi]
+                for klic, ponechane in used.items()
             }
 
             jiz_pouzite = used.get(purpose, ())
@@ -825,7 +826,7 @@ class FileStore:
                 return False
 
             used.setdefault(purpose, []).extend(steps)
-            used = {klic: staved for klic, staved in used.items() if staved}
+            used = {klic: ponechane for klic, ponechane in used.items() if ponechane}
             _replace(path, json.dumps(used))
             return True
 

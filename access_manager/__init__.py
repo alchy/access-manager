@@ -12,8 +12,17 @@ na drate by se jednou rozesly a byla by to ticha chyba v pravech, ne pad.
 """
 from .access import Access
 from .admin import Admin
-from .principals import Enrolment, Group, User
+from .principals import Component, Enrolment, Group, User
 from .realms import reconcile
 from .verdicts import Verdict
 
-__all__ = ["Access", "Admin", "Enrolment", "Group", "User", "Verdict", "reconcile"]
+__all__ = [
+    "Access",
+    "Admin",
+    "Component",
+    "Enrolment",
+    "Group",
+    "User",
+    "Verdict",
+    "reconcile",
+]

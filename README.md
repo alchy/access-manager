@@ -19,19 +19,14 @@ Ma vlastni proces a vlastni REST API, protoze ho pouziva **jak jadro, tak
 aplikace** - nemuze tedy bydlet uvnitr ani jednoho. Muze bezet v jinem
 kontejneru nez oba.
 
-## Pouziti z aplikace
+## Pouziti
 
 Aplikace, ktera jen prihlasuje lidi, potrebuje tohle a nic vic:
 
 ```python
-import os
 from access_manager import Access
 
-access = Access.remote(
-    os.environ["ACCESS_MANAGER_URL"],
-    key=os.environ["ACCESS_MANAGER_KEY"],
-    component="mojeapka",
-)
+access = Access.local("~/.access-manager", realm="example.com")
 
 verdikt = access.authenticate("jindrich", {"totp": kod}, purpose="login")
 
@@ -51,6 +46,18 @@ Dve veci, ktere je treba vedet predem:
    Drzet cloveka prihlaseneho je prace volajiciho.
 2. **`group:users` a `group:public` jsou vyhrazene.** Znamenaji "kdokoli
    overeny" a "kdokoli"; clovek je dostane tak jako tak a nejdou mu odebrat.
+3. **Realm je povinny.** Kazdy uzivatel a kazda skupina zije jen v ramci sveho
+   realmu; clovek z jednoho se nikdy nesetkv s druhym.
+
+## Realmy
+
+Realm je subadresar a jmenny prostor. Instance je vzdy per-realm: vsichni
+uzivatele jedne instance pamatuje stejny realm. Vznik deklaraci (kdo patri
+kam) se resi externlnlm systemem, access-manager jen splni `reconcile`, tj.
+doplni z uloziste jen to, co chybi. Spravci jsou oddelene identity se stitkem
+`<realm>-<role>-<jmeno>` a maji dvoukodovy vstup do budouci provozovatelske
+konzole. Klice aplikaci se vydavaji jednou, na serveru si drzi jen otisk.
+Audit je per-realm.
 
 ## Instalace
 
@@ -69,7 +76,7 @@ Zakladani a clenstvi jsou na samostatnem objektu, se samostatnym klicem:
 ```python
 from access_manager import Admin
 
-admin = Admin.local("~/.access-manager")
+admin = Admin.local("~/.access-manager", realm="example.com")
 
 admin.add_user("jindrich")            # + tajemstvi, URI a QR JAKO TEXT
 admin.pair_missing()                  # doplni jen tem, kdo parovaci kod nemaji
@@ -91,10 +98,9 @@ hlave bez obrazovky k nicemu.
 
 Rozpracovane. Hotova je souborova vrstva - overeni, rozbaleni skupin,
 anti-replay a cela zapisova pulka vcetne zivotniho cyklu (disable, remove,
-revoke + nove parovani), generace a kontroly principalu (116 testu, bezi bez
-site i bez serveru). Klient `Access.remote` a sama sluzba jeste ne, takze
-priklad vys s `Access.remote` zatim popisuje cil, ne skutecnost; `Access.local`
-funguje.
+revoke + nove parovani), generace a kontroly principalu (187 testu, bezi bez
+site i bez serveru). Scope: realmy (spravci, platnost QR, klice aplikaci, audit
+a reconcile); sluzba a Access.remote jeste ne.
 
 Navrh REST API je v [docs/design.md](docs/design.md) a plati jako zavazny -
 knihovna se pise podle nej, ne naopak.
