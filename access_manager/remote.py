@@ -10,10 +10,16 @@ jit naimportovat bez extras (`pip install 'access-manager[remote]'`).
 from __future__ import annotations
 
 import time
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
+
+from .principals import Group, User
+from .verdicts import Verdict
 
 #: Kam smi jit http:// bez TLS - jen misto, kam nikdo cizi nedosahne.
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+#: Jak dlouho plati zapamatovany `user()`, kdyz se generace realmu nehnula.
+_USER_CACHE_TTL_S = 5.0
 
 
 def _require_remote():
@@ -43,9 +49,11 @@ def _check_scheme(url: str) -> None:
 class RemoteStore:
     """Klient sluzby - stejna role jako `FileStore`, jina strana site.
 
-    Ukol 8 doplni datove metody (users/groups/authenticate). Tady je jadro:
     TLS, spojeni s klicem, overeni verze a totoznosti sluzby pri startu,
-    a retry pro `_request`.
+    retry pro `_request` a datove metody (users/groups/authenticate) nad
+    tymz dratem jako `wire.py` na serverove strane. `authenticate` se
+    NIKDY necachuje; `user()` ma kratkou cache platnou, dokud se nezmeni
+    znama generace realmu (viz `_observe_gen`).
     """
 
     def __init__(
@@ -63,6 +71,12 @@ class RemoteStore:
         httpx = _require_remote()
         self._httpx = httpx
         self._deadline = deadline
+
+        # Cache `user()`: jmeno -> (User|None, znama generace pri ulozeni,
+        # monotonicky cas ulozeni). `_known_gen` je nejvyssi generace, kterou
+        # kdy nesla nejaka odpoved (authenticate/generation) - viz _observe_gen.
+        self._known_gen: int | None = None
+        self._user_cache: dict[str, tuple] = {}
 
         client_kwargs = {}
         if ca is not None:
@@ -126,3 +140,139 @@ class RemoteStore:
                     duvod if isinstance(duvod, BaseException) else None
                 )
             time.sleep(cekani)
+
+    # == cache podle generace ==============================================
+
+    def _observe_gen(self, gen: int | None) -> None:
+        """Zaznamenej generaci z odpovedi, ktera ji nese (authenticate,
+        generation). Kdyz je vyssi nez znama, cely `user()` cache zahodime -
+        je to jednodussi a bezpecnejsi nez cistit po jednotlivych jmenech."""
+        if gen is None:
+            return
+        if self._known_gen is None or gen > self._known_gen:
+            self._known_gen = gen
+            self._user_cache.clear()
+
+    # == identita ===========================================================
+
+    def authenticate(
+        self,
+        username: str,
+        credentials,
+        *,
+        purpose: str,
+        component: str | None = None,
+    ) -> Verdict:
+        """Odpoved na "jsi to ty?" - vzdy z dratu, NIKDY z cache.
+
+        `component` se ignoruje: na strane sluzby ho urcuje klic samotny
+        (kazda komponenta ma svuj), parametr tu zustava jen kvuli stejnemu
+        podpisu jako `Access.authenticate`/`FileStore.authenticate`.
+        400 od sluzby je chyba VOLAJICIHO (spatny tvar ucelu/pole), ne
+        verdikt - takova odpoved se hlasi jako `RuntimeError`.
+        """
+        odpoved = self._request(
+            "POST", "/v1/authenticate",
+            json={
+                "username": username, "credentials": credentials, "purpose": purpose,
+            },
+        )
+        if odpoved.status_code == 400:
+            raise RuntimeError(
+                "authenticate: sluzba odmitla pozadavek jako spatny "
+                "(chyba volajiciho - spatny tvar ucelu nebo chybejici pole)"
+            )
+        data = odpoved.json()
+        gen = data.get("gen")
+        self._observe_gen(gen)
+        return Verdict(
+            outcome=data["outcome"],
+            reason=data.get("reason"),
+            subject_id=data.get("subject_id"),
+            principals=frozenset(data.get("principals", ())),
+            required=tuple(data.get("required", ())),
+            gen=gen,
+            retry_after=data.get("retry_after"),
+        )
+
+    def user(self, name: str) -> User | None:
+        """Clovek s plochym uzaverem principalu. Kratce cachovano - viz
+        `_USER_CACHE_TTL_S` a `_observe_gen`."""
+        zaznam = self._user_cache.get(name)
+        if zaznam is not None:
+            hodnota, gen, ulozeno = zaznam
+            stari = time.monotonic() - ulozeno
+            if gen == self._known_gen and stari < _USER_CACHE_TTL_S:
+                return hodnota
+
+        odpoved = self._request("GET", f"/v1/users/{quote(name, safe='')}")
+        if odpoved.status_code == 400:
+            raise ValueError(f"neplatne jmeno {name!r}")
+        data = odpoved.json()
+        if not data.get("exists"):
+            hodnota = None
+        else:
+            hodnota = User(
+                name=name,
+                subject_id=data["subject_id"],
+                enabled=data["enabled"],
+                principals=frozenset(data.get("principals", ())),
+            )
+        self._user_cache[name] = (hodnota, self._known_gen, time.monotonic())
+        return hodnota
+
+    def users(self) -> list[str]:
+        return self._request("GET", "/v1/users").json()["users"]
+
+    def groups(self) -> list[str]:
+        return self._request("GET", "/v1/groups").json()["groups"]
+
+    def group(self, name: str) -> Group | None:
+        """Skupina TAK, JAK JE NAPSANA - `includes` bez prefixu `group:`,
+        zrcadleni `group_to_wire`, ktery ho na drat prida."""
+        odpoved = self._request("GET", f"/v1/groups/{quote(name, safe='')}")
+        if odpoved.status_code == 400:
+            raise ValueError(f"neplatne jmeno skupiny {name!r}")
+        data = odpoved.json()
+        if not data.get("exists"):
+            return None
+        return Group(
+            name=name,
+            members=tuple(data.get("members", ())),
+            includes=tuple(
+                zaznam[len("group:"):] if zaznam.startswith("group:") else zaznam
+                for zaznam in data.get("includes", ())
+            ),
+        )
+
+    def unknown_principals(self, names) -> list[str]:
+        """Ktere z principalu NEEXISTUJI - hromadne, kvuli startu instance."""
+        odpoved = self._request(
+            "POST", "/v1/principals/check", json={"principals": list(names)},
+        )
+        return odpoved.json()["unknown"]
+
+    def generation(self) -> int:
+        """Cislo generace realmu - i tahle odpoved cisti `user()` cache,
+        kdyz je vyssi nez znama (viz `_observe_gen`)."""
+        gen = self._request("GET", "/v1/generation").json()["gen"]
+        self._observe_gen(gen)
+        return gen
+
+    def ready(self) -> str | None:
+        """`None` znamena pripraveno; jinak strucny popis proc ne.
+
+        Nejde pres `_request`: 503 je tu OCEKAVANY tvar odpovedi (sluzba
+        rika "jeste ne"), ne vypadek site k opakovani. Hlavicka s klicem se
+        posila i tady - `/readyz` ji nevyzaduje, ale poslat ji nevadi.
+        """
+        odpoved = self._client.get("/readyz")
+        if odpoved.status_code == 200:
+            return None
+        telo = odpoved.json()
+        reasons = telo.get("reasons") or {}
+        if reasons:
+            return "; ".join(
+                f"{jmeno}: {duvod}" for jmeno, duvod in sorted(reasons.items())
+            )
+        return str(telo.get("status", odpoved.status_code))
