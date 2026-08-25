@@ -7,16 +7,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
 <title>{% block title %}{{ t('login.title') if not session.get('admin') else t('nav.users') }}{% endblock %}</title>
 <style>
   /* Tokeny sdilene celou konzoli - viz Global Constraints v ukolech. */
   :root {
-    --sidebar: #14352A;
-    --sidebar-text: #E7EFE9;
-    --paper: #F6F7F5;
-    --accent: #166B52;
-    --text: #20241F;
-    --hranice: rgba(20, 36, 31, 0.14);
+    /* Podzimni paleta Autumn Partials. Akcent je ZAMERNE tmavsi nez oranzova
+       z loga (#B35C21): ta ma na svetlem papiru kontrast jen 4,37:1 a jako
+       barva textu by propadla. #9C4D1A ma 5,60:1. */
+    --sidebar: #2E1B0C;
+    --sidebar-text: #E4D6B8;
+    --paper: #F7F4EE;
+    --accent: #9C4D1A;
+    --text: #241A11;
+    --hranice: rgba(36, 26, 17, 0.14);
     --chyba: #B3261E;
     --info: #1F5DAD;
     --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
@@ -46,6 +50,14 @@
     padding: 1.5rem 1.1rem;
     gap: 1.5rem;
   }
+  .sidebar .znacka {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.95rem;
+    letter-spacing: 0.01em;
+  }
+  .sidebar .znacka img { height: 34px; width: auto; display: block; }
   .sidebar .realm {
     font-family: var(--mono);
     font-size: 0.82rem;
@@ -113,9 +125,23 @@
     padding: 2.25rem;
     width: 100%;
     max-width: 360px;
-    box-shadow: 0 1px 2px rgba(20, 36, 31, 0.06);
+    box-shadow: 0 1px 2px rgba(36, 26, 17, 0.06);
   }
-  .karta h1 { margin: 0 0 1.35rem; font-size: 1.25rem; }
+  .karta-znacka {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.55rem;
+    margin-bottom: 1.6rem;
+  }
+  .karta-znacka img { height: 76px; width: auto; display: block; }
+  .karta-znacka span {
+    font-size: 0.8rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    opacity: 0.6;
+  }
+  .karta h1 { margin: 0 0 1.35rem; font-size: 1.25rem; text-align: center; }
   .chyba {
     margin: 0 0 1.1rem;
     padding: 0.6rem 0.75rem;
@@ -251,7 +277,7 @@
     letter-spacing: 0.03em;
     color: var(--text);
     opacity: 0.65;
-    background: rgba(20, 36, 31, 0.03);
+    background: rgba(36, 26, 17, 0.03);
   }
   .tabulka tbody tr:last-child td { border-bottom: none; }
 
@@ -263,9 +289,9 @@
     font-size: 0.8rem;
     font-weight: 600;
   }
-  .stav-active { background: rgba(22, 107, 82, 0.12); color: var(--accent); }
+  .stav-active { background: rgba(156, 77, 26, 0.12); color: var(--accent); }
   .stav-disabled { background: rgba(179, 38, 30, 0.1); color: var(--chyba); }
-  .stav-waiting { background: rgba(20, 36, 31, 0.08); color: var(--text); }
+  .stav-waiting { background: rgba(36, 26, 17, 0.08); color: var(--text); }
   .stav-no_credential { background: rgba(179, 38, 30, 0.06); color: var(--chyba); }
 
   /* -- vysledek udalosti (audit): ok zelene, denied cervene, zapis modre - */
@@ -276,10 +302,10 @@
     font-size: 0.8rem;
     font-weight: 600;
   }
-  .vysledek-ok { background: rgba(22, 107, 82, 0.12); color: var(--accent); }
+  .vysledek-ok { background: rgba(156, 77, 26, 0.12); color: var(--accent); }
   .vysledek-denied { background: rgba(179, 38, 30, 0.1); color: var(--chyba); }
   .vysledek-write { background: rgba(31, 93, 173, 0.12); color: var(--info); }
-  .vysledek-jiny { background: rgba(20, 36, 31, 0.08); color: var(--text); }
+  .vysledek-jiny { background: rgba(36, 26, 17, 0.08); color: var(--text); }
 
   /* -- skupinove chipy ---------------------------------------------------- */
   .chip {
@@ -340,6 +366,10 @@
 <body class="{{ 'app' if prihlaseny else 'anon' }}">
   {% if prihlaseny %}
   <aside class="sidebar">
+    <div class="znacka">
+      <img src="{{ url_for('static', filename='mark.png') }}" alt="">
+      <span>Autumn Partials</span>
+    </div>
     <div class="realm">{{ session.get('realm', '') }}</div>
     <nav>
       <a href="{{ url_for('_uzivatele_seznam') }}">{{ t('nav.users') }}</a>
