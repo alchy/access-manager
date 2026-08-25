@@ -356,9 +356,22 @@ def main(argv=None):
     api_port = int(api_port_str)
     console_port = int(console_port_str)
 
-    # Funkce pro spusteni konzole serveru
+    # waitress ve vychozim stavu (clear_untrusted_proxy_headers=True,
+    # trusted_proxy=None) hlavicky X-Forwarded-* ZAHAZUJE, nez se dostanou
+    # do WSGI environ. Bez tohoto prepinace by _resolve_origin nikdy hlavicku
+    # nevidel, spadl na peer a origin ACL i audit by u KAZDEHO pozadavku za
+    # proxy merily adresu proxy - presne ta tichá porucha, pred kterou varuje
+    # docs/instalace.md. Rozhodnuti o duveryhodnosti si delame sami v
+    # _resolve_origin (zna CIDR i hops); waitress ma jen prestat mazat.
+    # trusted_proxy zamerne NEnastavujeme - jinak by waitress prepsal
+    # REMOTE_ADDR a _resolve_origin by prisel o skutecneho peera.
     def serve_console():
-        waitress.serve(console, host=console_host, port=console_port)
+        waitress.serve(
+            console,
+            host=console_host,
+            port=console_port,
+            clear_untrusted_proxy_headers=False,
+        )
 
     # Konzole je demon - kdyz spadne API (hlavni vlakno), proces skonci
     # cely, nezustane napulku bezici proces bez API. Ctrl+C/SIGTERM ukonci
@@ -367,7 +380,13 @@ def main(argv=None):
     konzole_vlakno.start()
 
     # API bezi primo v hlavnim vlakne - zadne druhe vlakno, zadny join.
-    waitress.serve(app, host=api_host, port=api_port)
+    # clear_untrusted_proxy_headers=False: viz komentar u serve_console vyse.
+    waitress.serve(
+        app,
+        host=api_host,
+        port=api_port,
+        clear_untrusted_proxy_headers=False,
+    )
 
 
 if __name__ == "__main__":

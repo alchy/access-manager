@@ -234,3 +234,59 @@ def test_main_prints_new_enrolments(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "nove zavedeni:" in captured.out
     assert "totp.txt" in captured.out
+
+
+def test_serve_keeps_forwarded_headers(tmp_path):
+    """Oba servery dostanou clear_untrusted_proxy_headers=False.
+
+    waitress ve vychozim stavu hlavicky X-Forwarded-* zahazuje driv, nez se
+    dostanou do WSGI environ. Bez tohoto prepinace by _resolve_origin nikdy
+    hlavicku nevidel, spadl zpatky na peer, a origin ACL i audit by za proxy
+    merily adresu proxy misto klienta - tise, bez jedine chyby.
+    """
+    conf_dir = tmp_path / "conf.d"
+    conf_dir.mkdir()
+    data_dir = tmp_path / "data"
+    (conf_dir / "service.json").write_text(
+        json.dumps({
+            "data": str(data_dir),
+            "listeners": {"api": "127.0.0.1:22000", "console": "127.0.0.1:22001"},
+            "trusted_proxies": ["127.0.0.1"],
+        }),
+        encoding="utf-8",
+    )
+
+    serve_calls = []
+
+    def mock_serve(app_or_callable, host=None, port=None, **kwargs):
+        serve_calls.append({"port": port, "kwargs": kwargs})
+
+    class MockThread:
+        def __init__(self, target=None, **kwargs):
+            self.target = target
+            self.daemon = kwargs.get("daemon", False)
+
+        def start(self):
+            if self.target:
+                self.target()
+
+        def join(self):
+            pass
+
+    with patch("access_manager.server._require_server") as mock_require:
+        mock_waitress = Mock()
+        mock_waitress.serve = mock_serve
+        mock_require.return_value = (Mock(), mock_waitress)
+        with patch("access_manager.server.threading.Thread", MockThread):
+            main(["-c", str(conf_dir)])
+
+    assert len(serve_calls) == 2, "ceka se API i konzole"
+    for volani in serve_calls:
+        assert volani["kwargs"].get("clear_untrusted_proxy_headers") is False, (
+            f"listener na portu {volani['port']} zahazuje X-Forwarded-*"
+        )
+
+    # trusted_proxy se ZAMERNE nenastavuje - waitress by prepsal REMOTE_ADDR
+    # a _resolve_origin by prisel o skutecneho peera, podle ktereho rozhoduje.
+    for volani in serve_calls:
+        assert "trusted_proxy" not in volani["kwargs"]
