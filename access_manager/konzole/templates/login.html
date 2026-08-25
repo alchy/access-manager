@@ -37,9 +37,14 @@
     </label>
     {{ kodova_policka('kod1', t('login.code_first')) }}
     {{ kodova_policka('kod2', t('login.code_second')) }}
-    <p class="poznamka">{{ t('login.codes_hint') }}</p>
     <button type="submit" class="odeslat">{{ t('login.submit') }}</button>
   </form>
+  {%- if klient_ip %}
+  <p class="pristup">
+    {{ t('login.access_from').format(ip=klient_ip) }}
+    {%- if klient_prohlizec %} &middot; {{ klient_prohlizec }}{% endif %}
+  </p>
+  {%- endif %}
 </div>
 <script src="{{ url_for('static', filename='code.js') }}" defer></script>
 {% endblock %}

@@ -143,6 +143,10 @@
     margin: 0;
     padding: 0;
     border: none;
+    /* Prohlizec dava fieldsetu min-inline-size: min-content. Bez tohohle
+       se jako flex polozka nikdy nezuzi pod sirku obsahu a rada policek
+       vyleze z karty ven. */
+    min-width: 0;
   }
   .code-fieldset legend {
     padding: 0;
@@ -152,28 +156,36 @@
   .code-group {
     display: flex;
     gap: 0.4rem;
+    max-width: 100%;
   }
-  .code-box {
+  /* POZOR na selektor: `input[type="text"]` vyse ma specificitu (0,1,1),
+     takze pouha trida (0,1,0) by ho neprebila a policko by si nechalo
+     puvodni padding i zaobleni. `input.code-box` je (0,2,1) - vyhrava. */
+  input.code-box {
+    /* flex-basis 0 + min-width 0: policka se deli o dostupnou sirku rovnym
+       dilem a smi se zmensit. Bez min-width: 0 drzi input svou vychozi
+       sirku (`size`) a rada pretece. */
     flex: 1 1 0;
     min-width: 0;
-    aspect-ratio: 1 / 1;
     max-width: 3rem;
+    aspect-ratio: 1 / 1;
     padding: 0;
     font-size: 1.15rem;
+    line-height: 1;
     text-align: center;
     border: 1px solid var(--hranice);
     border-radius: 10px;
     background: #fff;
     color: var(--text);
   }
-  .code-box:focus {
+  input.code-box:focus {
     outline: 2px solid var(--accent);
     outline-offset: 1px;
     border-color: var(--accent);
   }
   /* Sipky u number-like poli jen zabiraji misto. */
-  .code-box::-webkit-outer-spin-button,
-  .code-box::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  input.code-box::-webkit-outer-spin-button,
+  input.code-box::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
   .odeslat {
     background: var(--accent);
@@ -184,6 +196,15 @@
     font-weight: 600;
   }
   .odeslat:hover { filter: brightness(1.06); }
+  /* -- odkud a cim se clovek diva (pod prihlasovacim formularem) --------- */
+  .pristup {
+    margin: 1.1rem 0 0;
+    font-size: 0.78rem;
+    opacity: 0.6;
+    text-align: center;
+    font-family: var(--mono);
+    word-break: break-all;
+  }
   .visually-hidden {
     position: absolute;
     width: 1px;

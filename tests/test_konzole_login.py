@@ -210,3 +210,44 @@ def test_login_page_renders_one_box_per_digit(prostredi):
             assert f'name="{pole}_{i}"' in telo, f"chybi policko {pole}_{i}"
     # Skript je jen pohodli navic - policka musi fungovat i bez nej.
     assert "code.js" in telo
+
+
+def test_browser_engine_detection_prefers_the_specific_marker():
+    """Edge i Opera nesou v UA taky "Chrome", Chrome zase "Safari".
+
+    Poradi zkousenych znacek proto neni libovolne - obecnejsi znacka smi
+    prijit az po specificke, jinak se Edge oznaci za Chrome.
+    """
+    from access_manager.konzole.app import _prohlizec
+
+    edge = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0")
+    chrome = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    safari = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+              "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15")
+    firefox = "Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0"
+
+    assert _prohlizec(edge) == "Edge (Blink)"
+    assert _prohlizec(chrome) == "Chrome (Blink)"
+    assert _prohlizec(safari) == "Safari (WebKit)"
+    assert _prohlizec(firefox) == "Firefox (Gecko)"
+    # Nezname UA se nehada - radeji nic nez vymysl.
+    assert _prohlizec("neco-uplne-jineho/1.0") == ""
+    assert _prohlizec("") == ""
+
+
+def test_login_page_shows_the_address_the_service_actually_measures(prostredi):
+    """Pod formularem je adresa z resolve_origin, ne holy remote_addr.
+
+    Kdyz se tam objevi adresa proxy misto klienta, je spatne nastavene
+    trusted_proxies/hops - a je to videt hned pri prihlaseni.
+    """
+    telo = prostredi.get(
+        "/login",
+        environ_overrides={"REMOTE_ADDR": "198.51.100.7"},
+        headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:121.0) "
+                               "Gecko/20100101 Firefox/121.0"},
+    ).get_data(as_text=True)
+    assert "198.51.100.7" in telo
+    assert "Firefox (Gecko)" in telo

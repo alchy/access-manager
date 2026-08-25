@@ -22,6 +22,7 @@ from pathlib import Path
 from .config import ServiceConfig, load_config
 from .files import FileStore
 from .konzole.app import create_console_app
+from .origin import resolve_origin
 from .principals import Component, check_realm
 from .realms import realm_root, reconcile
 from .wire import group_to_wire, user_to_wire, verdict_to_wire
@@ -43,40 +44,6 @@ def _require_server():
     return flask, waitress
 
 
-def _is_trusted_proxy(peer: str, trusted_proxies) -> bool:
-    """Je `peer` mezi duveryhodnymi proxy? Prijima adresu i CIDR."""
-    try:
-        adresa = ip_address(peer)
-    except ValueError:
-        return False
-    for polozka in trusted_proxies:
-        try:
-            sit = ip_network(polozka, strict=False)
-        except ValueError:
-            continue
-        if adresa in sit:
-            return True
-    return False
-
-
-def _resolve_origin(environ: dict, cfg: ServiceConfig) -> str:
-    """Puvod pozadavku: peer socketu, nebo hlavicka od duveryhodne proxy.
-
-    Cizi peer se nikdy neveri - hlavicka se cte JEN, kdyz je peer sam
-    v `trusted_proxies`. Bere se `hops`-ty prvek ZPRAVA; chybejici nebo
-    zdeformovana hlavicka spadne zpatky na peer.
-    """
-    peer = environ.get("REMOTE_ADDR", "")
-    if not _is_trusted_proxy(peer, cfg.trusted_proxies):
-        return peer
-    header_klic = "HTTP_" + cfg.forwarded_header.upper().replace("-", "_")
-    surovy = environ.get(header_klic)
-    if not surovy:
-        return peer
-    prvky = [p.strip() for p in surovy.split(",") if p.strip()]
-    if not (1 <= cfg.hops <= len(prvky)):
-        return peer
-    return prvky[-cfg.hops]
 
 
 def _origin_allowed(component: Component, origin: str) -> bool:
@@ -170,7 +137,7 @@ def create_app(cfg: ServiceConfig):
         if flask.request.path in _OPERATIONAL_PATHS:
             return None
 
-        origin = _resolve_origin(flask.request.environ, cfg)
+        origin = resolve_origin(flask.request.environ, cfg)
         key = _bearer_key(flask.request.headers.get("Authorization", ""))
         realm = component = None
         if key is not None:
@@ -358,13 +325,13 @@ def main(argv=None):
 
     # waitress ve vychozim stavu (clear_untrusted_proxy_headers=True,
     # trusted_proxy=None) hlavicky X-Forwarded-* ZAHAZUJE, nez se dostanou
-    # do WSGI environ. Bez tohoto prepinace by _resolve_origin nikdy hlavicku
+    # do WSGI environ. Bez tohoto prepinace by resolve_origin nikdy hlavicku
     # nevidel, spadl na peer a origin ACL i audit by u KAZDEHO pozadavku za
     # proxy merily adresu proxy - presne ta tichá porucha, pred kterou varuje
     # docs/instalace.md. Rozhodnuti o duveryhodnosti si delame sami v
-    # _resolve_origin (zna CIDR i hops); waitress ma jen prestat mazat.
+    # resolve_origin (zna CIDR i hops); waitress ma jen prestat mazat.
     # trusted_proxy zamerne NEnastavujeme - jinak by waitress prepsal
-    # REMOTE_ADDR a _resolve_origin by prisel o skutecneho peera.
+    # REMOTE_ADDR a resolve_origin by prisel o skutecneho peera.
     def serve_console():
         waitress.serve(
             console,

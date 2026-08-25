@@ -19,6 +19,7 @@ from pathlib import Path
 from ..audit import read_events
 from ..config import ServiceConfig
 from ..files import FileStore
+from ..origin import resolve_origin
 from ..principals import PUBLIC, USERS, check_identity, check_name, check_realm
 from ..realms import realm_root
 from . import preklady
@@ -61,6 +62,33 @@ def _kod_z_formulare(form, pole: str) -> str:
     return "".join(
         form.get(f"{pole}_{i}", "").strip() for i in range(1, DELKA_KODU + 1)
     )
+
+
+#: Jadra prohlizecu v poradi, v jakem se musi zkouset. Poradi neni libovolne:
+#: Edge i Opera nesou v UA retezci taky "Chrome", Chrome zase "Safari" - kdo
+#: hleda obecnejsi znacku driv, oznaci Edge za Chrome a Safari za cokoli.
+_JADRA = (
+    ("Firefox/", "Firefox (Gecko)"),
+    ("Edg/", "Edge (Blink)"),
+    ("OPR/", "Opera (Blink)"),
+    ("Chrome/", "Chrome (Blink)"),
+    ("Safari/", "Safari (WebKit)"),
+    ("curl/", "curl"),
+    ("Wget/", "Wget"),
+)
+
+
+def _prohlizec(ua: str) -> str:
+    """Jadro prohlizece z hlavicky User-Agent, nebo prazdno.
+
+    Nechceme presnou identifikaci - UA retezec je notoricky lzivy a nic se
+    podle nej nerozhoduje. Je to jen informace pro cloveka u obrazovky:
+    "prihlasuju se odsud a timhle". Nezname UA se radeji nehada.
+    """
+    for znacka, nazev in _JADRA:
+        if znacka in ua:
+            return nazev
+    return ""
 
 
 def _realm_store_kwargs(cfg: ServiceConfig) -> dict[str, dict]:
@@ -213,9 +241,24 @@ def create_console_app(cfg: ServiceConfig):
             return flask.redirect(dalsi)
         return flask.redirect("/")
 
+    def _kontext_pristupu() -> dict:
+        """Odkud a cim se clovek diva - vypisuje se pod prihlasovacim formularem.
+
+        Adresa je TA SAMA, kterou meri origin ACL a audit (resolve_origin),
+        ne holy remote_addr. Kdyz se tady objevi adresa proxy misto klienta,
+        je spatne nastavene trusted_proxies/hops - a je to videt hned, ne az
+        z auditu za tri mesice.
+        """
+        return {
+            "klient_ip": resolve_origin(flask.request.environ, cfg),
+            "klient_prohlizec": _prohlizec(
+                flask.request.headers.get("User-Agent", "")
+            ),
+        }
+
     @app.get("/login")
     def _prihlasovaci_stranka():
-        return flask.render_template("login.html")
+        return flask.render_template("login.html", **_kontext_pristupu())
 
     @app.post("/login")
     def _prihlasit():
@@ -240,19 +283,27 @@ def create_console_app(cfg: ServiceConfig):
             jmeno_realmu = check_realm(jmeno_realmu)
             jmeno = check_identity(jmeno)
         except ValueError:
-            return flask.render_template("login.html", chyba=_prelozit("login.failed"))
+            return flask.render_template(
+                "login.html", chyba=_prelozit("login.failed"), **_kontext_pristupu()
+            )
 
         if jmeno_realmu not in realmy:
-            return flask.render_template("login.html", chyba=_prelozit("login.failed"))
+            return flask.render_template(
+                "login.html", chyba=_prelozit("login.failed"), **_kontext_pristupu()
+            )
 
         store = _store_pro(jmeno_realmu, actor=f"admin:{jmeno}")
         verdikt = store.authenticate_admin(jmeno, kod1, kod2)
 
         if verdikt.outcome == "throttled":
             chyba = _prelozit("login.throttled").format(s=verdikt.retry_after)
-            return flask.render_template("login.html", chyba=chyba)
+            return flask.render_template(
+                "login.html", chyba=chyba, **_kontext_pristupu()
+            )
         if not verdikt:
-            return flask.render_template("login.html", chyba=_prelozit("login.failed"))
+            return flask.render_template(
+                "login.html", chyba=_prelozit("login.failed"), **_kontext_pristupu()
+            )
 
         # Cista relace: zadny stav z doby pred prihlasenim (treba rozdelane
         # necekane klice) neprezije do prihlasene session - jen jazyk se
