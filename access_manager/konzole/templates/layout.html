@@ -77,12 +77,35 @@
   .content { flex: 1; padding: 2rem; }
 
   /* -- anonymni pristup: obsah (karta) vystredeny, bez sidebaru --------- */
+  /* Prihlasovaci obrazovka je TMAVA. Bila karta na kremovem papiru mela
+     kontrast 1,10:1 - neoddelovala se od pozadi a cela obrazovka pusobila
+     jako jedna vymydlena plocha. Na hnede karta plave a je videt, ze je to
+     samostatna karta. Prihlaseny provoz zustava svetly, tam je hustota dat prednejsi. */
+  body.anon {
+    background: var(--sidebar);
+    color: var(--sidebar-text);
+  }
   body.anon .content {
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 2rem 1rem;
   }
+  body.anon .karta {
+    /* Karta zustava svetla, takze si MUSI vratit tmavy text. Bez toho by
+       po body.anon zdedila kremovou a obsah karty by na bile zmizel. */
+    color: var(--text);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
+    border-color: rgba(36, 26, 17, 0.10);
+  }
+  /* Uvnitr karty potrebuji pole vic muziky nez v hustem seznamu za prihlasenim */
+  .karta input[type="text"] { border-color: rgba(36, 26, 17, 0.28); }
+  body.anon .paticka {
+    justify-content: center;
+    border-top-color: rgba(228, 214, 184, 0.18);
+  }
+  body.anon .jazyk a { color: rgba(228, 214, 184, 0.72); }
+  body.anon .jazyk a.aktivni { color: var(--sidebar-text); }
 
   /* -- pata: prepinac jazyka, identita, odhlaseni ----------------------- */
   .paticka {
@@ -94,7 +117,6 @@
     border-top: 1px solid var(--hranice);
     font-size: 0.85rem;
   }
-  body.anon .paticka { justify-content: center; }
   .jazyk a { text-decoration: none; padding: 0.15rem 0.35rem; }
   .jazyk a.aktivni { color: var(--text); font-weight: 600; text-decoration: underline; }
   .identita { display: flex; align-items: center; gap: 0.75rem; }
