@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.metadata
+import signal
 import sys
 import threading
 from ipaddress import ip_address, ip_network
@@ -90,6 +91,96 @@ def _component_for_key(stores: dict, key: str, cache: dict):
             cache[key] = (realm, komponenta, store.generation())
             return realm, komponenta
     return None, None
+
+
+class _Prepinac:
+    """WSGI volatelny objekt, ktery deleguje na prave platnou aplikaci.
+
+    Listener drzi TOHLE, ne aplikaci samotnou - vymena za behu tedy nesahne
+    na sokety. Rozdelane pozadavky dobehnou na stare aplikaci, nove uz jdou
+    na novou. Prirazeni atributu je v CPythonu atomicke, zamek netreba.
+    """
+
+    def __init__(self, app):
+        self._app = app
+
+    def __call__(self, environ, start_response):
+        return self._app(environ, start_response)
+
+    def aktualni(self):
+        return self._app
+
+    def vymen(self, app) -> None:
+        self._app = app
+
+
+def _prenacti(conf_dir: Path, api: _Prepinac, konzole: _Prepinac) -> None:
+    """Znovu nacte konfiguraci, dojede reconcile a vymeni obe aplikace.
+
+    Nove aplikace se stavi PRED vymenou - kdyz je konfigurace rozbita,
+    vyjimka spadne driv, nez se cehokoli dotkne, a bezi dal ta stara.
+    To je cely smysl reloadu: spatny conf.d nesmi shodit bezici sluzbu.
+    """
+    cfg = load_config(conf_dir)
+
+    # Listenery se za behu prevazat nedaji - sokety uz jsou navazane. Radeji
+    # to rekneme nahlas, nez aby se operator divil, proc zmena nic nedela.
+    stare_listenery = getattr(_prenacti, "_listenery", None)
+    if stare_listenery is not None and cfg.listeners != stare_listenery:
+        print(
+            "SIGHUP: zmena listeners se za behu neuplatni, chce to restart "
+            f"(bezi na {stare_listenery})",
+            file=sys.stderr,
+        )
+    else:
+        _prenacti._listenery = dict(cfg.listeners)
+
+    deklarace = [{**cfg.defaults, **d} for d in cfg.realms]
+    for z in reconcile(cfg.data, deklarace):
+        print(f"nove zavedeni: {z.directory / 'totp.txt'}", file=sys.stderr)
+
+    novy_api = create_app(cfg)
+    nova_konzole = create_console_app(cfg)
+
+    # Relace konzole prezije RELOAD, ale ne RESTART - a je to zamer.
+    # create_console_app si generuje novy secret_key, takze bez tohohle
+    # radku by prenacteni konfigurace odhlasilo vsechny spravce a reload
+    # by pro ne nebyl k rozeznani od restartu. Kdo chce ciste smetene
+    # relace, ma restart - ten tuhle vlastnost drzi dal.
+    nova_konzole.secret_key = konzole.aktualni().secret_key
+
+    api.vymen(novy_api)
+    konzole.vymen(nova_konzole)
+
+
+def _zapoj_sighup(prenacti) -> None:
+    """SIGHUP -> prenacteni konfigurace.
+
+    Prace bezi PRIMO v handleru, ne ve vlakne. Pythonovsky handler neni
+    C handler: bezi v hlavnim vlakne mezi instrukcemi, s GIL, takze smi
+    delat I/O i stavet aplikace. Hlavni vlakno je u waitress jen accept
+    smycka (pozadavky obsluhuji workeri), takze se na par desitek
+    milisekund pozdrzi navazovani novych spojeni - rozdelanych pozadavku
+    se to nedotkne.
+
+    Handler NESMI pustit vyjimku ven - propadla by do rozdelaneho ramce
+    hlavniho vlakna a shodila by accept smycku. Proto to siroke except.
+    """
+    if not hasattr(signal, "SIGHUP"):
+        return
+
+    def obsluha(_signal, _ramec):
+        try:
+            prenacti()
+            print("SIGHUP: konfigurace prenactena", file=sys.stderr)
+        except Exception as chyba:  # noqa: BLE001 - sluzba nesmi spadnout
+            print(
+                "SIGHUP: prenacteni SELHALO, bezi dal ta stara "
+                f"konfigurace: {chyba}",
+                file=sys.stderr,
+            )
+
+    signal.signal(signal.SIGHUP, obsluha)
 
 
 def create_app(cfg: ServiceConfig):
@@ -289,8 +380,9 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
 
-    # Nacti konfiguraci
-    cfg = load_config(Path(args.config))
+    # Nacti konfiguraci. conf_dir si drzime - SIGHUP z nej cte znovu.
+    conf_dir = Path(args.config)
+    cfg = load_config(conf_dir)
 
     # Instancni defaults se slouci do kazde deklarace, ktera si vlastni
     # hodnotu nerekla sama - deklarace smi prebit instancni defaults,
@@ -306,8 +398,12 @@ def main(argv=None):
 
     # Zaloz aplikace - API i konzole se stavi tady, v hlavnim vlakne;
     # konzole pak jen svou serve() spousti v demonskem vlakne nize.
-    app = create_app(cfg)
-    console = create_console_app(cfg)
+    # Listener drzi prepinac, ne aplikaci - SIGHUP pak vymeni jeho obsah,
+    # aniz by se sahlo na sokety. Viz _Prepinac a _prenacti.
+    api_prepinac = _Prepinac(create_app(cfg))
+    konzole_prepinac = _Prepinac(create_console_app(cfg))
+    _prenacti._listenery = dict(cfg.listeners)
+    _zapoj_sighup(lambda: _prenacti(conf_dir, api_prepinac, konzole_prepinac))
 
     # Ziskej waitress (lazy import)
     flask, waitress = _require_server()
@@ -334,7 +430,7 @@ def main(argv=None):
     # REMOTE_ADDR a resolve_origin by prisel o skutecneho peera.
     def serve_console():
         waitress.serve(
-            console,
+            konzole_prepinac,
             host=console_host,
             port=console_port,
             clear_untrusted_proxy_headers=False,
@@ -349,7 +445,7 @@ def main(argv=None):
     # API bezi primo v hlavnim vlakne - zadne druhe vlakno, zadny join.
     # clear_untrusted_proxy_headers=False: viz komentar u serve_console vyse.
     waitress.serve(
-        app,
+        api_prepinac,
         host=api_host,
         port=api_port,
         clear_untrusted_proxy_headers=False,

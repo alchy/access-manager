@@ -113,14 +113,17 @@ def test_main_reconciles_and_serves(tmp_path):
     assert api_call is not None, "API listener (22000) not found"
     assert console_call is not None, "Console listener (22001) not found"
 
-    # API listener musi mit Flask app
-    assert api_call["app"] is mock_app, "API listener has wrong app"
-    assert hasattr(api_call["app"], "test_client"), (
+    # Listener nedostava aplikaci primo, ale prepinac - SIGHUP pak vymeni
+    # jeho obsah, aniz by se sahlo na sokety. Overuje se tedy, co je ZA nim.
+    assert api_call["app"].aktualni() is mock_app, "API listener has wrong app"
+    assert hasattr(api_call["app"].aktualni(), "test_client"), (
         "API listener app lacks Flask attributes"
     )
 
     # Console listener musi mit prave to, co vratil create_console_app(cfg)
-    assert console_call["app"] is mock_console_app, "Console listener has wrong app"
+    assert console_call["app"].aktualni() is mock_console_app, (
+        "Console listener has wrong app"
+    )
 
 
 def test_main_merges_instance_defaults_into_declarations(tmp_path):
@@ -290,3 +293,108 @@ def test_serve_keeps_forwarded_headers(tmp_path):
     # a _resolve_origin by prisel o skutecneho peera, podle ktereho rozhoduje.
     for volani in serve_calls:
         assert "trusted_proxy" not in volani["kwargs"]
+
+
+def _konfigurace(tmp_path, realmy=("example.com",)):
+    """Minimalni conf.d s uvedenymi realmy."""
+    conf_dir = tmp_path / "conf.d"
+    realms_dir = conf_dir / "realms"
+    realms_dir.mkdir(parents=True, exist_ok=True)
+    (conf_dir / "service.json").write_text(
+        json.dumps({
+            "data": str(tmp_path / "data"),
+            "listeners": {"api": "127.0.0.1:22000", "console": "127.0.0.1:22001"},
+        }),
+        encoding="utf-8",
+    )
+    for jmeno in realmy:
+        (realms_dir / f"{jmeno}.json").write_text(
+            json.dumps({"name": jmeno, "admins": ["jindrich"]}), encoding="utf-8"
+        )
+    return conf_dir
+
+
+def test_the_switcher_delegates_and_can_be_swapped():
+    """Prepinac je WSGI volatelny objekt, ktery deleguje na aktualni aplikaci."""
+    from access_manager.server import _Prepinac
+
+    prvni = Mock(return_value=["prvni"])
+    druha = Mock(return_value=["druha"])
+    prepinac = _Prepinac(prvni)
+
+    assert prepinac({}, None) == ["prvni"]
+    assert prepinac.aktualni() is prvni
+
+    prepinac.vymen(druha)
+    assert prepinac({}, None) == ["druha"]
+    assert prepinac.aktualni() is druha
+
+
+def test_reload_swaps_both_apps_and_keeps_console_sessions(tmp_path):
+    """Prenacteni vymeni obe aplikace a PRENESE secret_key konzole.
+
+    create_console_app si generuje novy klic pri kazdem volani. Bez
+    preneseni by reload odhlasil vsechny spravce a nebyl by k rozeznani
+    od restartu - prave to je duvod, proc reload existuje.
+    """
+    from access_manager.server import _prenacti, _Prepinac
+
+    conf_dir = _konfigurace(tmp_path)
+    api = _Prepinac(Mock(name="stare_api"))
+    konzole = _Prepinac(Mock(name="stara_konzole"))
+    konzole.aktualni().secret_key = "puvodni-klic"
+
+    stare_api, stara_konzole = api.aktualni(), konzole.aktualni()
+    _prenacti(conf_dir, api, konzole)
+
+    assert api.aktualni() is not stare_api, "API se nevymenilo"
+    assert konzole.aktualni() is not stara_konzole, "konzole se nevymenila"
+    assert konzole.aktualni().secret_key == "puvodni-klic", (
+        "relace konzole by reload nemely prezit jen kvuli novemu klici"
+    )
+
+
+def test_a_broken_config_leaves_the_running_apps_untouched(tmp_path):
+    """Rozbity conf.d nesmi shodit bezici sluzbu.
+
+    Nove aplikace se stavi PRED vymenou, takze vyjimka spadne driv, nez se
+    cehokoli dotkne. To je cely smysl reloadu oproti restartu.
+    """
+    from access_manager.server import _prenacti, _Prepinac
+
+    conf_dir = _konfigurace(tmp_path)
+    api = _Prepinac(Mock(name="stare_api"))
+    konzole = _Prepinac(Mock(name="stara_konzole"))
+    konzole.aktualni().secret_key = "puvodni-klic"
+    stare_api, stara_konzole = api.aktualni(), konzole.aktualni()
+
+    # Dva realmy stejneho jmena - konflikt, ktery zavira start.
+    (conf_dir / "realms" / "duplikat.json").write_text(
+        json.dumps({"name": "example.com", "admins": ["jindrich"]}), encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError):
+        _prenacti(conf_dir, api, konzole)
+
+    assert api.aktualni() is stare_api, "API se vymenilo i pres rozbitou konfiguraci"
+    assert konzole.aktualni() is stara_konzole, "konzole se vymenila"
+
+
+def test_sighup_handler_never_lets_an_exception_escape():
+    """Vyjimka z handleru by propadla do ramce hlavniho vlakna a shodila
+    accept smycku. Handler ji proto musi spolknout a jen o ni rict."""
+    import signal as signal_modul
+
+    from access_manager.server import _zapoj_sighup
+
+    def prenacti_ktere_spadne():
+        raise RuntimeError("rozbity conf.d")
+
+    puvodni = signal_modul.getsignal(signal_modul.SIGHUP)
+    try:
+        _zapoj_sighup(prenacti_ktere_spadne)
+        obsluha = signal_modul.getsignal(signal_modul.SIGHUP)
+        assert callable(obsluha)
+        obsluha(signal_modul.SIGHUP, None)   # nesmi vyhodit
+    finally:
+        signal_modul.signal(signal_modul.SIGHUP, puvodni)

@@ -96,6 +96,49 @@ Běží-li webová konzole za touto TLS proxy, zapněte `console_secure_cookie`
 (výchozí `false`) — cookie relace pak ponese příznak `Secure` a neopustí
 šifrované spojení.
 
+## Přenačtení za běhu (SIGHUP)
+
+Služba reaguje na **SIGHUP**: znovu načte `conf.d/`, dojede reconcile
+deklarovaných realmů a vymění obě aplikace za běhu.
+
+```bash
+systemctl reload access-manager     # ExecReload=/bin/kill -HUP $MAINPID
+kill -HUP <pid>                     # bez systemd
+```
+
+Sokety zůstávají navázané, takže **nevypadne žádné spojení** a rozdělané
+požadavky doběhnou. Přihlášené relace konzole reload **přežijí** — to je
+záměrný rozdíl oproti restartu, který je dál smete (`create_console_app` si
+jinak generuje nový podpisový klíč). Kdo chce čistou tabulku, má restart.
+
+Co se přenačte:
+
+| | |
+|---|---|
+| deklarace realmů, `defaults`, `throttle` | ano |
+| `trusted_proxies`, `forwarded_header`, `hops` | ano |
+| `console_secure_cookie` | ano |
+| `data` | ano (nová úložiště) |
+| **`listeners`** | **ne** — sokety už jsou navázané, chce to restart |
+
+Změnu `listeners` služba **řekne do logu** a jinak ji ignoruje — aby se
+nikdo nedivil, proč se nic nestalo.
+
+**Rozbitá konfigurace službu neshodí.** Nové aplikace se staví dřív, než se
+cokoli vymění, takže výjimka spadne ještě před zásahem a běží dál ta stará:
+
+```
+SIGHUP: prenacteni SELHALO, bezi dal ta stara konfigurace: realm 'x' je deklarovany dvakrat
+```
+
+Pozor: `systemctl reload` skončí **úspěchem i když přenačtení selhalo** —
+systemd ví jen to, že signál odeslal, ne co s ním aplikace udělala. Výsledek
+se čte z logu:
+
+```bash
+systemctl reload access-manager && journalctl -u access-manager -n 5 | grep SIGHUP
+```
+
 ## Kontejner
 
 `Dockerfile` je v kořeni repozitáře:

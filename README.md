@@ -91,6 +91,11 @@ addresses. A `Dockerfile` sits at the repository root; in a container,
 bind `listeners.api` to `0.0.0.0:22000` (EXPOSE alone is not enough) and
 adjust the healthcheck if you rebind.
 
+The service reloads on **SIGHUP** - it re-reads `conf.d/`, reconciles the
+declared realms and swaps both applications in place. Sockets stay bound, so
+no connection drops and console sessions survive; a broken config is refused
+and the old one keeps running. A restart still wipes sessions, by design.
+
 Administration (users, groups, application keys, admins, audit) is done
 through the web console (port 22001) as the primary path; the `Admin`
 library object on the server remains available for operators over ssh.
