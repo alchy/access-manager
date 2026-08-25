@@ -1,6 +1,6 @@
 """Stranka Skupiny: vypis s pocty, detail (prime cleny, zretezeni, kdo patri
 jen pres retezec), zalozeni, smazani, pridani/odebrani clena, zretezeni.
-Mirror vzoru z test_konzole_lide.py - mutace jsou vzdy POST + CSRF, uspech
+Mirror vzoru z test_konzole_uzivatele.py - mutace jsou vzdy POST + CSRF, uspech
 i chyba se vraci flashem (Post/Redirect/Get).
 """
 import pytest
@@ -11,7 +11,7 @@ from access_manager import Admin
 
 def _pridej_skupinu(prihlaseny_klient, nazev):
     klient, csrf = prihlaseny_klient
-    return klient.post("/skupiny/pridat", data={"csrf": csrf, "nazev": nazev})
+    return klient.post("/groups/add", data={"csrf": csrf, "nazev": nazev})
 
 
 def test_the_listing_shows_a_created_group_and_its_member_count(
@@ -23,14 +23,14 @@ def test_the_listing_shows_a_created_group_and_its_member_count(
     spravce.add_member("ucetni", "tereza")
 
     klient, _ = prihlaseny_klient
-    telo = klient.get("/skupiny").get_data(as_text=True)
+    telo = klient.get("/groups").get_data(as_text=True)
     assert "ucetni" in telo
 
 
 def test_adding_a_group_redirects_to_its_detail(prihlaseny_klient):
     odpoved = _pridej_skupinu(prihlaseny_klient, "ucetni")
     assert odpoved.status_code == 302
-    assert odpoved.headers["Location"].endswith("/skupiny?skupina=ucetni")
+    assert odpoved.headers["Location"].endswith("/groups?group=ucetni")
 
 
 def test_the_detail_shows_direct_members_and_includes(prihlaseny_klient, tmp_path):
@@ -42,10 +42,10 @@ def test_the_detail_shows_direct_members_and_includes(prihlaseny_klient, tmp_pat
     spravce.include("ucetni", "mzdy")
 
     klient, _ = prihlaseny_klient
-    telo = klient.get("/skupiny?skupina=mzdy").get_data(as_text=True)
+    telo = klient.get("/groups?group=mzdy").get_data(as_text=True)
     assert "tereza" in telo
 
-    telo = klient.get("/skupiny?skupina=ucetni").get_data(as_text=True)
+    telo = klient.get("/groups?group=ucetni").get_data(as_text=True)
     assert "mzdy" in telo
 
 
@@ -56,7 +56,7 @@ def test_a_missing_or_malformed_group_query_shows_the_listing_without_a_crash(
     # Nonexistujici jmeno (validni syntax) i zdeformovany dotaz (neprojde
     # check_name) nesmi stranku shodit - detail proste zmizi.
     klient, _ = prihlaseny_klient
-    odpoved = klient.get(f"/skupiny?skupina={skupina}")
+    odpoved = klient.get(f"/groups?group={skupina}")
     assert odpoved.status_code == 200
     telo = odpoved.get_data(as_text=True)
     # Detailova sekce (nazev skupiny, cleny, zretezeni) se vubec
@@ -74,7 +74,7 @@ def test_membership_added_via_the_console_shows_up_in_the_users_closure(
 
     klient, csrf = prihlaseny_klient
     odpoved = klient.post(
-        "/skupiny/ucetni/clen", data={"csrf": csrf, "clen": "tereza"},
+        "/groups/ucetni/member", data={"csrf": csrf, "clen": "tereza"},
     )
     assert odpoved.status_code == 302
 
@@ -91,7 +91,7 @@ def test_removing_a_member_drops_the_group_from_the_users_closure(
 
     klient, csrf = prihlaseny_klient
     odpoved = klient.post(
-        "/skupiny/ucetni/clen/tereza/odebrat", data={"csrf": csrf},
+        "/groups/ucetni/member/tereza/remove", data={"csrf": csrf},
     )
     assert odpoved.status_code == 302
 
@@ -109,7 +109,7 @@ def test_belonging_via_chaining_is_shown_separately_from_direct_members(
     spravce.include("ucetni", "mzdy")          # ucetni OBSAHUJE mzdy
 
     klient, _ = prihlaseny_klient
-    telo = klient.get("/skupiny?skupina=ucetni").get_data(as_text=True)
+    telo = klient.get("/groups?group=ucetni").get_data(as_text=True)
     # tereza je clenem "ucetni" jen pres zretezeni, ne primo - v tabulce
     # primych clenu nesmi byt, ale v seznamu "pres retezec" ano.
     assert '<td class="mono">tereza</td>' not in telo
@@ -126,7 +126,7 @@ def test_a_cycle_flashes_the_library_error_and_leaves_the_chain_unchanged(
 
     klient, csrf = prihlaseny_klient
     odpoved = klient.post(
-        "/skupiny/b/zretezit", data={"csrf": csrf, "zahrnuti": "a"},
+        "/groups/b/chain", data={"csrf": csrf, "zahrnuti": "a"},
     )
     assert odpoved.status_code == 302
 
@@ -138,11 +138,11 @@ def test_a_cycle_flashes_the_library_error_and_leaves_the_chain_unchanged(
 def test_a_reserved_group_is_refused_and_state_unchanged(prihlaseny_klient):
     klient, csrf = prihlaseny_klient
     odpoved = klient.post(
-        "/skupiny/pridat", data={"csrf": csrf, "nazev": "users"},
+        "/groups/add", data={"csrf": csrf, "nazev": "users"},
     )
     assert odpoved.status_code == 302
 
-    telo = klient.get("/skupiny").get_data(as_text=True)
+    telo = klient.get("/groups").get_data(as_text=True)
     assert "zprava-chyba" in telo
     assert ">users<" not in telo
 
@@ -151,10 +151,10 @@ def test_deleting_a_group_removes_it_from_the_listing(prihlaseny_klient):
     _pridej_skupinu(prihlaseny_klient, "ucetni")
     klient, csrf = prihlaseny_klient
 
-    odpoved = klient.post("/skupiny/ucetni/smazat", data={"csrf": csrf})
+    odpoved = klient.post("/groups/ucetni/delete", data={"csrf": csrf})
     assert odpoved.status_code == 302
 
-    telo = klient.get("/skupiny").get_data(as_text=True)
+    telo = klient.get("/groups").get_data(as_text=True)
     assert "ucetni" not in telo
 
 
@@ -167,29 +167,29 @@ def test_every_mutating_route_without_csrf_is_rejected_and_state_unchanged(
     klient, _ = prihlaseny_klient
 
     mutace = [
-        ("/skupiny/pridat", {"nazev": "mzdy"}),
-        ("/skupiny/ucetni/clen", {"clen": "tereza"}),
-        ("/skupiny/ucetni/clen/tereza/odebrat", {}),
-        ("/skupiny/ucetni/zretezit", {"zahrnuti": "ucetni"}),
-        ("/skupiny/ucetni/smazat", {}),
+        ("/groups/add", {"nazev": "mzdy"}),
+        ("/groups/ucetni/member", {"clen": "tereza"}),
+        ("/groups/ucetni/member/tereza/remove", {}),
+        ("/groups/ucetni/chain", {"zahrnuti": "ucetni"}),
+        ("/groups/ucetni/delete", {}),
     ]
     for cesta, data in mutace:
         odpoved = klient.post(cesta, data=data)
         assert odpoved.status_code == 400, cesta
 
-    telo = klient.get("/skupiny").get_data(as_text=True)
+    telo = klient.get("/groups").get_data(as_text=True)
     assert "ucetni" in telo
     assert "mzdy" not in telo
     assert "group:ucetni" not in principaly(tmp_path / "data", "tereza")
 
 
 @pytest.mark.parametrize("metoda,cesta", [
-    ("get", "/skupiny"),
-    ("post", "/skupiny/pridat"),
-    ("post", "/skupiny/ucetni/smazat"),
-    ("post", "/skupiny/ucetni/clen"),
-    ("post", "/skupiny/ucetni/clen/tereza/odebrat"),
-    ("post", "/skupiny/ucetni/zretezit"),
+    ("get", "/groups"),
+    ("post", "/groups/add"),
+    ("post", "/groups/ucetni/delete"),
+    ("post", "/groups/ucetni/member"),
+    ("post", "/groups/ucetni/member/tereza/remove"),
+    ("post", "/groups/ucetni/chain"),
 ])
 def test_every_route_without_a_session_redirects_to_login(prostredi, metoda, cesta):
     odpoved = getattr(prostredi, metoda)(cesta)
@@ -201,6 +201,6 @@ def test_the_english_language_switches_table_texts(prihlaseny_klient):
     _pridej_skupinu(prihlaseny_klient, "ucetni")
     klient, _ = prihlaseny_klient
 
-    telo = klient.get("/skupiny?lang=en").get_data(as_text=True)
+    telo = klient.get("/groups?lang=en").get_data(as_text=True)
     assert "Groups" in telo
     assert "Skupiny" not in telo

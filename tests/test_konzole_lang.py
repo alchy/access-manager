@@ -3,14 +3,14 @@ presmeruje zpet na `next`, s ochranou proti open redirectu. Puvodni
 mechanismus `?lang=cs|en` (pres before_request) zustava funkcni dal - `/lang`
 je jen dalsi, PRG-bezpecna cesta pro POST-vyrenderovane stranky (napr.
 klic.html), kde holy `?lang=` skonci 405 (jina metoda) nebo ztrati dotaz
-(filtrovany /audit, /skupiny?skupina=...).
+(filtrovany /audit, /groups?group=...).
 """
 from urllib.parse import quote
 
 
 def test_lang_switch_preserves_a_filtered_audit_query(prihlaseny_klient):
     klient, _ = prihlaseny_klient
-    cesta = "/audit?subjekt=admin:jindrich&kind=authenticate"
+    cesta = "/audit?subject=admin:jindrich&kind=authenticate"
     odpoved = klient.get(f"/lang?to=en&next={quote(cesta, safe='')}")
     assert odpoved.status_code == 302
     assert odpoved.headers["Location"].endswith(cesta)

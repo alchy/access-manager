@@ -54,10 +54,10 @@ def test_a_successful_login_sets_the_session_and_redirects(prostredi, tmp_path):
         # Stav pred prihlasenim relaci nepreziva - session.clear() v _prihlasit.
         assert "neco_stareho" not in relace
 
-    # Ukol 4 teprve dodava /lide - overujeme jen cil presmerovani, ne obsah.
+    # Ukol 4 teprve dodava /users - overujeme jen cil presmerovani, ne obsah.
     dalsi = prostredi.get("/")
     assert dalsi.status_code == 302
-    assert dalsi.headers["Location"].endswith("/lide")
+    assert dalsi.headers["Location"].endswith("/users")
 
 
 def test_login_with_mismatched_case_and_whitespace_stays_logged_in(prostredi, tmp_path):
@@ -74,7 +74,7 @@ def test_login_with_mismatched_case_and_whitespace_stays_logged_in(prostredi, tm
     assert odpoved.status_code == 302
     assert odpoved.headers["Location"].endswith("/")
 
-    dalsi = prostredi.get("/lide")
+    dalsi = prostredi.get("/users")
     assert dalsi.status_code == 200
 
 
@@ -89,7 +89,7 @@ def test_login_with_an_uppercase_realm_variant_succeeds(prostredi, tmp_path):
     assert odpoved.status_code == 302
     assert odpoved.headers["Location"].endswith("/")
 
-    dalsi = prostredi.get("/lide")
+    dalsi = prostredi.get("/users")
     assert dalsi.status_code == 200
 
 
@@ -179,3 +179,34 @@ def test_logout_without_csrf_is_rejected(prostredi, tmp_path):
 
     with prostredi.session_transaction() as relace:
         assert relace.get("admin") == "jindrich"
+
+
+def test_login_accepts_codes_split_into_per_digit_fields(prostredi, tmp_path):
+    """Prihlaseni projde i kdyz kod prijde po cislicich.
+
+    Formular vykresluje policko na kazdou cislici (kod1_1..kod1_6), protoze
+    se to lip opisuje z telefonu. Server je slozi zpatky - jedno cele pole
+    zustava platne (posilaji ho ostatni testy), tady se overuje ta druha
+    cesta.
+    """
+    prvni, druhy = admin_kody(tmp_path / "data")
+    data = {"realm": REALM, "jmeno": "jindrich"}
+    for i, znak in enumerate(prvni, start=1):
+        data[f"kod1_{i}"] = znak
+    for i, znak in enumerate(druhy, start=1):
+        data[f"kod2_{i}"] = znak
+
+    odpoved = prostredi.post("/login", data=data)
+    assert odpoved.status_code == 302
+    with prostredi.session_transaction() as relace:
+        assert relace["admin"] == "jindrich"
+
+
+def test_login_page_renders_one_box_per_digit(prostredi):
+    """Formular ma policko na kazdou cislici obou kodu."""
+    telo = prostredi.get("/login").get_data(as_text=True)
+    for pole in ("kod1", "kod2"):
+        for i in range(1, 7):
+            assert f'name="{pole}_{i}"' in telo, f"chybi policko {pole}_{i}"
+    # Skript je jen pohodli navic - policka musi fungovat i bez nej.
+    assert "code.js" in telo

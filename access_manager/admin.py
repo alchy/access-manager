@@ -28,7 +28,7 @@ class Admin:
             FileStore(realm_root(home, realm), realm=check_realm(realm), actor=actor)
         )
 
-    # -- lide --------------------------------------------------------------
+    # -- uzivatele ----------------------------------------------------------
 
     def add_user(self, name: str) -> Enrolment:
         """Zalozi cloveka i s parovacim kodem. Vraci UKAZATEL, ne tajemstvi."""

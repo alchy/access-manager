@@ -28,11 +28,11 @@ def test_the_subject_filter_shows_matching_and_hides_others(prihlaseny_klient):
         data={"realm": REALM, "jmeno": "outsider", "kod1": "000000", "kod2": "000000"},
     )
 
-    jen_jindrich = klient.get("/audit?subjekt=admin:jindrich").get_data(as_text=True)
+    jen_jindrich = klient.get("/audit?subject=admin:jindrich").get_data(as_text=True)
     assert "admin:jindrich" in jen_jindrich
     assert "admin:outsider" not in jen_jindrich
 
-    jen_outsider = klient.get("/audit?subjekt=admin:outsider").get_data(as_text=True)
+    jen_outsider = klient.get("/audit?subject=admin:outsider").get_data(as_text=True)
     assert "admin:outsider" in jen_outsider
     assert "admin:jindrich" not in jen_outsider
 
@@ -69,7 +69,7 @@ def test_a_malformed_date_filter_does_not_crash_and_falls_back_to_default(
     prihlaseny_klient,
 ):
     klient, _ = prihlaseny_klient
-    odpoved = klient.get("/audit?od=nedatum&do=takenetohle")
+    odpoved = klient.get("/audit?from=nedatum&to=takenetohle")
     assert odpoved.status_code == 200
     # Padne na vychozi okno - dnesni prihlaseni tam porad je videt.
     assert "admin:jindrich" in odpoved.get_data(as_text=True)

@@ -456,7 +456,7 @@ class FileStore:
         self._complete_pairing(directory)
         return Verdict.ok(f"admin:{name}", frozenset(), gen=gen)
 
-    # == zapis: lide =======================================================
+    # == zapis: uzivatele ==================================================
 
     def _bump_gen(self) -> None:
         # Volat JEN pod _locked - jinak se dva zapisy sejdou na temz cisle.

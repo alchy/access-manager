@@ -43,6 +43,26 @@ def _require_flask():
     return flask
 
 
+#: Kolik cislic ma jeden TOTP kod. Sablona podle toho vykresli policka.
+DELKA_KODU = 6
+
+
+def _kod_z_formulare(form, pole: str) -> str:
+    """Slozi kod bud z jednoho pole, nebo z policek po cislicich.
+
+    Prihlasovaci stranka vykresluje policko na kazdou cislici
+    (`kod1_1`..`kod1_6`), protoze se to lip opisuje z telefonu. Jedno pole
+    s celym kodem ale zustava platne - posilaji ho testy i kdokoli, kdo si
+    formular odesle sam. Bere se to, co prislo; cele pole ma prednost.
+    """
+    cely = form.get(pole, "").strip()
+    if cely:
+        return cely
+    return "".join(
+        form.get(f"{pole}_{i}", "").strip() for i in range(1, DELKA_KODU + 1)
+    )
+
+
 def _realm_store_kwargs(cfg: ServiceConfig) -> dict[str, dict]:
     """Konstrukcni argumenty `FileStore` pro kazdy realm z `cfg`.
 
@@ -130,7 +150,7 @@ def create_console_app(cfg: ServiceConfig):
 
     @app.context_processor
     def _kontext_prekladu():
-        return {"t": _prelozit}
+        return {"t": _prelozit, "delka_kodu": DELKA_KODU}
 
     def prihlasen(view):
         """Strazce relace: bez platne session presmeruje na `/login`.
@@ -181,7 +201,7 @@ def create_console_app(cfg: ServiceConfig):
         Doplnuje starsi mechanismus `?lang=cs|en` (viz `_uloz_jazyk`), ktery
         na strankach vyrenderovanych primo z POST (klic.html) skonci 405
         (jina metoda) a na strankach s vlastnim dotazem (filtrovany /audit,
-        /skupiny?skupina=...) dotaz zahodi. `next` se pousti dal JEN kdyz je
+        /groups?group=...) dotaz zahodi. `next` se pousti dal JEN kdyz je
         to relativni cesta zacinajici jednim '/' - '//host/...' by prohlizec
         vzal jako absolutni URL na cizi host (open redirect).
         """
@@ -205,8 +225,8 @@ def create_console_app(cfg: ServiceConfig):
         # zadny postranni kanal, ktery by prozradil, ze realm neexistuje.
         jmeno_realmu = flask.request.form.get("realm", "")
         jmeno = flask.request.form.get("jmeno", "")
-        kod1 = flask.request.form.get("kod1", "")
-        kod2 = flask.request.form.get("kod2", "")
+        kod1 = _kod_z_formulare(flask.request.form, "kod1")
+        kod2 = _kod_z_formulare(flask.request.form, "kod2")
 
         # Normalizace DRIV, nez se cokoli porovna nebo ulozi do session:
         # authenticate_admin normalizuje jmeno pres check_identity uvnitr
@@ -255,15 +275,15 @@ def create_console_app(cfg: ServiceConfig):
     @app.get("/")
     @prihlasen
     def _uvod():
-        return flask.redirect(flask.url_for("_lide_seznam"))
+        return flask.redirect(flask.url_for("_uzivatele_seznam"))
 
-    # == lide ===============================================================
+    # == uzivatele ==========================================================
     #
     # VZOR pro dalsi stranky (skupiny/aplikace/spravci/audit): kazda mutace
     # je @prihlasen + POST, prvni radek je over_csrf(), knihovni volani bezi
     # v try/except ValueError, uspech i chyba konci flashem a redirectem
-    # (Post/Redirect/Get). `_lide_mutace` tenhle tvar nese za vsechny
-    # jednoduche akce - vyjimkou je jen `/lide/pridat` s vlastnim GET view
+    # (Post/Redirect/Get). `_uzivatele_mutace` tenhle tvar nese za vsechny
+    # jednoduche akce - vyjimkou je jen `/users/add` s vlastnim GET view
     # (formular), ktere tu neni potreba.
 
     def _radek_cloveka(store, jmeno: str) -> dict:
@@ -289,14 +309,14 @@ def create_console_app(cfg: ServiceConfig):
             if principal.startswith("group:") and principal not in (PUBLIC, USERS)
         )
         if not clovek.enabled:
-            stav, stav_text = "disabled", _prelozit("lide.disabled")
+            stav, stav_text = "disabled", _prelozit("uzivatele.disabled")
         else:
             adresar = store.home / f"user-{jmeno}"
             tajemstvi = adresar / "totp.secret"
             vydano = adresar / "totp.issued"
             sparovano = adresar / "totp.paired"
             if not tajemstvi.is_file() and not vydano.is_file():
-                stav, stav_text = "no_credential", _prelozit("lide.no_credential")
+                stav, stav_text = "no_credential", _prelozit("uzivatele.no_credential")
             elif vydano.is_file() and not sparovano.is_file():
                 try:
                     vydano_ts = int(vydano.read_text(encoding="utf-8").strip())
@@ -308,79 +328,79 @@ def create_console_app(cfg: ServiceConfig):
                     0, int(store.qr_ttl_days - (time.time() - vydano_ts) // 86400)
                 )
                 stav = "waiting"
-                stav_text = _prelozit("lide.waiting").format(dni=zbyva)
+                stav_text = _prelozit("uzivatele.waiting").format(dni=zbyva)
             else:
-                stav, stav_text = "active", _prelozit("lide.active")
+                stav, stav_text = "active", _prelozit("uzivatele.active")
         return {
             "jmeno": jmeno, "stav": stav, "stav_text": stav_text, "skupiny": skupiny,
         }
 
-    @app.get("/lide")
+    @app.get("/users")
     @prihlasen
-    def _lide_seznam():
+    def _uzivatele_seznam():
         store = flask.g.store
-        lide = [_radek_cloveka(store, jmeno) for jmeno in store.users()]
-        return flask.render_template("lide.html", lide=lide)
+        uzivatele = [_radek_cloveka(store, jmeno) for jmeno in store.users()]
+        return flask.render_template("uzivatele.html", uzivatele=uzivatele)
 
-    def _lide_mutace(jmeno, akce, presmerovani=None):
+    def _uzivatele_mutace(jmeno, akce, presmerovani=None):
         """Spolecny tvar mutaci lidi: CSRF -> knihovni volani -> flash ->
         redirect. `presmerovani(vysledek)` urcuje cil PRI USPECHU (napr. na
-        stranku QR) - vychozi je zpet na /lide. Chyba vzdy konci na /lide,
+        stranku QR) - vychozi je zpet na /users. Chyba vzdy konci na /users,
         `presmerovani` se pak nevola."""
         over_csrf()
+        seznam = flask.url_for("_uzivatele_seznam")
         try:
             vysledek = akce(jmeno)
         except ValueError as chyba:
             flask.flash(f"{_prelozit('spolecne.error')}: {chyba}", "chyba")
-            return flask.redirect(flask.url_for("_lide_seznam"))
+            return flask.redirect(seznam)
         flask.flash(_prelozit("spolecne.done"), "ok")
-        cil = presmerovani(vysledek) if presmerovani else flask.url_for("_lide_seznam")
-        return flask.redirect(cil)
+        return flask.redirect(presmerovani(vysledek) if presmerovani else seznam)
 
-    @app.post("/lide/pridat")
+    @app.post("/users/add")
     @prihlasen
-    def _lide_pridat():
+    def _uzivatele_pridat():
         jmeno = flask.request.form.get("jmeno", "")
-        return _lide_mutace(
+        return _uzivatele_mutace(
             jmeno, flask.g.store.add_user,
             presmerovani=lambda zavedeni: flask.url_for(
-                "_lide_qr", jmeno=zavedeni.name
+                "_uzivatele_qr", jmeno=zavedeni.name
             ),
         )
 
-    @app.post("/lide/<jmeno>/vypnout")
+    @app.post("/users/<jmeno>/disable")
     @prihlasen
-    def _lide_vypnout(jmeno):
-        return _lide_mutace(jmeno, flask.g.store.disable_user)
+    def _uzivatele_vypnout(jmeno):
+        return _uzivatele_mutace(jmeno, flask.g.store.disable_user)
 
-    @app.post("/lide/<jmeno>/zapnout")
+    @app.post("/users/<jmeno>/enable")
     @prihlasen
-    def _lide_zapnout(jmeno):
-        return _lide_mutace(jmeno, flask.g.store.enable_user)
+    def _uzivatele_zapnout(jmeno):
+        return _uzivatele_mutace(jmeno, flask.g.store.enable_user)
 
-    @app.post("/lide/<jmeno>/smazat")
+    @app.post("/users/<jmeno>/delete")
     @prihlasen
-    def _lide_smazat(jmeno):
-        return _lide_mutace(jmeno, flask.g.store.remove_user)
+    def _uzivatele_smazat(jmeno):
+        return _uzivatele_mutace(jmeno, flask.g.store.remove_user)
 
-    @app.post("/lide/<jmeno>/odvolat")
+    @app.post("/users/<jmeno>/revoke")
     @prihlasen
-    def _lide_odvolat(jmeno):
-        return _lide_mutace(jmeno, flask.g.store.revoke_credential)
+    def _uzivatele_odvolat(jmeno):
+        return _uzivatele_mutace(jmeno, flask.g.store.revoke_credential)
 
-    @app.post("/lide/<jmeno>/parovat")
+    @app.post("/users/<jmeno>/pair")
     @prihlasen
-    def _lide_parovat(jmeno):
-        return _lide_mutace(
+    def _uzivatele_parovat(jmeno):
+        return _uzivatele_mutace(
             jmeno, flask.g.store.pair,
             presmerovani=lambda zavedeni: flask.url_for(
-                "_lide_qr", jmeno=zavedeni.name
+                "_uzivatele_qr", jmeno=zavedeni.name
             ),
         )
 
-    @app.get("/lide/qr/<jmeno>")
+    @app.get("/users/qr/<jmeno>")
     @prihlasen
-    def _lide_qr(jmeno):
+    def _uzivatele_qr(jmeno):
         # Jmeno se sklada do cesty na disku - overit DRIV, nez se ceho
         # dotkne, stejny vzorec jako knihovni metody (check_identity() prvni
         # radek). Zdeformovane jmeno je 404, ne 500 z divneho souboroveho
@@ -397,12 +417,12 @@ def create_console_app(cfg: ServiceConfig):
         stitek = f"{store.realm}-member-{jmeno}"
         return _bez_ukladani(flask.render_template(
             "qr.html", jmeno=jmeno, obrazec=obrazec, sparovano=sparovano,
-            stitek=stitek, zpet=flask.url_for("_lide_seznam"),
+            stitek=stitek, zpet=flask.url_for("_uzivatele_seznam"),
         ))
 
     # == skupiny =============================================================
     #
-    # Na rozdil od `_lide_mutace` bere `_skupiny_mutace` cil presmerovani
+    # Na rozdil od `_uzivatele_mutace` bere `_skupiny_mutace` cil presmerovani
     # VZDY explicitne (`cil=`) - mutace clenu/zretezeni maji po chybe
     # i po uspechu zustat na detailu prave upravovane skupiny, ne skocit
     # zpatky na holy vypis (jedina vyjimka je smazani skupiny samotne,
@@ -443,13 +463,13 @@ def create_console_app(cfg: ServiceConfig):
             ],
         }
 
-    @app.get("/skupiny")
+    @app.get("/groups")
     @prihlasen
     def _skupiny_seznam():
         store = flask.g.store
         skupiny = [_radek_skupiny(store, nazev) for nazev in store.groups()]
         detail = None
-        pozadovana = flask.request.args.get("skupina")
+        pozadovana = flask.request.args.get("group")
         if pozadovana:
             try:
                 pozadovana = check_name(pozadovana)
@@ -472,17 +492,17 @@ def create_console_app(cfg: ServiceConfig):
         flask.flash(_prelozit("spolecne.done"), "ok")
         return flask.redirect(presmerovani(vysledek) if presmerovani else cil)
 
-    @app.post("/skupiny/pridat")
+    @app.post("/groups/add")
     @prihlasen
     def _skupiny_pridat():
         nazev = flask.request.form.get("nazev", "")
         return _skupiny_mutace(
             flask.g.store.add_group, nazev,
             cil=flask.url_for("_skupiny_seznam"),
-            presmerovani=lambda _: flask.url_for("_skupiny_seznam", skupina=nazev),
+            presmerovani=lambda _: flask.url_for("_skupiny_seznam", group=nazev),
         )
 
-    @app.post("/skupiny/<nazev>/smazat")
+    @app.post("/groups/<nazev>/delete")
     @prihlasen
     def _skupiny_smazat(nazev):
         return _skupiny_mutace(
@@ -490,30 +510,30 @@ def create_console_app(cfg: ServiceConfig):
             cil=flask.url_for("_skupiny_seznam"),
         )
 
-    @app.post("/skupiny/<nazev>/clen")
+    @app.post("/groups/<nazev>/member")
     @prihlasen
     def _skupiny_clen_pridat(nazev):
         clen = flask.request.form.get("clen", "")
         return _skupiny_mutace(
             flask.g.store.add_member, nazev, clen,
-            cil=flask.url_for("_skupiny_seznam", skupina=nazev),
+            cil=flask.url_for("_skupiny_seznam", group=nazev),
         )
 
-    @app.post("/skupiny/<nazev>/clen/<clen>/odebrat")
+    @app.post("/groups/<nazev>/member/<clen>/remove")
     @prihlasen
     def _skupiny_clen_odebrat(nazev, clen):
         return _skupiny_mutace(
             flask.g.store.remove_member, nazev, clen,
-            cil=flask.url_for("_skupiny_seznam", skupina=nazev),
+            cil=flask.url_for("_skupiny_seznam", group=nazev),
         )
 
-    @app.post("/skupiny/<nazev>/zretezit")
+    @app.post("/groups/<nazev>/chain")
     @prihlasen
     def _skupiny_zretezit(nazev):
         zahrnuti = flask.request.form.get("zahrnuti", "")
         return _skupiny_mutace(
             flask.g.store.include, nazev, zahrnuti,
-            cil=flask.url_for("_skupiny_seznam", skupina=nazev),
+            cil=flask.url_for("_skupiny_seznam", group=nazev),
         )
 
     # == aplikace =============================================================
@@ -535,13 +555,13 @@ def create_console_app(cfg: ServiceConfig):
             "detail": komponenta.detail,
         }
 
-    @app.get("/aplikace")
+    @app.get("/applications")
     @prihlasen
     def _aplikace_seznam():
         aplikace = [_radek_aplikace(k) for k in flask.g.store.components()]
         return flask.render_template("aplikace.html", aplikace=aplikace)
 
-    @app.post("/aplikace/pridat")
+    @app.post("/applications/add")
     @prihlasen
     def _aplikace_pridat():
         over_csrf()
@@ -564,7 +584,7 @@ def create_console_app(cfg: ServiceConfig):
         )
 
     def _aplikace_mutace(jmeno, akce):
-        """Stejny tvar jako `_lide_mutace`/`_skupiny_mutace`, jen bez
+        """Stejny tvar jako `_uzivatele_mutace`/`_skupiny_mutace`, jen bez
         volitelneho presmerovani - odvolani vzdy konci zpet na vypisu."""
         over_csrf()
         try:
@@ -575,16 +595,16 @@ def create_console_app(cfg: ServiceConfig):
             flask.flash(_prelozit("spolecne.done"), "ok")
         return flask.redirect(flask.url_for("_aplikace_seznam"))
 
-    @app.post("/aplikace/<jmeno>/odvolat")
+    @app.post("/applications/<jmeno>/revoke")
     @prihlasen
     def _aplikace_odvolat(jmeno):
         return _aplikace_mutace(jmeno, flask.g.store.revoke_component)
 
     # == spravci ==============================================================
     #
-    # Zrcadli lide (`_lide_mutace`/`_radek_cloveka`), jen bez "zakazany" -
+    # Zrcadli uzivatele (`_uzivatele_mutace`/`_radek_cloveka`), jen bez "zakazany" -
     # spravci nemaji disable_admin/enable_admin, takze ten stav pro ne
-    # neexistuje. `qr.html` je SDILENA s lide - `_spravci_qr` je tenka route
+    # neexistuje. `qr.html` je SDILENA s uzivateli - `_spravci_qr` je tenka route
     # nad stejnou sablonou, jen cte z `admin-<jmeno>` a posila jiny stitek
     # a jiny "zpet" cil.
 
@@ -604,7 +624,7 @@ def create_console_app(cfg: ServiceConfig):
         vydano = adresar / "totp.issued"
         sparovano = adresar / "totp.paired"
         if not tajemstvi.is_file() and not vydano.is_file():
-            stav, stav_text = "no_credential", _prelozit("lide.no_credential")
+            stav, stav_text = "no_credential", _prelozit("uzivatele.no_credential")
         elif vydano.is_file() and not sparovano.is_file():
             try:
                 vydano_ts = int(vydano.read_text(encoding="utf-8").strip())
@@ -615,7 +635,7 @@ def create_console_app(cfg: ServiceConfig):
                 0, int(store.qr_ttl_days - (time.time() - vydano_ts) // 86400)
             )
             stav = "waiting"
-            stav_text = _prelozit("lide.waiting").format(dni=zbyva)
+            stav_text = _prelozit("uzivatele.waiting").format(dni=zbyva)
         else:
             stav, stav_text = "active", _prelozit("spravci.paired")
         return {
@@ -623,7 +643,7 @@ def create_console_app(cfg: ServiceConfig):
             "stav": stav, "stav_text": stav_text,
         }
 
-    @app.get("/spravci")
+    @app.get("/admins")
     @prihlasen
     def _spravci_seznam():
         store = flask.g.store
@@ -631,7 +651,7 @@ def create_console_app(cfg: ServiceConfig):
         return flask.render_template("spravci.html", spravci=spravci)
 
     def _spravci_mutace(jmeno, akce, presmerovani=None):
-        """Stejny tvar jako `_lide_mutace` - CSRF -> knihovni volani -> flash ->
+        """Stejny tvar jako `_uzivatele_mutace` - CSRF -> knihovni volani -> flash ->
         redirect. Guard posledniho spravce (`_require_not_last_admin`) hlasi
         `ValueError` s presnym textem z knihovny, zobrazenym surove."""
         over_csrf()
@@ -647,7 +667,7 @@ def create_console_app(cfg: ServiceConfig):
         )
         return flask.redirect(cil)
 
-    @app.post("/spravci/pridat")
+    @app.post("/admins/add")
     @prihlasen
     def _spravci_pridat():
         jmeno = flask.request.form.get("jmeno", "")
@@ -658,17 +678,17 @@ def create_console_app(cfg: ServiceConfig):
             ),
         )
 
-    @app.post("/spravci/<jmeno>/odebrat")
+    @app.post("/admins/<jmeno>/remove")
     @prihlasen
     def _spravci_odebrat(jmeno):
         return _spravci_mutace(jmeno, flask.g.store.remove_admin)
 
-    @app.post("/spravci/<jmeno>/odvolat")
+    @app.post("/admins/<jmeno>/revoke")
     @prihlasen
     def _spravci_odvolat(jmeno):
         return _spravci_mutace(jmeno, flask.g.store.revoke_admin_credential)
 
-    @app.post("/spravci/<jmeno>/parovat")
+    @app.post("/admins/<jmeno>/pair")
     @prihlasen
     def _spravci_parovat(jmeno):
         return _spravci_mutace(
@@ -678,10 +698,10 @@ def create_console_app(cfg: ServiceConfig):
             ),
         )
 
-    @app.get("/spravci/qr/<jmeno>")
+    @app.get("/admins/qr/<jmeno>")
     @prihlasen
     def _spravci_qr(jmeno):
-        # Stejna uvaha jako u `_lide_qr`: jmeno overit DRIV, nez se ceho na
+        # Stejna uvaha jako u `_uzivatele_qr`: jmeno overit DRIV, nez se ceho na
         # disku dotkne - zdeformovane jmeno je 404, ne 500.
         try:
             jmeno = check_identity(jmeno)
@@ -764,9 +784,9 @@ def create_console_app(cfg: ServiceConfig):
         dnes = datetime.now(UTC).date()
         vychozi_od = (dnes - timedelta(days=_AUDIT_VYCHOZI_DNI)).isoformat()
         vychozi_do = dnes.isoformat()
-        od = _validni_den(flask.request.args.get("od", "")) or vychozi_od
-        do = _validni_den(flask.request.args.get("do", "")) or vychozi_do
-        subjekt = flask.request.args.get("subjekt", "").strip() or None
+        od = _validni_den(flask.request.args.get("from", "")) or vychozi_od
+        do = _validni_den(flask.request.args.get("to", "")) or vychozi_do
+        subjekt = flask.request.args.get("subject", "").strip() or None
         kind = flask.request.args.get("kind", "").strip() or None
         outcome = flask.request.args.get("outcome", "").strip() or None
         udalosti = read_events(

@@ -1,6 +1,6 @@
 """Stranka Spravci: vypis se stitkem a stavem parovani, pridani (-> QR
-sdilena s lide), odebrani, odvolani tokenu, nove parovani; guard posledniho
-spravce. Mirror vzoru z test_konzole_lide.py - mutace jsou vzdy POST + CSRF,
+sdilena s uzivateli), odebrani, odvolani tokenu, nove parovani; guard posledniho
+spravce. Mirror vzoru z test_konzole_uzivatele.py - mutace jsou vzdy POST + CSRF,
 uspech i chyba se vraci flashem (Post/Redirect/Get).
 """
 import pytest
@@ -12,7 +12,7 @@ from access_manager.files import FileStore
 
 def _pridej(prihlaseny_klient, jmeno):
     klient, csrf = prihlaseny_klient
-    return klient.post("/spravci/pridat", data={"csrf": csrf, "jmeno": jmeno})
+    return klient.post("/admins/add", data={"csrf": csrf, "jmeno": jmeno})
 
 
 def test_adding_an_admin_redirects_to_a_qr_page_without_the_secret(
@@ -20,7 +20,7 @@ def test_adding_an_admin_redirects_to_a_qr_page_without_the_secret(
 ):
     odpoved = _pridej(prihlaseny_klient, "marie")
     assert odpoved.status_code == 302
-    assert odpoved.headers["Location"].endswith("/spravci/qr/marie")
+    assert odpoved.headers["Location"].endswith("/admins/qr/marie")
 
     klient, _ = prihlaseny_klient
     stranka = klient.get(odpoved.headers["Location"])
@@ -33,7 +33,7 @@ def test_adding_an_admin_redirects_to_a_qr_page_without_the_secret(
     ).read_text(encoding="utf-8").strip()
     assert tajemstvi not in telo
 
-    seznam = klient.get("/spravci").get_data(as_text=True)
+    seznam = klient.get("/admins").get_data(as_text=True)
     assert tajemstvi not in seznam
 
 
@@ -43,7 +43,7 @@ def test_listing_shows_waiting_then_paired_then_no_credential_after_revoke(
     klient, csrf = prihlaseny_klient
     _pridej(prihlaseny_klient, "marie")
 
-    cekajici = klient.get("/spravci").get_data(as_text=True)
+    cekajici = klient.get("/admins").get_data(as_text=True)
     assert f"{REALM}-admin-marie" in cekajici
     assert "Čeká" in cekajici
 
@@ -54,11 +54,11 @@ def test_listing_shows_waiting_then_paired_then_no_credential_after_revoke(
     store = FileStore(koren(tmp_path / "data"), realm=REALM)
     assert store.authenticate_admin("marie", prvni, druhy)
 
-    sparovano = klient.get("/spravci").get_data(as_text=True)
+    sparovano = klient.get("/admins").get_data(as_text=True)
     assert "Spárováno" in sparovano
 
-    klient.post("/spravci/marie/odvolat", data={"csrf": csrf})
-    bez_povereni = klient.get("/spravci").get_data(as_text=True)
+    klient.post("/admins/marie/revoke", data={"csrf": csrf})
+    bez_povereni = klient.get("/admins").get_data(as_text=True)
     assert "Bez pověření" in bez_povereni
     # "Sparovano" uz zbyva jen u jindricha (fixtura ho prihlasi hned na
     # zacatku) - marie po odvolani ne.
@@ -70,15 +70,15 @@ def test_revoke_then_pair_produces_a_new_qr(prihlaseny_klient):
     klient, csrf = prihlaseny_klient
     prvni_qr = klient.get(prvni_odpoved.headers["Location"]).get_data(as_text=True)
 
-    odvolat = klient.post("/spravci/marie/odvolat", data={"csrf": csrf})
+    odvolat = klient.post("/admins/marie/revoke", data={"csrf": csrf})
     assert odvolat.status_code == 302
 
-    telo = klient.get("/spravci").get_data(as_text=True)
+    telo = klient.get("/admins").get_data(as_text=True)
     assert "Bez pověření" in telo
 
-    parovat = klient.post("/spravci/marie/parovat", data={"csrf": csrf})
+    parovat = klient.post("/admins/marie/pair", data={"csrf": csrf})
     assert parovat.status_code == 302
-    assert parovat.headers["Location"].endswith("/spravci/qr/marie")
+    assert parovat.headers["Location"].endswith("/admins/qr/marie")
 
     druhy_qr = klient.get(parovat.headers["Location"]).get_data(as_text=True)
     assert "<pre" in druhy_qr
@@ -87,7 +87,7 @@ def test_revoke_then_pair_produces_a_new_qr(prihlaseny_klient):
 
 def test_qr_page_rejects_an_invalid_identity_with_404(prihlaseny_klient):
     klient, _ = prihlaseny_klient
-    odpoved = klient.get("/spravci/qr/marie!")
+    odpoved = klient.get("/admins/qr/marie!")
     assert odpoved.status_code == 404
 
 
@@ -95,10 +95,10 @@ def test_the_last_admin_cannot_be_removed_and_state_is_unchanged(
     prihlaseny_klient, tmp_path,
 ):
     klient, csrf = prihlaseny_klient
-    odpoved = klient.post("/spravci/jindrich/odebrat", data={"csrf": csrf})
+    odpoved = klient.post("/admins/jindrich/remove", data={"csrf": csrf})
     assert odpoved.status_code == 302
 
-    telo = klient.get("/spravci").get_data(as_text=True)
+    telo = klient.get("/admins").get_data(as_text=True)
     assert "zprava-chyba" in telo
     assert "posledni spravce" in telo
     assert Admin.local(tmp_path / "data", realm=REALM).admins() == ["jindrich"]
@@ -108,10 +108,10 @@ def test_the_last_admins_token_cannot_be_revoked_and_state_is_unchanged(
     prihlaseny_klient, tmp_path,
 ):
     klient, csrf = prihlaseny_klient
-    odpoved = klient.post("/spravci/jindrich/odvolat", data={"csrf": csrf})
+    odpoved = klient.post("/admins/jindrich/revoke", data={"csrf": csrf})
     assert odpoved.status_code == 302
 
-    telo = klient.get("/spravci").get_data(as_text=True)
+    telo = klient.get("/admins").get_data(as_text=True)
     assert "zprava-chyba" in telo
     assert "posledni spravce" in telo
     # Odvolani se vubec neprovedlo - tajemstvi zustava netknute.
@@ -124,10 +124,10 @@ def test_a_second_admin_can_be_removed(prihlaseny_klient, tmp_path):
     klient, csrf = prihlaseny_klient
     _pridej(prihlaseny_klient, "marie")
 
-    odpoved = klient.post("/spravci/marie/odebrat", data={"csrf": csrf})
+    odpoved = klient.post("/admins/marie/remove", data={"csrf": csrf})
     assert odpoved.status_code == 302
 
-    telo = klient.get("/spravci").get_data(as_text=True)
+    telo = klient.get("/admins").get_data(as_text=True)
     assert "marie" not in telo
     assert Admin.local(tmp_path / "data", realm=REALM).admins() == ["jindrich"]
 
@@ -137,7 +137,7 @@ def test_a_newly_added_admin_can_complete_the_full_login_round(
 ):
     odpoved = _pridej(prihlaseny_klient, "marie")
     assert odpoved.status_code == 302
-    assert odpoved.headers["Location"].endswith("/spravci/qr/marie")
+    assert odpoved.headers["Location"].endswith("/admins/qr/marie")
 
     prvni, druhy = admin_kody(tmp_path / "data", jmeno="marie")
 
@@ -178,12 +178,12 @@ def test_removing_an_admin_kills_their_live_session(prihlaseny_klient, tmp_path)
     assert prihlaseni.status_code == 302
 
     # marie ma otevrenou relaci a funguje - overeno pred odebranim.
-    assert marie_klient.get("/spravci").status_code == 200
+    assert marie_klient.get("/admins").status_code == 200
 
-    odebrani = klient.post("/spravci/marie/odebrat", data={"csrf": csrf})
+    odebrani = klient.post("/admins/marie/remove", data={"csrf": csrf})
     assert odebrani.status_code == 302
 
-    dalsi_pozadavek = marie_klient.get("/spravci")
+    dalsi_pozadavek = marie_klient.get("/admins")
     assert dalsi_pozadavek.status_code == 302
     assert dalsi_pozadavek.headers["Location"].endswith("/login")
 
@@ -192,7 +192,7 @@ def test_removing_an_admin_kills_their_live_session(prihlaseny_klient, tmp_path)
 
     # Prezijici spravce (jindrich) neni zasahem dotcen - jeho relace
     # funguje dal.
-    assert klient.get("/spravci").status_code == 200
+    assert klient.get("/admins").status_code == 200
 
 
 def test_every_mutating_route_without_csrf_is_rejected_and_state_unchanged(
@@ -202,16 +202,16 @@ def test_every_mutating_route_without_csrf_is_rejected_and_state_unchanged(
     klient, _ = prihlaseny_klient
 
     mutace = [
-        ("/spravci/pridat", {"jmeno": "petr"}),
-        ("/spravci/marie/odvolat", {}),
-        ("/spravci/marie/parovat", {}),
-        ("/spravci/marie/odebrat", {}),
+        ("/admins/add", {"jmeno": "petr"}),
+        ("/admins/marie/revoke", {}),
+        ("/admins/marie/pair", {}),
+        ("/admins/marie/remove", {}),
     ]
     for cesta, data in mutace:
         odpoved = klient.post(cesta, data=data)
         assert odpoved.status_code == 400, cesta
 
-    telo = klient.get("/spravci").get_data(as_text=True)
+    telo = klient.get("/admins").get_data(as_text=True)
     assert "marie" in telo
     assert "petr" not in telo
     assert Admin.local(tmp_path / "data", realm=REALM).admins() == [
@@ -220,12 +220,12 @@ def test_every_mutating_route_without_csrf_is_rejected_and_state_unchanged(
 
 
 @pytest.mark.parametrize("metoda,cesta", [
-    ("get", "/spravci"),
-    ("get", "/spravci/qr/marie"),
-    ("post", "/spravci/pridat"),
-    ("post", "/spravci/marie/odebrat"),
-    ("post", "/spravci/marie/odvolat"),
-    ("post", "/spravci/marie/parovat"),
+    ("get", "/admins"),
+    ("get", "/admins/qr/marie"),
+    ("post", "/admins/add"),
+    ("post", "/admins/marie/remove"),
+    ("post", "/admins/marie/revoke"),
+    ("post", "/admins/marie/pair"),
 ])
 def test_every_route_without_a_session_redirects_to_login(prostredi, metoda, cesta):
     odpoved = getattr(prostredi, metoda)(cesta)
@@ -235,6 +235,6 @@ def test_every_route_without_a_session_redirects_to_login(prostredi, metoda, ces
 
 def test_the_english_language_switches_table_texts(prihlaseny_klient):
     klient, _ = prihlaseny_klient
-    telo = klient.get("/spravci?lang=en").get_data(as_text=True)
+    telo = klient.get("/admins?lang=en").get_data(as_text=True)
     assert "Admins" in telo
     assert "Správci" not in telo

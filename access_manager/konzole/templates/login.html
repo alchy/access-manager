@@ -1,5 +1,25 @@
 {% extends "layout.html" %}
 {% block title %}{{ t('login.title') }}{% endblock %}
+
+{#- Kod se opisuje z telefonu, proto policko na kazdou cislici. Funguje
+    i bez JavaScriptu (tabem mezi policky); skript jen doplni posun kurzoru,
+    mazani zpet a vlozeni celeho kodu ze schranky. Server slozi cislice
+    dohromady v _kod_z_formulare, ktere dal prijima i jedno cele pole. -#}
+{% macro kodova_policka(pole, popisek) %}
+<fieldset class="code-fieldset">
+  <legend>{{ popisek }}</legend>
+  <div class="code-group" data-code="{{ pole }}">
+    {% for i in range(1, delka_kodu + 1) %}
+    <input type="text" name="{{ pole }}_{{ i }}" class="code-box mono"
+           inputmode="numeric" pattern="[0-9]" maxlength="1"
+           aria-label="{{ t('login.digit_aria').format(kod=popisek, poradi=i) }}"
+           autocomplete="{{ 'one-time-code' if pole == 'kod1' and i == 1 else 'off' }}"
+           required>
+    {% endfor %}
+  </div>
+</fieldset>
+{% endmacro %}
+
 {% block content %}
 <div class="karta">
   <h1>{{ t('login.title') }}</h1>
@@ -15,17 +35,11 @@
       <span>{{ t('login.name') }}</span>
       <input type="text" name="jmeno" autocomplete="off" required>
     </label>
-    <label>
-      <span>{{ t('login.codes') }}</span>
-      <input type="text" name="kod1" class="mono" inputmode="numeric" pattern="[0-9]{6}"
-             placeholder="{{ t('login.codes_hint') }}" autocomplete="off" required>
-    </label>
-    <label>
-      <span class="visually-hidden">{{ t('login.codes') }}</span>
-      <input type="text" name="kod2" class="mono" inputmode="numeric" pattern="[0-9]{6}"
-             placeholder="{{ t('login.codes_hint') }}" autocomplete="off" required>
-    </label>
+    {{ kodova_policka('kod1', t('login.code_first')) }}
+    {{ kodova_policka('kod2', t('login.code_second')) }}
+    <p class="poznamka">{{ t('login.codes_hint') }}</p>
     <button type="submit" class="odeslat">{{ t('login.submit') }}</button>
   </form>
 </div>
+<script src="{{ url_for('static', filename='code.js') }}" defer></script>
 {% endblock %}

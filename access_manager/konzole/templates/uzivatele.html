@@ -1,0 +1,64 @@
+{% extends "layout.html" %}
+{% block content %}
+<h1>{{ t('uzivatele.title') }}</h1>
+
+<table class="tabulka">
+  <thead>
+    <tr>
+      <th>{{ t('uzivatele.subject') }}</th>
+      <th>{{ t('uzivatele.status') }}</th>
+      <th>{{ t('uzivatele.groups') }}</th>
+      <th>{{ t('spolecne.actions') }}</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for radek in uzivatele %}
+    <tr>
+      <td class="mono">{{ radek.jmeno }}</td>
+      <td><span class="stav stav-{{ radek.stav }}">{{ radek.stav_text }}</span></td>
+      <td>
+        {% for skupina in radek.skupiny %}
+        <span class="chip">{{ skupina }}</span>
+        {% endfor %}
+      </td>
+      <td class="akce">
+        <a href="{{ url_for('_uzivatele_qr', jmeno=radek.jmeno) }}">{{ t('uzivatele.show_qr') }}</a>
+        {% if radek.stav == 'disabled' %}
+        <form method="post" action="{{ url_for('_uzivatele_zapnout', jmeno=radek.jmeno) }}">
+          {{ csrf_pole() }}
+          <button type="submit">{{ t('uzivatele.enable') }}</button>
+        </form>
+        {% else %}
+        <form method="post" action="{{ url_for('_uzivatele_vypnout', jmeno=radek.jmeno) }}">
+          {{ csrf_pole() }}
+          <button type="submit">{{ t('uzivatele.disable') }}</button>
+        </form>
+        {% endif %}
+        <form method="post" action="{{ url_for('_uzivatele_parovat', jmeno=radek.jmeno) }}">
+          {{ csrf_pole() }}
+          <button type="submit">{{ t('uzivatele.pair') }}</button>
+        </form>
+        <form method="post" action="{{ url_for('_uzivatele_odvolat', jmeno=radek.jmeno) }}">
+          {{ csrf_pole() }}
+          <button type="submit">{{ t('uzivatele.revoke') }}</button>
+        </form>
+        <form method="post" action="{{ url_for('_uzivatele_smazat', jmeno=radek.jmeno) }}">
+          {{ csrf_pole() }}
+          <button type="submit">{{ t('uzivatele.delete') }}</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>{{ t('uzivatele.add') }}</h2>
+<form method="post" action="{{ url_for('_uzivatele_pridat') }}" class="pole-radek">
+  {{ csrf_pole() }}
+  <label>
+    <span>{{ t('uzivatele.subject') }}</span>
+    <input type="text" name="jmeno" autocomplete="off" required>
+  </label>
+  <button type="submit" class="odeslat">{{ t('uzivatele.add') }}</button>
+</form>
+{% endblock %}

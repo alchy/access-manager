@@ -1,7 +1,7 @@
 {% extends "layout.html" %}
-{% block title %}{{ t('lide.show_qr') }}{% endblock %}
+{% block title %}{{ t('uzivatele.show_qr') }}{% endblock %}
 {% block content %}
-<h1>{{ t('lide.show_qr') }}</h1>
+<h1>{{ t('uzivatele.show_qr') }}</h1>
 <p>
   <span class="mono">{{ jmeno }}</span>
   &middot;
@@ -10,11 +10,11 @@
 
 {% if obrazec %}
 <pre class="qr">{{ obrazec }}</pre>
-<p class="poznamka">{{ t('lide.qr_note') }}</p>
+<p class="poznamka">{{ t('uzivatele.qr_note') }}</p>
 {% elif sparovano %}
 <p>{{ t('spravci.paired') }}</p>
 {% else %}
-<p>{{ t('lide.no_credential') }}</p>
+<p>{{ t('uzivatele.no_credential') }}</p>
 {% endif %}
 
 <p><a href="{{ zpet }}">{{ t('spolecne.back') }}</a></p>

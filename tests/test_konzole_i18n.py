@@ -21,5 +21,5 @@ def test_a_missing_key_returns_the_key_itself():
 def test_known_keys_translate():
     cs = preklady.nacti("cs")
     en = preklady.nacti("en")
-    assert cs["nav.people"] == "Lidé"
-    assert en["nav.people"] == "People"
+    assert cs["nav.users"] == "Uživatelé"
+    assert en["nav.users"] == "Users"

@@ -20,7 +20,7 @@ def _zaregistruj(prihlaseny_klient, jmeno, origins="", detail=False):
     data = {"csrf": csrf, "jmeno": jmeno, "origins": origins}
     if detail:
         data["detail"] = "on"
-    return klient.post("/aplikace/pridat", data=data)
+    return klient.post("/applications/add", data=data)
 
 
 def _klic_z_odpovedi(odpoved):
@@ -37,7 +37,7 @@ def test_registration_shows_the_key_once_and_never_on_the_listing(
     klic = _klic_z_odpovedi(odpoved)
 
     klient, _ = prihlaseny_klient
-    vypis = klient.get("/aplikace").get_data(as_text=True)
+    vypis = klient.get("/applications").get_data(as_text=True)
     assert klic not in vypis
     assert "core" in vypis
 
@@ -51,7 +51,7 @@ def test_the_fingerprint_is_shown_shortened_not_in_full(prihlaseny_klient, tmp_p
     assert komponenta is not None
 
     klient, _ = prihlaseny_klient
-    vypis = klient.get("/aplikace").get_data(as_text=True)
+    vypis = klient.get("/applications").get_data(as_text=True)
     assert komponenta.key_hash[:12] in vypis
     assert komponenta.key_hash not in vypis
 
@@ -64,7 +64,7 @@ def test_registering_with_a_duplicate_name_flashes_an_error_and_leaves_state_unc
     assert odpoved.status_code == 302
 
     klient, _ = prihlaseny_klient
-    vypis = klient.get("/aplikace").get_data(as_text=True)
+    vypis = klient.get("/applications").get_data(as_text=True)
     assert "zprava-chyba" in vypis
     assert vypis.count(">core<") == 1
 
@@ -76,7 +76,7 @@ def test_registering_with_a_bad_cidr_origin_flashes_an_error_and_is_not_register
     assert odpoved.status_code == 302
 
     klient, _ = prihlaseny_klient
-    vypis = klient.get("/aplikace").get_data(as_text=True)
+    vypis = klient.get("/applications").get_data(as_text=True)
     assert "zprava-chyba" in vypis
     assert "core" not in vypis
 
@@ -85,10 +85,10 @@ def test_revoking_an_application_removes_it_from_the_listing(prihlaseny_klient):
     _zaregistruj(prihlaseny_klient, "core")
     klient, csrf = prihlaseny_klient
 
-    odpoved = klient.post("/aplikace/core/odvolat", data={"csrf": csrf})
+    odpoved = klient.post("/applications/core/revoke", data={"csrf": csrf})
     assert odpoved.status_code == 302
 
-    vypis = klient.get("/aplikace").get_data(as_text=True)
+    vypis = klient.get("/applications").get_data(as_text=True)
     assert "core" not in vypis
 
 
@@ -111,23 +111,23 @@ def test_every_mutating_route_without_csrf_is_rejected_and_state_unchanged(
     klient, _ = prihlaseny_klient
 
     mutace = [
-        ("/aplikace/pridat", {"jmeno": "jina"}),
-        ("/aplikace/core/odvolat", {}),
+        ("/applications/add", {"jmeno": "jina"}),
+        ("/applications/core/revoke", {}),
     ]
     for cesta, data in mutace:
         odpoved = klient.post(cesta, data=data)
         assert odpoved.status_code == 400, cesta
 
-    vypis = klient.get("/aplikace").get_data(as_text=True)
+    vypis = klient.get("/applications").get_data(as_text=True)
     assert "core" in vypis
     assert "jina" not in vypis
     assert len(Admin.local(tmp_path / "data", realm=REALM).components()) == 1
 
 
 @pytest.mark.parametrize("metoda,cesta", [
-    ("get", "/aplikace"),
-    ("post", "/aplikace/pridat"),
-    ("post", "/aplikace/core/odvolat"),
+    ("get", "/applications"),
+    ("post", "/applications/add"),
+    ("post", "/applications/core/revoke"),
 ])
 def test_every_route_without_a_session_redirects_to_login(prostredi, metoda, cesta):
     odpoved = getattr(prostredi, metoda)(cesta)
@@ -145,13 +145,13 @@ def test_secret_bearing_pages_send_cache_control_no_store(prihlaseny_klient, tmp
     Admin.local(tmp_path / "data", realm=REALM).add_user("tereza")
     klient, _ = prihlaseny_klient
 
-    qr = klient.get("/lide/qr/tereza")
+    qr = klient.get("/users/qr/tereza")
     assert qr.headers.get("Cache-Control") == "no-store"
 
     klic_odpoved = _zaregistruj(prihlaseny_klient, "core")
     assert klic_odpoved.headers.get("Cache-Control") == "no-store"
 
-    normalni = klient.get("/lide")
+    normalni = klient.get("/users")
     assert normalni.headers.get("Cache-Control") != "no-store"
 
 
@@ -159,6 +159,6 @@ def test_the_english_language_switches_table_texts(prihlaseny_klient):
     _zaregistruj(prihlaseny_klient, "core")
     klient, _ = prihlaseny_klient
 
-    vypis = klient.get("/aplikace?lang=en").get_data(as_text=True)
+    vypis = klient.get("/applications?lang=en").get_data(as_text=True)
     assert "Applications" in vypis
     assert "Aplikace" not in vypis

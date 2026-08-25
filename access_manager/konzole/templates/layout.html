@@ -7,7 +7,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}{{ t('login.title') if not session.get('admin') else t('nav.people') }}{% endblock %}</title>
+<title>{% block title %}{{ t('login.title') if not session.get('admin') else t('nav.users') }}{% endblock %}</title>
 <style>
   /* Tokeny sdilene celou konzoli - viz Global Constraints v ukolech. */
   :root {
@@ -137,6 +137,44 @@
     outline-offset: 1px;
     border-color: var(--accent);
   }
+  /* -- prihlasovaci kod: policko na kazdou cislici (tridy anglicky,
+        vybira je code.js) ------------------------------------------------ */
+  .code-fieldset {
+    margin: 0;
+    padding: 0;
+    border: none;
+  }
+  .code-fieldset legend {
+    padding: 0;
+    margin-bottom: 0.3rem;
+    font-size: 0.85rem;
+  }
+  .code-group {
+    display: flex;
+    gap: 0.4rem;
+  }
+  .code-box {
+    flex: 1 1 0;
+    min-width: 0;
+    aspect-ratio: 1 / 1;
+    max-width: 3rem;
+    padding: 0;
+    font-size: 1.15rem;
+    text-align: center;
+    border: 1px solid var(--hranice);
+    border-radius: 10px;
+    background: #fff;
+    color: var(--text);
+  }
+  .code-box:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    border-color: var(--accent);
+  }
+  /* Sipky u number-like poli jen zabiraji misto. */
+  .code-box::-webkit-outer-spin-button,
+  .code-box::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
   .odeslat {
     background: var(--accent);
     color: #fff;
@@ -170,7 +208,7 @@
   .zprava-chyba { border-color: var(--chyba); color: var(--chyba); }
   .zprava-ok { border-color: var(--accent); color: var(--accent); }
 
-  /* -- tabulky (lide, skupiny, aplikace, spravci, audit) ----------------- */
+  /* -- tabulky (uzivatele, skupiny, aplikace, spravci, audit) ------------ */
   .tabulka {
     width: 100%;
     border-collapse: collapse;
@@ -283,7 +321,7 @@
   <aside class="sidebar">
     <div class="realm">{{ session.get('realm', '') }}</div>
     <nav>
-      <a href="{{ url_for('_lide_seznam') }}">{{ t('nav.people') }}</a>
+      <a href="{{ url_for('_uzivatele_seznam') }}">{{ t('nav.users') }}</a>
       <a href="{{ url_for('_skupiny_seznam') }}">{{ t('nav.groups') }}</a>
       <a href="{{ url_for('_aplikace_seznam') }}">{{ t('nav.apps') }}</a>
       <a href="{{ url_for('_spravci_seznam') }}">{{ t('nav.admins') }}</a>
