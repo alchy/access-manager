@@ -111,6 +111,14 @@ class Admin:
         """Vsechny registrovane komponenty v realmu, setridene podle jmena."""
         return self._store.components()
 
+    def add_origin(self, name: str, origin: str) -> None:
+        """Prida aplikaci povoleny rozsah. Klic zustava, plati hned."""
+        self._store.add_origin(name, origin)
+
+    def remove_origin(self, name: str, origin: str) -> None:
+        """Odebere aplikaci povoleny rozsah. Klic zustava, plati hned."""
+        self._store.remove_origin(name, origin)
+
     def revoke_component(self, name: str) -> None:
         """Odvolani komponenty. Nasledne registrace ma novy klic."""
         self._store.revoke_component(name)

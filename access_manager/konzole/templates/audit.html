@@ -2,6 +2,7 @@
 {% block title %}{{ t('audit.title') }}{% endblock %}
 {% block content %}
 <h1>{{ t('audit.title') }}</h1>
+{{ napoveda('audit') }}
 
 <h2>{{ t('audit.filter') }}</h2>
 <form method="get" action="{{ url_for('_audit_seznam') }}" class="pole-radek">
@@ -22,7 +23,7 @@
     <input type="text" name="kind" value="{{ kind }}" autocomplete="off">
   </label>
   <label>
-    <span>{{ t('audit.outcome') }}</span>
+    <span>{{ t('audit.result') }}</span>
     <input type="text" name="outcome" value="{{ outcome }}" autocomplete="off">
   </label>
   <button type="submit" class="odeslat">{{ t('audit.filter') }}</button>
@@ -44,7 +45,7 @@
       <td>{{ radek.udalost }}</td>
       <td class="mono">{{ radek.kdo }}</td>
       <td>
-        <span class="vysledek {{ radek.vysledek_trida }}">{{ radek.vysledek_text }}</span>
+        {{ stavovy_stitek(radek.vysledek_trida, radek.vysledek_text) }}
         {% if radek.reason %}<span class="poznamka">({{ radek.reason }})</span>{% endif %}
       </td>
     </tr>

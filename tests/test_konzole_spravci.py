@@ -45,7 +45,7 @@ def test_listing_shows_waiting_then_paired_then_no_credential_after_revoke(
 
     cekajici = klient.get("/admins").get_data(as_text=True)
     assert f"{REALM}-admin-marie" in cekajici
-    assert "Čeká" in cekajici
+    assert "Nespárováno" in cekajici
 
     # Prvni skutecne prihlaseni dokoncuje parovani (viz
     # FileStore._complete_pairing) - presne stejny mechanismus, ktery

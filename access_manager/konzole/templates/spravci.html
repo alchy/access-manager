@@ -2,6 +2,7 @@
 {% block title %}{{ t('spravci.title') }}{% endblock %}
 {% block content %}
 <h1>{{ t('spravci.title') }}</h1>
+{{ napoveda('admins') }}
 
 <table class="tabulka">
   <thead>
@@ -15,7 +16,7 @@
     {% for radek in spravci %}
     <tr>
       <td class="mono">{{ radek.stitek }}</td>
-      <td><span class="stav stav-{{ radek.stav }}">{{ radek.stav_text }}</span></td>
+      <td>{{ stavovy_stitek('stav-' ~ radek.stav, radek.stav_text) }}</td>
       <td class="akce">
         <a href="{{ url_for('_spravci_qr', jmeno=radek.jmeno) }}">{{ t('uzivatele.show_qr') }}</a>
         <form method="post" action="{{ url_for('_spravci_parovat', jmeno=radek.jmeno) }}">

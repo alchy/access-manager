@@ -2,6 +2,7 @@
 {% block title %}{{ t('aplikace.title') }}{% endblock %}
 {% block content %}
 <h1>{{ t('aplikace.title') }}</h1>
+{{ napoveda('apps') }}
 
 <table class="tabulka">
   <thead>
@@ -19,13 +20,33 @@
       <td class="mono">{{ radek.jmeno }}</td>
       <td class="mono">{{ radek.key_id }} &middot; {{ radek.otisk }}</td>
       <td>
-        {% for puvod in radek.origins %}
-        <span class="chip">{{ puvod }}</span>
-        {% endfor %}
+        {% if radek.origins %}
+        {# Odebrani jde formularem, ne odkazem: je to zapis. Rozsah cestuje ve
+           skrytem poli, protoze CIDR obsahuje lomitko a v ceste by se rozpadl. #}
+        <div class="rozsahy">
+          {% for puvod in radek.origins %}
+          <span class="chip chip-x">{{ puvod }}
+            <form method="post" action="{{ url_for('_aplikace_rozsah_odebrat') }}">
+              {{ csrf_pole() }}
+              <input type="hidden" name="jmeno" value="{{ radek.jmeno }}">
+              <input type="hidden" name="rozsah" value="{{ puvod }}">
+              <button type="submit" title="{{ t('aplikace.range_remove') }}"
+                      aria-label="{{ t('aplikace.range_remove') }}: {{ puvod }}">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+              </button>
+            </form>
+          </span>
+          {% endfor %}
+        </div>
+        {% else %}
+        {{ stavovy_stitek('stav-no_credential', t('aplikace.range_none')) }}
+        {% endif %}
       </td>
       <td>
         {% if radek.detail %}
-        <span class="chip">{{ t('aplikace.detail') }}</span>
+        {{ stavovy_stitek('vysledek-write', t('aplikace.detail_on')) }}
+        {% else %}
+        <span class="chip">{{ t('aplikace.detail_off') }}</span>
         {% endif %}
       </td>
       <td class="akce">
@@ -39,21 +60,43 @@
   </tbody>
 </table>
 
-<h2>{{ t('aplikace.register') }}</h2>
+<h2>{{ t('aplikace.step_add') }}</h2>
+<p class="poznamka">{{ t('aplikace.step_add_hint') }}</p>
 <form method="post" action="{{ url_for('_aplikace_pridat') }}" class="pole-radek">
   {{ csrf_pole() }}
   <label>
     <span>{{ t('aplikace.name') }}</span>
     <input type="text" name="jmeno" autocomplete="off" required>
   </label>
-  <label>
-    <span>{{ t('aplikace.origins') }}</span>
-    <input type="text" name="origins" autocomplete="off">
-  </label>
-  <label>
+  <label class="volba">
     <input type="checkbox" name="detail" value="on">
-    <span>{{ t('aplikace.detail') }}</span>
+    <span>
+      {{ t('aplikace.detail') }}
+      <span class="poznamka">{{ t('aplikace.detail_hint') }}</span>
+    </span>
   </label>
-  <button type="submit" class="odeslat">{{ t('aplikace.register') }}</button>
+  <button type="submit" class="odeslat">{{ t('aplikace.step_add') }}</button>
 </form>
+
+<h2>{{ t('aplikace.step_ranges') }}</h2>
+<p class="poznamka">{{ t('aplikace.step_ranges_hint') }}</p>
+{% if aplikace %}
+<form method="post" action="{{ url_for('_aplikace_rozsah_pridat') }}" class="pole-radek">
+  {{ csrf_pole() }}
+  <label>
+    <span>{{ t('aplikace.app') }}</span>
+    <select name="jmeno" required>
+      {% for radek in aplikace %}
+      <option value="{{ radek.jmeno }}">{{ radek.jmeno }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>
+    <span>{{ t('aplikace.range_label') }}</span>
+    <input type="text" name="rozsah" autocomplete="off" required placeholder="10.42.0.0/16">
+  </label>
+  <button type="submit" class="odeslat">{{ t('aplikace.range_add') }}</button>
+</form>
+<p class="poznamka">{{ t('aplikace.range_forms') }}</p>
+{% endif %}
 {% endblock %}

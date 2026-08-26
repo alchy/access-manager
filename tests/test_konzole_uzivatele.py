@@ -58,7 +58,7 @@ def test_disabling_changes_the_state_shown_in_the_listing(prihlaseny_klient):
     # Cerstve zalozeny clovek jeste nikdy nepouzil sve prvni prihlaseni -
     # ceka na parovani, neni "aktivni" (viz FileStore._complete_pairing).
     ceka = klient.get("/users").get_data(as_text=True)
-    assert "Čeká" in ceka
+    assert "Nespárováno" in ceka
 
     odpoved = klient.post("/users/tereza/disable", data={"csrf": csrf})
     assert odpoved.status_code == 302
@@ -140,7 +140,7 @@ def test_every_mutating_route_without_csrf_is_rejected_and_state_unchanged(
 
     telo = klient.get("/users").get_data(as_text=True)
     assert "tereza" in telo
-    assert "Čeká" in telo
+    assert "Nespárováno" in telo
     assert "petr" not in telo
 
 
@@ -166,5 +166,58 @@ def test_the_english_language_switches_table_texts(prihlaseny_klient):
 
     telo = klient.get("/users?lang=en").get_data(as_text=True)
     assert "Users" in telo
-    assert "Subject" in telo
+    assert "Username" in telo
     assert "Uživatelé" not in telo
+
+
+# == vypis o stovkach identit ==============================================
+#
+# Realm o stovkach lidi se bez filtru necte. Filtr navic setri cteni z disku:
+# `_radek_cloveka` sahne kazde identite na disk zvlast, a to az PO filtru.
+
+
+def _pridej_vic(prihlaseny_klient, jmena):
+    for jmeno in jmena:
+        _pridej(prihlaseny_klient, jmeno)
+
+
+def test_the_listing_shows_how_many_identities_there_are(prihlaseny_klient):
+    _pridej_vic(prihlaseny_klient, ["hana", "pavel", "tereza"])
+    klient, _ = prihlaseny_klient
+    telo = klient.get("/users").get_data(as_text=True)
+    assert "3 celkem" in telo
+
+
+def test_a_query_narrows_the_listing_and_reports_both_counts(prihlaseny_klient):
+    _pridej_vic(prihlaseny_klient, ["hana.novakova", "pavel.novak", "tereza.mala"])
+    klient, _ = prihlaseny_klient
+    telo = klient.get("/users?q=novak").get_data(as_text=True)
+
+    assert "hana.novakova" in telo
+    assert "pavel.novak" in telo
+    assert "tereza.mala" not in telo
+    assert "2 z 3" in telo
+
+
+def test_a_query_matches_anywhere_in_the_name_not_just_the_start(prihlaseny_klient):
+    """Spravce hleda 'novak' a chce najit i 'jan.novak@example.com'."""
+    _pridej_vic(prihlaseny_klient, ["jan.novak@example.com"])
+    klient, _ = prihlaseny_klient
+    telo = klient.get("/users?q=novak").get_data(as_text=True)
+    assert "jan.novak@example.com" in telo
+
+
+def test_a_query_that_matches_nothing_says_so(prihlaseny_klient):
+    _pridej_vic(prihlaseny_klient, ["hana"])
+    klient, _ = prihlaseny_klient
+    telo = klient.get("/users?q=nikdo").get_data(as_text=True)
+    assert "Filtru neodpovídá nic." in telo
+    assert "0 z 1" in telo
+
+
+def test_an_empty_query_does_not_filter(prihlaseny_klient):
+    _pridej_vic(prihlaseny_klient, ["hana", "pavel"])
+    klient, _ = prihlaseny_klient
+    telo = klient.get("/users?q=%20%20").get_data(as_text=True)
+    assert "hana" in telo and "pavel" in telo
+    assert "2 celkem" in telo

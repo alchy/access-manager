@@ -1,6 +1,6 @@
 # Připojení aplikace
 
-*Jak aplikace ověřuje lidi a čte adresář skupin — lokálně i přes službu.*
+*Jak aplikace ověřuje uživatele a čte adresář skupin — lokálně i přes službu.*
 
 ## Dvě zapojení, jedno API
 

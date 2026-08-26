@@ -386,12 +386,32 @@ def create_console_app(cfg: ServiceConfig):
             "jmeno": jmeno, "stav": stav, "stav_text": stav_text, "skupiny": skupiny,
         }
 
+    def _vyfiltruj(jmena, dotaz):
+        """Podretezcovy filtr pres jmeno. Prazdny dotaz nefiltruje.
+
+        Zamerne obycejny podretezec, ne prefix: spravce hleda "novak" a chce
+        najit i "jan.novak@example.com".
+        """
+        if not dotaz:
+            return list(jmena)
+        return [jmeno for jmeno in jmena if dotaz in jmeno]
+
     @app.get("/users")
     @prihlasen
     def _uzivatele_seznam():
         store = flask.g.store
-        uzivatele = [_radek_cloveka(store, jmeno) for jmeno in store.users()]
-        return flask.render_template("uzivatele.html", uzivatele=uzivatele)
+        vsichni = store.users()
+        dotaz = flask.request.args.get("q", "").strip().lower()
+        # Filtruje se PRED stavbou radku. `_radek_cloveka` sahne kazde identite
+        # na disk zvlast (stav poverni, zbyvajici platnost QR, skupiny), takze
+        # u stovek identit je nefiltrovany vypis stovky cteni na jedno
+        # zobrazeni - a vetsinu z nich pak nikdo necte.
+        vybrani = _vyfiltruj(vsichni, dotaz)
+        uzivatele = [_radek_cloveka(store, jmeno) for jmeno in vybrani]
+        return flask.render_template(
+            "uzivatele.html", uzivatele=uzivatele, dotaz=dotaz,
+            celkem=len(vsichni), videno=len(vybrani),
+        )
 
     def _uzivatele_mutace(jmeno, akce, presmerovani=None):
         """Spolecny tvar mutaci lidi: CSRF -> knihovni volani -> flash ->
@@ -518,7 +538,10 @@ def create_console_app(cfg: ServiceConfig):
     @prihlasen
     def _skupiny_seznam():
         store = flask.g.store
-        skupiny = [_radek_skupiny(store, nazev) for nazev in store.groups()]
+        vsechny = store.groups()
+        dotaz = flask.request.args.get("q", "").strip().lower()
+        vybrane = _vyfiltruj(vsechny, dotaz)
+        skupiny = [_radek_skupiny(store, nazev) for nazev in vybrane]
         detail = None
         pozadovana = flask.request.args.get("group")
         if pozadovana:
@@ -528,7 +551,10 @@ def create_console_app(cfg: ServiceConfig):
                 pozadovana = None
             if pozadovana:
                 detail = _detail_skupiny(store, pozadovana)
-        return flask.render_template("skupiny.html", skupiny=skupiny, detail=detail)
+        return flask.render_template(
+            "skupiny.html", skupiny=skupiny, detail=detail, dotaz=dotaz,
+            celkem=len(vsechny), videno=len(vybrane),
+        )
 
     def _skupiny_mutace(akce, *args, cil, presmerovani=None):
         """Spolecny tvar mutaci skupin: CSRF -> knihovni volani -> flash ->
@@ -615,17 +641,19 @@ def create_console_app(cfg: ServiceConfig):
     @app.post("/applications/add")
     @prihlasen
     def _aplikace_pridat():
+        """Prvni krok: vznikne aplikace a klic. Rozsahy se pridavaji zvlast.
+
+        Jedno pole na cárkami oddeleny seznam CIDR bylo nesrozumitelne a
+        neslo z nej po zalozeni nic ubrat, aniz by se vymenil klic. Registrace
+        proto rozsahy nebere; druhy krok (`_aplikace_rozsah_pridat`) je pridava
+        po jednom a umi je i odebrat.
+        """
         over_csrf()
         jmeno = flask.request.form.get("jmeno", "").strip()
-        origins = [
-            puvod.strip()
-            for puvod in flask.request.form.get("origins", "").split(",")
-            if puvod.strip()
-        ]
         detail = flask.request.form.get("detail") == "on"
         try:
             klic = flask.g.store.register_component(
-                jmeno, origins=origins, detail=detail
+                jmeno, origins=(), detail=detail
             )
         except ValueError as chyba:
             flask.flash(f"{_prelozit('spolecne.error')}: {chyba}", "chyba")
@@ -650,6 +678,42 @@ def create_console_app(cfg: ServiceConfig):
     @prihlasen
     def _aplikace_odvolat(jmeno):
         return _aplikace_mutace(jmeno, flask.g.store.revoke_component)
+
+    def _aplikace_rozsah(akce):
+        """Spolecny tvar pro pridani i odebrani rozsahu.
+
+        Jmeno aplikace i rozsah chodi FORMULAREM, ne v ceste. U rozsahu proto,
+        ze CIDR obsahuje lomitko a v ceste by se rozpadl na dva segmenty.
+        U jmena proto, ze cil se vybira ze seznamu: kdyby byl v ceste, musel by
+        vyber prepisovat action JavaScriptem - a bez nej by formular tise
+        pridal rozsah prvni aplikaci v poradi. Konzole ma fungovat i bez JS.
+        """
+        over_csrf()
+        jmeno = flask.request.form.get("jmeno", "").strip()
+        rozsah = flask.request.form.get("rozsah", "").strip()
+        if not jmeno or not rozsah:
+            flask.flash(
+                f"{_prelozit('spolecne.error')}: {_prelozit('aplikace.range_empty')}",
+                "chyba",
+            )
+            return flask.redirect(flask.url_for("_aplikace_seznam"))
+        try:
+            akce(jmeno, rozsah)
+        except ValueError as chyba:
+            flask.flash(f"{_prelozit('spolecne.error')}: {chyba}", "chyba")
+        else:
+            flask.flash(_prelozit("spolecne.done"), "ok")
+        return flask.redirect(flask.url_for("_aplikace_seznam"))
+
+    @app.post("/applications/ranges/add")
+    @prihlasen
+    def _aplikace_rozsah_pridat():
+        return _aplikace_rozsah(flask.g.store.add_origin)
+
+    @app.post("/applications/ranges/remove")
+    @prihlasen
+    def _aplikace_rozsah_odebrat():
+        return _aplikace_rozsah(flask.g.store.remove_origin)
 
     # == spravci ==============================================================
     #

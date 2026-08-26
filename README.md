@@ -122,7 +122,7 @@ Complete: the file storage layer (verification, group expansion,
 anti-replay per purpose, full write half with identity lifecycle), realms
 (admins, QR validity, application keys, per-realm audit, reconcile), the
 REST service (flask/waitress behind a proxy, throttling), `Access.remote`
-and the web console (all five pages — people, groups, applications, admins,
+and the web console (all five pages — users, groups, applications, admins,
 audit — CZ/EN switch, CSRF on every mutation, sessions die on service
 restart by design) — 359 tests, all running without network or a live
 server (the console is driven through `create_console_app(cfg).test_client()`).

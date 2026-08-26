@@ -2,6 +2,8 @@
 {% block title %}{{ t('skupiny.title') }}{% endblock %}
 {% block content %}
 <h1>{{ t('skupiny.title') }}</h1>
+{{ napoveda('groups') }}
+{{ hledani(url_for('_skupiny_seznam'), dotaz, videno, celkem) }}
 
 <table class="tabulka">
   <thead>
@@ -28,6 +30,9 @@
       </td>
     </tr>
     {% endfor %}
+    {% if not skupiny %}
+    <tr><td colspan="4" class="poznamka">{{ t('spolecne.nothing_found') }}</td></tr>
+    {% endif %}
   </tbody>
 </table>
 <p class="poznamka">{{ t('skupiny.reserved_note') }}</p>
@@ -36,7 +41,7 @@
 <form method="post" action="{{ url_for('_skupiny_pridat') }}" class="pole-radek">
   {{ csrf_pole() }}
   <label>
-    <span>{{ t('aplikace.name') }}</span>
+    <span>{{ t('skupiny.name') }}</span>
     <input type="text" name="nazev" autocomplete="off" required>
   </label>
   <button type="submit" class="odeslat">{{ t('skupiny.add_group') }}</button>

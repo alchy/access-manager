@@ -1,6 +1,8 @@
 {% extends "layout.html" %}
 {% block content %}
 <h1>{{ t('uzivatele.title') }}</h1>
+{{ napoveda('users') }}
+{{ hledani(url_for('_uzivatele_seznam'), dotaz, videno, celkem) }}
 
 <table class="tabulka">
   <thead>
@@ -15,7 +17,7 @@
     {% for radek in uzivatele %}
     <tr>
       <td class="mono">{{ radek.jmeno }}</td>
-      <td><span class="stav stav-{{ radek.stav }}">{{ radek.stav_text }}</span></td>
+      <td>{{ stavovy_stitek('stav-' ~ radek.stav, radek.stav_text) }}</td>
       <td>
         {% for skupina in radek.skupiny %}
         <span class="chip">{{ skupina }}</span>
@@ -49,6 +51,9 @@
       </td>
     </tr>
     {% endfor %}
+    {% if not uzivatele %}
+    <tr><td colspan="4" class="poznamka">{{ t('spolecne.nothing_found') }}</td></tr>
+    {% endif %}
   </tbody>
 </table>
 

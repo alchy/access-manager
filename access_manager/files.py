@@ -599,16 +599,7 @@ class FileStore:
         Klic se VRACI JEDNOU a nikde se neuklada - jen jeho sha256 otisk.
         """
         name = _check_component_name(name)
-        origins = tuple(origins)
-        for origin in origins:
-            # Preklep v CIDR by jinak zapadl tise - origin se ulozi verbatim
-            # a proste nikdy nic nematchne (viz `_origin_allowed`).
-            try:
-                ipaddress.ip_network(origin, strict=False)
-            except ValueError as chyba:
-                raise ValueError(
-                    f"neplatny origin {origin!r}: neni to platna IP adresa ani CIDR"
-                ) from chyba
+        origins = tuple(_check_origin(origin) for origin in origins)
         with _locked(self.home):
             data = self._components_table()
             if name in data["components"]:
@@ -646,6 +637,64 @@ class FileStore:
             self._bump_gen()
             self._audit(
                 kind="write", actor=self.actor, op="revoke_component", name=name,
+            )
+
+    def add_origin(self, name: str, origin: str) -> None:
+        """Prida komponente povoleny rozsah, aniz by se sahlo na klic.
+
+        Bez tohohle by zmena rozsahu znamenala odvolat a registrovat znovu -
+        tedy vymenit klic ve vsech aplikacich kvuli tomu, ze se presunul
+        server. Rozsah, ktery uz je pokryty, je bez ucinku (ne chyba):
+        `10.0.0.5` se nepridava, kdyz uz tam `10.0.0.5/32` je.
+        """
+        name = _check_component_name(name)
+        origin = _check_origin(origin)
+        with _locked(self.home):
+            data = self._components_table()
+            if name not in data["components"]:
+                raise ValueError(f"komponenta {name!r} neexistuje")
+            zaznam = data["components"][name]
+            stavajici = list(zaznam.get("origins", ()))
+            if _stejna_sit(origin, stavajici) is not None:
+                return
+            zaznam["origins"] = sorted([*stavajici, origin])
+            _replace(self.home / COMPONENTS, json.dumps(data, indent=2, sort_keys=True))
+            # Generace nese cache klicu v serveru. Bez bumpu by novy rozsah
+            # zacal platit az po restartu sluzby.
+            self._bump_gen()
+            self._audit(
+                kind="write", actor=self.actor, op="add_origin",
+                name=name, origin=origin,
+            )
+
+    def remove_origin(self, name: str, origin: str) -> None:
+        """Odebere komponente povoleny rozsah.
+
+        Porovnava se SIT, ne retezec - kdo v konzoli vidi `10.0.0.5/32`,
+        odebere ho i zapisem `10.0.0.5`. Odebrani posledniho rozsahu je
+        dovolene: prazdny seznam znamena jen smycku (viz `_origin_allowed`),
+        cimz se komponenta fakticky vypne, ale klic zustava.
+        """
+        name = _check_component_name(name)
+        origin = _check_origin(origin)
+        with _locked(self.home):
+            data = self._components_table()
+            if name not in data["components"]:
+                raise ValueError(f"komponenta {name!r} neexistuje")
+            zaznam = data["components"][name]
+            stavajici = list(zaznam.get("origins", ()))
+            sedici = _stejna_sit(origin, stavajici)
+            if sedici is None:
+                raise ValueError(
+                    f"komponenta {name!r} rozsah {origin!r} nema"
+                )
+            stavajici.remove(sedici)
+            zaznam["origins"] = sorted(stavajici)
+            _replace(self.home / COMPONENTS, json.dumps(data, indent=2, sort_keys=True))
+            self._bump_gen()
+            self._audit(
+                kind="write", actor=self.actor, op="remove_origin",
+                name=name, origin=sedici,
             )
 
     # == zapis: zivotni cyklus =============================================
@@ -1147,6 +1196,42 @@ def _code_at_step(secret: str, step: int, code) -> bool:
     pyotp = _require_totp()
     totp = pyotp.TOTP(secret)
     return hmac.compare_digest(totp.at(step * totp.interval), str(code))
+
+
+def _check_origin(origin: str) -> str:
+    """Povoleny rozsah: IP adresa nebo CIDR, IPv4 i IPv6.
+
+    Preklep by jinak zapadl tise - origin se uklada verbatim a `_origin_allowed`
+    nerozpoznanou polozku PRESKAKUJE, takze by komponenta prestala pouštět
+    a nikde by nebylo videt proc.
+    """
+    text = str(origin).strip()
+    try:
+        ipaddress.ip_network(text, strict=False)
+    except ValueError as chyba:
+        raise ValueError(
+            f"neplatny origin {origin!r}: neni to platna IP adresa ani CIDR"
+        ) from chyba
+    return text
+
+
+def _stejna_sit(origin: str, mezi):
+    """Vrati polozku z `mezi`, ktera znaci tutez sit jako `origin`, jinak None.
+
+    Porovnavat retezce nestaci: `10.0.0.5` a `10.0.0.5/32` je totez a ulozit
+    oboji by znamenalo dva zaznamy, ze kterych jde odebrat jen jeden.
+    """
+    try:
+        hledana = ipaddress.ip_network(origin, strict=False)
+    except ValueError:
+        return None
+    for polozka in mezi:
+        try:
+            if ipaddress.ip_network(polozka, strict=False) == hledana:
+                return polozka
+        except ValueError:
+            continue
+    return None
 
 
 def _check_component_name(name: str) -> str:

@@ -2,6 +2,66 @@
    Definovano tady, protoze layout.html je spolecny predek vsech sablon a
    Jinja macro z rodice je videt i uvnitr bloku potomka bez importu. #}
 {% macro csrf_pole() %}<input type="hidden" name="csrf" value="{{ session.get('csrf', '') }}">{% endmacro %}
+
+{# Ikona ke stavovemu stitku. Zelena a cervena maji shodnou svetlost, takze
+   samotna barva rozdil neunese - tvar ano. Trida rozhoduje, ktera ikona to je;
+   `aria-hidden`, protoze vyznam uz nese text vedle. #}
+{% macro ikona_stavu(trida) -%}
+{%- if trida in ('stav-active', 'vysledek-ok') -%}
+<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
+{%- elif trida == 'vysledek-denied' -%}
+<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+{%- elif trida == 'stav-disabled' -%}
+<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M6 12h12"/></svg>
+{%- elif trida == 'stav-waiting' -%}
+<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+{%- elif trida == 'stav-no_credential' -%}
+<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9L2.4 17.5A2 2 0 004.1 20.5h15.8a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>
+{%- elif trida == 'vysledek-write' -%}
+<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>
+{%- endif -%}
+{%- endmacro %}
+
+{% macro stavovy_stitek(trida, text) -%}
+<span class="{{ 'vysledek' if trida.startswith('vysledek') else 'stav' }} {{ trida }}">{{ ikona_stavu(trida) }}{{ text }}</span>
+{%- endmacro %}
+
+{# Hledani nad dlouhym vypisem. Realm o stovkach identit se bez nej neda
+   precist - a filtr take usetri stovky cteni z disku, protoze se radky stavi
+   az po nem. GET, zadny CSRF: nic to nemeni. #}
+{% macro hledani(cil, dotaz, videno, celkem) %}
+<form method="get" action="{{ cil }}" class="hledani">
+  <label>
+    <span class="visually-hidden">{{ t('spolecne.search') }}</span>
+    <input type="search" name="q" value="{{ dotaz or '' }}"
+           placeholder="{{ t('spolecne.search') }}" autocomplete="off">
+  </label>
+  <button type="submit">{{ t('spolecne.search') }}</button>
+  {% if dotaz %}<a href="{{ cil }}">{{ t('spolecne.clear') }}</a>{% endif %}
+  <span class="pocet">
+    {%- if dotaz -%}
+      {{ t('spolecne.count_filtered').format(videno=videno, celkem=celkem) }}
+    {%- else -%}
+      {{ t('spolecne.count_all').format(celkem=celkem) }}
+    {%- endif -%}
+  </span>
+</form>
+{% endmacro %}
+
+{# Nápověda na zacatku kazde stranky: co se tu spravuje a jak to pouziva API.
+   Ton je referencni (jako man), ne vypraveci - autorsky hlas patri do docs/. #}
+{% macro napoveda(klic) %}
+<section class="napoveda">
+  <div>
+    <h2>{{ t('napoveda.what') }}</h2>
+    <p>{{ t('napoveda.' ~ klic ~ '.what') }}</p>
+  </div>
+  <div>
+    <h2>{{ t('napoveda.api') }}</h2>
+    <p>{{ t('napoveda.' ~ klic ~ '.api') }}</p>
+  </div>
+</section>
+{% endmacro %}
 <!doctype html>
 <html lang="{{ session.get('lang', 'cs') }}">
 <head>
@@ -22,6 +82,14 @@
     --text: #241A11;
     --hranice: rgba(36, 26, 17, 0.14);
     --chyba: #B3261E;
+    /* Uspech NESMI byt akcentova hneda: proti #B3261E ma skoro tutez svetlost
+       a "proslo" se od "zamitnuto" na stitku nedalo rozeznat. #2C6E49 ma na
+       svem 12% podkladu 5,18:1 - stejnou latku jako zbytek palety - a je to
+       jednoznacne zelena, ne oliva (ta by zase splynula s hnedou). */
+    --ok: #2C6E49;
+    /* Cekani neni ani uspech, ani chyba - vlastni okr, aby nesplynulo s
+       aktivnim. */
+    --ceka: #8A5A00;
     --info: #1F5DAD;
     --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -312,35 +380,94 @@
     letter-spacing: 0.03em;
     color: var(--text);
     opacity: 0.65;
-    background: rgba(36, 26, 17, 0.03);
+    /* Nepruhledne, ne 3% z hranice: lepive zahlavi se pri rolovani prekryva
+       s radky pod sebou a pruhledne by se s nimi slilo. */
+    background: #F0EBE2;
+    position: sticky;
+    top: 0;
+    z-index: 1;
   }
   .tabulka tbody tr:last-child td { border-bottom: none; }
 
+  /* -- hledani nad dlouhym vypisem -------------------------------------- */
+  .hledani {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0 0 0.9rem;
+    flex-wrap: wrap;
+  }
+  .hledani label { margin: 0; }
+  .hledani input[type="search"] {
+    font: inherit;
+    padding: 0.45rem 0.6rem;
+    border: 1px solid var(--hranice);
+    border-radius: 6px;
+    min-width: 16rem;
+  }
+  .hledani input[type="search"]:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    border-color: var(--accent);
+  }
+  .hledani button {
+    background: none;
+    border: 1px solid var(--hranice);
+    border-radius: 6px;
+    padding: 0.45rem 0.75rem;
+    color: var(--text);
+  }
+  .hledani button:hover { border-color: var(--accent); color: var(--accent); }
+  .hledani .pocet { margin-left: auto; font-size: 0.82rem; opacity: 0.7; }
+
   /* -- stavovy stitek (aktivni/zakazany/cekajici) ------------------------ */
-  .stav {
-    display: inline-block;
+  /* Zelena a cervena maji temer shodnou SVETLOST (kontrast mezi nimi 1,07),
+     takze ve stupnich sedi i pri barvosleposti splynou. Barva proto nesmi
+     nest vyznam sama - kazdy stitek nese i ikonu, viz makro `stitek`. */
+  .stav, .vysledek {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
     padding: 0.15rem 0.55rem;
     border-radius: 999px;
     font-size: 0.8rem;
     font-weight: 600;
   }
-  .stav-active { background: rgba(156, 77, 26, 0.12); color: var(--accent); }
+  .stav svg, .vysledek svg { flex: none; }
+
+  .stav-active { background: rgba(44, 110, 73, 0.12); color: var(--ok); }
   .stav-disabled { background: rgba(179, 38, 30, 0.1); color: var(--chyba); }
-  .stav-waiting { background: rgba(36, 26, 17, 0.08); color: var(--text); }
+  .stav-waiting { background: rgba(138, 90, 0, 0.13); color: var(--ceka); }
   .stav-no_credential { background: rgba(179, 38, 30, 0.06); color: var(--chyba); }
 
-  /* -- vysledek udalosti (audit): ok zelene, denied cervene, zapis modre - */
-  .vysledek {
-    display: inline-block;
-    padding: 0.15rem 0.55rem;
-    border-radius: 999px;
-    font-size: 0.8rem;
-    font-weight: 600;
-  }
-  .vysledek-ok { background: rgba(156, 77, 26, 0.12); color: var(--accent); }
+  /* -- vysledek udalosti (audit): proslo zelene, zamitnuto cervene,
+        zapis modre - zapis neni verdikt a nema byt ani zeleny, ani cerveny - */
+  .vysledek-ok { background: rgba(44, 110, 73, 0.12); color: var(--ok); }
   .vysledek-denied { background: rgba(179, 38, 30, 0.1); color: var(--chyba); }
   .vysledek-write { background: rgba(31, 93, 173, 0.12); color: var(--info); }
   .vysledek-jiny { background: rgba(36, 26, 17, 0.08); color: var(--text); }
+
+  /* -- napoveda na zacatku stranky -------------------------------------- */
+  .napoveda {
+    background: rgba(36, 26, 17, 0.035);
+    border: 1px solid var(--hranice);
+    border-radius: 10px;
+    padding: 1rem 1.15rem;
+    margin: 0 0 1.5rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 1.5rem;
+  }
+  @media (max-width: 860px) { .napoveda { grid-template-columns: minmax(0, 1fr); } }
+  .napoveda h2 {
+    margin: 0 0 0.4rem;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    opacity: 0.6;
+    font-weight: 600;
+  }
+  .napoveda p { margin: 0; font-size: 0.85rem; line-height: 1.5; }
 
   /* -- skupinove chipy ---------------------------------------------------- */
   .chip {
@@ -352,6 +479,27 @@
     font-family: var(--mono);
     font-size: 0.78rem;
   }
+
+  /* -- povolene IP rozsahy: chip, ze ktereho jde rovnou odebrat ---------- */
+  .rozsahy { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .chip-x { display: inline-flex; align-items: center; gap: 0.3rem; padding-right: 0.25rem; }
+  .chip-x form { margin: 0; display: flex; }
+  .chip-x button {
+    background: none;
+    border: none;
+    padding: 0.1rem;
+    display: flex;
+    color: var(--text);
+    opacity: 0.45;
+    border-radius: 999px;
+  }
+  .chip-x button:hover { opacity: 1; color: var(--chyba); }
+  .chip-x button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  /* -- zaskrtavaci volba s vysvetlenim pod popiskem ---------------------- */
+  .volba { flex-direction: row; align-items: flex-start; gap: 0.5rem; max-width: 30rem; }
+  .volba input { margin-top: 0.2rem; }
+  .volba .poznamka { display: block; font-size: 0.78rem; margin-top: 0.15rem; }
 
   /* -- akce v radku tabulky: kratke formulare vedle sebe ------------------ */
   .akce { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }

@@ -1,4 +1,4 @@
-# Správa: realmy, lidé, správci, klíče aplikací
+# Správa: realmy, uživatelé, správci, klíče aplikací
 
 *Co všechno spravuje správce realmu a provozovatel instance — a čím se liší.*
 
@@ -24,7 +24,7 @@ jeden `@`, takže identifikátorem může být e-mailová adresa.
 (`listeners.console` v konfiguraci, viz [instalace.md](instalace.md)).
 Přihlášení vyžaduje realm, jméno správce a **dva kódy z po sobě jdoucích
 oken** autentikátoru — stejně jako u knihovny níže. Konzole pokrývá všechny
-běžné úkony: lidi (založení, zákaz, smazání, odvolání a nové párování),
+běžné úkony: uživatele (založení, zákaz, smazání, odvolání a nové párování),
 skupiny (členy i zřetězení), aplikace (registrace včetně jednorázového
 zobrazení klíče a odvolání), správce (založení, odebrání, odvolání a
 párování) a auditní stopu. Rozhraní přepíná mezi češtinou a angličtinou
@@ -100,12 +100,27 @@ zobrazí **právě jednou**; na serveru zůstává jen jeho sha256 otisk
 
 ```python
 klic = admin.register_component("app:report",
-                                origins=("10.42.0.0/16",),  # odkud klic plati
                                 detail=False)               # smi videt duvody?
 print(klic)                       # am_k1_... — TED, pak uz nikdy
+
+admin.add_origin("app:report", "10.42.0.0/16")      # odkud klic plati
+admin.add_origin("app:report", "2a01:4f8:1c1b::/48")
+admin.remove_origin("app:report", "10.42.0.0/16")
+
 admin.components()                # zaznamy s key_id a otiskem
 admin.revoke_component("app:report")
 ```
+
+Rozsahy se přidávají a odebírají **bez zásahu do klíče**. Dřív se daly zadat
+jen při registraci, takže přestěhování serveru znamenalo odvolat aplikaci
+a rozdat nový klíč do všech instalací. Změna platí okamžitě, bez restartu.
+Konzole to má na stránce Aplikace ve dvou krocích: založit aplikaci, pak
+k ní přidat rozsahy (a křížkem u rozsahu je zase odebrat).
+
+Přijímá se IPv4 i IPv6, samostatná adresa i CIDR. Překlep se odmítne hned —
+neuloží se, protože nerozpoznanou položku origin ACL přeskakuje a aplikace
+by tiše přestala procházet. `10.0.0.5` a `10.0.0.5/32` je tatáž síť: nepřidá
+se dvakrát a odebrat ji lze kterýmkoli z obou zápisů.
 
 Registrace = udělení přístupu k **veřejnému API** realmu (ověřování a čtení)
 — nic správcovského, žádný zápis, jen jeden realm. `origins` je druhý faktor
