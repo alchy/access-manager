@@ -119,6 +119,10 @@ class Admin:
         """Odebere aplikaci povoleny rozsah. Klic zustava, plati hned."""
         self._store.remove_origin(name, origin)
 
+    def set_detail(self, name: str, detail: bool) -> None:
+        """Smi aplikace videt duvod zamitnuti? Klic zustava, plati hned."""
+        self._store.set_detail(name, detail)
+
     def revoke_component(self, name: str) -> None:
         """Odvolani komponenty. Nasledne registrace ma novy klic."""
         self._store.revoke_component(name)

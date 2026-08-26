@@ -33,6 +33,41 @@ neřešit.
 **Hranice jednou větou:** access-manager říká *kdo jsi a kam patříš*;
 viewBase počítá *co z toho plyne pro tenhle objekt*.
 
+### 1.1 Slovník
+
+Termíny níže jsou **normativní**. Platí pro dokumentaci, rozhraní konzole
+i hlášky služby; ostatní dokumenty se na ně odkazují a nezavádějí vlastní.
+Kde se rozchází pojmenování v kódu, je to uvedeno.
+
+| termín | co to je | kde leží |
+|---|---|---|
+| **pověření** | tajemství, kterým se člověk prokazuje; ověřuje, dokud ho někdo nezneplatní | `totp.secret` |
+| **párovací token** | zobrazitelná podoba pověření — QR a týž obsah k opsání; předává se člověku | `totp.uri`, `totp.txt` |
+| **spárování** | okamžik, kdy člověk pověření poprvé úspěšně použil | `totp.paired` |
+| **klíč aplikace** | čím se prokazuje aplikace, ne člověk; server drží jen jeho otisk | `components.json` |
+| **realm** | jmenný prostor; přes jeho hranici nevede nic | `realm-<název>/` |
+| **auditní stopa** | co se stalo uvnitř realmu | `realm-<x>/audit/` |
+| **provozní log** | jak se vede procesu — viz §3.5 | `stdout`/`stderr` |
+
+Dvojice **pověření / párovací token** není pedantství: každý má jinou
+životnost a plete se to i v kódu. Párovací token zaniká **spárováním nebo
+expirací**, pověření žije dál a ověřuje; zaniká až zneplatněním. Proto se
+po prvním přihlášení nedá QR znovu zobrazit, ale člověk se přihlašuje dál.
+
+Úkony a jejich přesný dosah:
+
+| úkon | co zanikne | co zůstane | v kódu |
+|---|---|---|---|
+| **vydat párovací token** | — | — | `pair`, `pair_admin` |
+| **zneplatnit párovací token / spárování** | pověření i token | členství, skupiny, auditní stopa, účet | `revoke_credential` |
+| **zamknout uživatele** | nic | vše; přihlášení vrací `disabled` | `disable_user` |
+| **smazat uživatele** | účet i členství | auditní stopa | `remove_user` |
+| **zneplatnit klíč** | klíč aplikace | auditní stopa | `revoke_component` |
+
+Sloveso **zneplatnit** (v kódu `revoke`) znamená vždy *„od teď to neplatí"*,
+nikdy *„uklidilo se to"*. **Zamknout** je vratné a nic neničí. Rozdíl mezi
+nimi musí být z rozhraní patrný dřív, než člověk klikne.
+
 ## 2. Kdo se ptá a čím se prokáže
 
 Kanál je **autentizovaný od začátku**, ne „až v provozu" — jinak si
@@ -145,9 +180,9 @@ při startu, ne až u prvního dotazu.
 
 ### 3.1 Ověření člověka
 
-**Ověřuje se pověření, ne oprávnění.** `authenticate` odpovídá „jsi to ty?";
-„smíš to?" je otázka na viewBase a nikdy sem nechodí (§5). Ta dvě slova
-znamenají různé věci a celý model stojí na tom, že se nesmažou.
+**Ověřuje se pověření, ne oprávnění.** `authenticate` ověřuje **totožnost**;
+o **oprávnění** rozhoduje viewBase a sem se ta otázka nedostane (§5). Ta dvě
+slova znamenají různé věci a celý model stojí na tom, že se nesmažou.
 
 ```http
 POST /v1/authenticate
@@ -220,6 +255,25 @@ pověřením může zevnitř projít a zvenčí dostat `need_factor`.
   `unknown_user` a `disabled` zůstávají dva různé stavy: zablokovat člověka
   na tři dny je běžný úkon a smazat ho kvůli tomu znamená přijít o jeho
   členství i o auditní stopu.
+
+- **Do auditu patří i „kdo se ptal", ne jen „koho se ptal".** Záznam ověření
+  nese vedle `subject` také `component`, `key_id` a `origin` — tedy která
+  aplikace o ověření požádala, kterým klíčem a z jaké adresy. Ani jedno
+  o výsledku ověření nerozhoduje; je to čistě stopa.
+
+  Bez `origin` má audit dohledatelnost obrácenou: adresu zaznamená jen
+  u pokusu, který **odmítlo** origin ACL (`origin_denied`), a u úspěšného ji
+  zahodí. „Odkud se včera ověřil `demo`" je přitom ta otázka, která se
+  po incidentu ptá jako první.
+
+  Nepředané pole se do řádku **nepíše**. Lokální volání (`Access.local`)
+  žádnou adresu ani klíč nemá a prázdná hodnota by předstírala, že se měřily
+  a nic nevyšly.
+
+  Přihlášení správce do konzole komponentu nemá — je to konzole, ne aplikace —
+  ale adresu ano, a měří ji `resolve_origin`, tedy **stejně** jako origin ACL
+  (§2b). Kdyby to konzole počítala po svém, ukazoval by audit u téhož
+  požadavku dvě různé adresy.
 
 - Odpověď je **vždy `200`**. Rozlišitelný stavový kód by z HTTP udělal
   postranní kanál. Jediná výjimka je `403` za nepovolený původ (§2b), a ta

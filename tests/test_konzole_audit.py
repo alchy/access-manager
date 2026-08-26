@@ -1,7 +1,8 @@
-"""Stranka Audit: jediny GET, zadna mutace, zadny CSRF. Filtry (od/do/subjekt/
+"""Stranka Audit: jediny GET, zadna mutace, zadny CSRF. Filtry (od/do/kdo/
 kind/outcome) nad `read_events`. Kazde pole udalosti se cte tolerantne pres
 `.get` - rucne pripsany kusy radek nesmi stranku shodit.
 """
+import re
 from datetime import UTC, datetime
 
 import pytest
@@ -28,13 +29,85 @@ def test_the_subject_filter_shows_matching_and_hides_others(prihlaseny_klient):
         data={"realm": REALM, "jmeno": "outsider", "kod1": "000000", "kod2": "000000"},
     )
 
-    jen_jindrich = klient.get("/audit?subject=admin:jindrich").get_data(as_text=True)
+    jen_jindrich = klient.get("/audit?kdo=admin:jindrich").get_data(as_text=True)
     assert "admin:jindrich" in jen_jindrich
     assert "admin:outsider" not in jen_jindrich
 
-    jen_outsider = klient.get("/audit?subject=admin:outsider").get_data(as_text=True)
+    jen_outsider = klient.get("/audit?kdo=admin:outsider").get_data(as_text=True)
     assert "admin:outsider" in jen_outsider
     assert "admin:jindrich" not in jen_outsider
+
+
+def _filtracni_pole(telo):
+    """Jmena poli filtru v poradi, jak stoji ve sloupcich.
+
+    Pole nestoji uvnitr `<form>` - odkazuji se na nej pres `form="filtr"`,
+    aby mohla sedet primo v bunkach tabulky.
+    """
+    radek = telo[telo.index('class="filtr-radek"'):telo.index("</thead>")]
+    return re.findall(r'name="([a-z_]+)" form="filtr"', radek)
+
+
+def test_the_filter_form_sends_what_the_route_reads(prihlaseny_klient):
+    """Formular posilal `od`/`do`/`subjekt`, route cetla `from`/`to`/`subject` -
+    tri z peti filtru tise nedelaly nic a testy to nechytily, protoze si
+    dotaz skladaly v URL samy. Tenhle test se diva na SKUTECNA pole."""
+    klient, _ = prihlaseny_klient
+    telo = klient.get("/audit").get_data(as_text=True)
+    assert set(_filtracni_pole(telo)) == {
+        "od", "do", "kind", "kdo", "odkud", "aplikace", "outcome",
+    }
+
+    # A kazde z nich musi na strance opravdu neco delat.
+    klient.post(
+        "/login",
+        data={"realm": REALM, "jmeno": "outsider", "kod1": "000000", "kod2": "000000"},
+    )
+    for dotaz, ceka_se in (
+        ("kdo=admin:jindrich", False),
+        ("outcome=ok", False),
+        ("kind=write", False),
+        ("od=2000-01-01&do=2000-01-02", False),
+    ):
+        telo = klient.get(f"/audit?{dotaz}").get_data(as_text=True)
+        assert ("admin:outsider" in telo) is ceka_se, dotaz
+
+
+def test_each_filter_sits_under_the_column_it_filters(prihlaseny_klient):
+    """Filtr uz nema vlastni popisek - popiskem je ZAHLAVI SLOUPCE nad nim.
+    Proto musi porad sedet poradi: n-te pole pod n-tym sloupcem. Drive stalo
+    pole "Predmet" nad sloupcem "Kdo" a nesouviselo s nim vubec."""
+    klient, _ = prihlaseny_klient
+    telo = klient.get("/audit").get_data(as_text=True)
+
+    zahlavi = re.findall(r"<th>(.*?)</th>", telo, flags=re.S)
+    zahlavi = [z.strip() for z in zahlavi]
+    assert zahlavi == ["Čas", "Událost", "Kdo", "Odkud", "Aplikace", "Výsledek"]
+
+    # Sloupec "Cas" nese dve pole (od-do), ostatni po jednom.
+    assert _filtracni_pole(telo) == [
+        "od", "do", "kind", "kdo", "odkud", "aplikace", "outcome",
+    ]
+    assert "Předmět" not in telo
+
+
+def test_the_new_columns_can_be_filtered(prihlaseny_klient, tmp_path):
+    """Sloupec, pod kterym stoji filtr, ho taky musi poslouchat."""
+    klient, _ = prihlaseny_klient
+    for adresa, aplikace in (("10.0.0.1", "workbench"), ("10.0.0.2", "jina")):
+        append_event(koren(tmp_path / "data"), {
+            "t": datetime.now(UTC).isoformat(timespec="seconds"),
+            "kind": "authenticate", "subject": "user:demo", "outcome": "ok",
+            "origin": adresa, "component": aplikace,
+        }, retention_days=90)
+
+    jen_prvni = klient.get("/audit?odkud=10.0.0.1").get_data(as_text=True)
+    assert "10.0.0.1" in jen_prvni
+    assert "10.0.0.2" not in jen_prvni
+
+    jen_workbench = klient.get("/audit?aplikace=workbench").get_data(as_text=True)
+    assert "10.0.0.1" in jen_workbench
+    assert "10.0.0.2" not in jen_workbench
 
 
 def test_a_hand_written_minimal_event_does_not_crash_the_page(

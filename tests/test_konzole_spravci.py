@@ -241,3 +241,33 @@ def test_the_english_language_switches_table_texts(prihlaseny_klient):
     telo = klient.get("/admins?lang=en").get_data(as_text=True)
     assert "Admins" in telo
     assert "Správci" not in telo
+
+
+def test_the_admin_listing_shows_the_same_login_dropdowns(prihlaseny_klient, tmp_path):
+    """Spravce potrebuje tutez stopu jako clen - jen pod prefixem `admin:`.
+    `prihlaseny_klient` uz jedno prihlaseni zapsal, nez test zacal."""
+    klient, _ = prihlaseny_klient
+    telo = klient.get("/admins").get_data(as_text=True)
+    assert '<table class="tabulka log vnorena">' in telo
+    assert "Poslední přihlášení" in telo
+    assert "Datum spárování" in telo
+    # Skutecne prihlaseni spravce, ne prazdna roletka.
+    assert "Zatím žádné ověření" not in telo
+
+
+def test_the_admin_dropdown_does_not_borrow_a_members_trail(
+    prihlaseny_klient, tmp_path,
+):
+    """Spravce a clen stejneho jmena jsou dve ruzne identity - roletka
+    spravce nesmi ukazat prihlaseni clena."""
+    from access_manager.audit import append_event
+
+    klient, csrf = prihlaseny_klient
+    klient.post("/users/add", data={"jmeno": "jindrich", "csrf": csrf})
+    append_event(koren(tmp_path / "data"), {
+        "t": "2026-08-26T10:00:00+00:00", "kind": "authenticate",
+        "subject": "user:jindrich", "outcome": "ok", "origin": "10.9.9.9",
+    }, retention_days=90)
+
+    assert "10.9.9.9" not in klient.get("/admins").get_data(as_text=True)
+    assert "10.9.9.9" in klient.get("/users").get_data(as_text=True)

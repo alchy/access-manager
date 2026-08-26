@@ -24,7 +24,7 @@ REASONS = frozenset({
 
 @dataclass(frozen=True, slots=True)
 class Verdict:
-    """Odpoved na "jsi to ty?".
+    """Vysledek overeni totoznosti.
 
     Pravdivy je JEN `ok`. `outcome` je jeden ze ctyr verejnych tvaru;
     `reason` je podrobnost pro audit. Lokalni zapojeni je duveryhodne cele,

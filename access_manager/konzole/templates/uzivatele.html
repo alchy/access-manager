@@ -23,8 +23,27 @@
         <span class="chip">{{ skupina }}</span>
         {% endfor %}
       </td>
+      {# Poradi neni libovolne: nejdriv POVERENI (ukaz, vydej, zneplatni),
+         pak UCET (zamkni, smaz). Ty dve skupiny delaji ruzne veci - jedna
+         resi, cim se clovek prokazuje, druha jestli tu vubec je - a smi
+         se plest tim min, cim jsou ucinnejsi. Oddelovac je hranice mezi
+         nimi, ne ozdoba. #}
       <td class="akce">
-        <a href="{{ url_for('_uzivatele_qr', jmeno=radek.jmeno) }}">{{ t('uzivatele.show_qr') }}</a>
+        <a href="{{ url_for('_uzivatele_qr', jmeno=radek.jmeno) }}">{{ t('uzivatele.show_token') }}</a>
+        {% if radek.stav == 'no_credential' %}
+        <form method="post" action="{{ url_for('_uzivatele_parovat', jmeno=radek.jmeno) }}">
+          {{ csrf_pole() }}
+          <button type="submit">{{ t('uzivatele.issue') }}</button>
+        </form>
+        {% else %}
+        <form method="post" action="{{ url_for('_uzivatele_odvolat', jmeno=radek.jmeno) }}">
+          {{ csrf_pole() }}
+          <button type="submit">{% if radek.stav == 'active' %}{{ t('uzivatele.revoke_paired') }}{% else %}{{ t('uzivatele.revoke_token') }}{% endif %}</button>
+        </form>
+        {% endif %}
+
+        <span class="oddelovac" aria-hidden="true"></span>
+
         {% if radek.stav == 'disabled' %}
         <form method="post" action="{{ url_for('_uzivatele_zapnout', jmeno=radek.jmeno) }}">
           {{ csrf_pole() }}
@@ -36,20 +55,13 @@
           <button type="submit">{{ t('uzivatele.disable') }}</button>
         </form>
         {% endif %}
-        <form method="post" action="{{ url_for('_uzivatele_parovat', jmeno=radek.jmeno) }}">
-          {{ csrf_pole() }}
-          <button type="submit">{{ t('uzivatele.pair') }}</button>
-        </form>
-        <form method="post" action="{{ url_for('_uzivatele_odvolat', jmeno=radek.jmeno) }}">
-          {{ csrf_pole() }}
-          <button type="submit">{{ t('uzivatele.revoke') }}</button>
-        </form>
         <form method="post" action="{{ url_for('_uzivatele_smazat', jmeno=radek.jmeno) }}">
           {{ csrf_pole() }}
           <button type="submit">{{ t('uzivatele.delete') }}</button>
         </form>
       </td>
     </tr>
+    {{ log_roletky(radek, 4) }}
     {% endfor %}
     {% if not uzivatele %}
     <tr><td colspan="4" class="poznamka">{{ t('spolecne.nothing_found') }}</td></tr>

@@ -18,21 +18,28 @@
       <td class="mono">{{ radek.stitek }}</td>
       <td>{{ stavovy_stitek('stav-' ~ radek.stav, radek.stav_text) }}</td>
       <td class="akce">
-        <a href="{{ url_for('_spravci_qr', jmeno=radek.jmeno) }}">{{ t('uzivatele.show_qr') }}</a>
+        <a href="{{ url_for('_spravci_qr', jmeno=radek.jmeno) }}">{{ t('uzivatele.show_token') }}</a>
+        {% if radek.stav == 'no_credential' %}
         <form method="post" action="{{ url_for('_spravci_parovat', jmeno=radek.jmeno) }}">
           {{ csrf_pole() }}
-          <button type="submit">{{ t('spravci.pair') }}</button>
+          <button type="submit">{{ t('spravci.issue') }}</button>
         </form>
+        {% else %}
         <form method="post" action="{{ url_for('_spravci_odvolat', jmeno=radek.jmeno) }}">
           {{ csrf_pole() }}
-          <button type="submit">{{ t('spravci.revoke') }}</button>
+          <button type="submit">{% if radek.stav == 'active' %}{{ t('uzivatele.revoke_paired') }}{% else %}{{ t('uzivatele.revoke_token') }}{% endif %}</button>
         </form>
+        {% endif %}
+
+        <span class="oddelovac" aria-hidden="true"></span>
+
         <form method="post" action="{{ url_for('_spravci_odebrat', jmeno=radek.jmeno) }}">
           {{ csrf_pole() }}
           <button type="submit">{{ t('spravci.remove') }}</button>
         </form>
       </td>
     </tr>
+    {{ log_roletky(radek, 3) }}
     {% endfor %}
   </tbody>
 </table>

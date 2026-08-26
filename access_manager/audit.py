@@ -50,9 +50,56 @@ def _prune(adresar: Path, retention_days: int) -> None:
             soubor.unlink(missing_ok=True)
 
 
+def recent_by_subject(root, subjects, *, kind=None, limit=5) -> dict[str, list]:
+    """Poslednich `limit` udalosti pro kazdy subjekt, NEJNOVEJSI PRVNI.
+
+    Nestavi se to na `read_events` schvalne. Ten precte cely rozsah dni,
+    rozparsuje kazdy radek a teprve pak filtruje - pro vypis o stovkach
+    identit by to znamenalo projit celou retenci jednou za kazdou z nich.
+    Tady se cte od NEJNOVEJSIHO dne a konci se, jakmile ma kazdy hledany
+    subjekt dost: u ciloveho pripadu (nedavno prihlaseni lide) staci prvni
+    soubor nebo dva.
+
+    Subjekty se predavaji uz hotove (`user:hana`), at tahle funkce nemusi
+    vedet nic o tom, jak se skladaji principaly.
+    """
+    hledane = set(subjects)
+    nalezene: dict[str, list] = {subjekt: [] for subjekt in hledane}
+    adresar = Path(root) / ADRESAR
+    if not hledane or not adresar.is_dir():
+        return nalezene
+
+    zbyva = set(hledane)
+    for soubor in sorted(adresar.glob("*.jsonl"), reverse=True):
+        if not zbyva:
+            break
+        for radek in reversed(soubor.read_text(encoding="utf-8").splitlines()):
+            try:
+                udalost = json.loads(radek)
+            except json.JSONDecodeError:
+                continue                 # viz `read_events` - jeden spatny
+                                         # radek nesmi shodit vypis
+            subjekt = udalost.get("subject")
+            if subjekt not in zbyva:
+                continue
+            if kind and udalost.get("kind") != kind:
+                continue
+            nalezene[subjekt].append(udalost)
+            if len(nalezene[subjekt]) >= limit:
+                zbyva.discard(subjekt)
+    return nalezene
+
+
 def read_events(root, day_from=None, day_to=None, *, subject=None,
-                outcome=None, kind=None) -> list[dict]:
-    """Precti udalosti s filtrem. Dny jako 'RRRR-MM-DD', vcetne."""
+                outcome=None, kind=None, who=None, origin=None,
+                component=None) -> list[dict]:
+    """Precti udalosti s filtrem. Dny jako 'RRRR-MM-DD', vcetne.
+
+    `subject` sedi presne na pole `subject`. `who` je sirsi: sedi na subjekt
+    NEBO aktera, tedy na tyz sloupec, jaky ukazuje konzole - kdo filtruje
+    podle toho, co v tabulce vidi, nesmi prijit o radky zapisu jen proto,
+    ze u nich je jmeno pod jinym klicem.
+    """
     adresar = Path(root) / ADRESAR
     if not adresar.is_dir():
         return []
@@ -73,9 +120,17 @@ def read_events(root, day_from=None, day_to=None, *, subject=None,
                 continue
             if subject and udalost.get("subject") != subject:
                 continue
+            if who and who not in (
+                udalost.get("subject") or "", udalost.get("actor") or "",
+            ):
+                continue
             if outcome and udalost.get("outcome") != outcome:
                 continue
             if kind and udalost.get("kind") != kind:
+                continue
+            if origin and udalost.get("origin") != origin:
+                continue
+            if component and udalost.get("component") != component:
                 continue
             vysledek.append(udalost)
     return vysledek

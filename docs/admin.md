@@ -12,8 +12,8 @@ realm subadresář `realm-<název>/` pod datovým adresářem instance.
 
 Realm **vzniká deklarací v konfiguraci** (viz [instalace.md](instalace.md)),
 ne přes API ani konzoli. Při startu služby proběhne *reconcile*: doplní se
-jen to, co chybí — chybějící adresáře, chybějící správci, párovací QR těm,
-kdo žádné nemají. Restart ve 3 ráno nikomu nic nevymění.
+jen to, co chybí — chybějící adresáře, chybějící správci, párovací token
+těm, kdo žádný nemají. Restart ve 3 ráno nikomu nic nevymění.
 
 Všechna jména se normalizují na **malá písmena**; uživatelé a správci smí mít
 jeden `@`, takže identifikátorem může být e-mailová adresa.
@@ -50,8 +50,9 @@ Vstup správce (do konzole i přes knihovnu) vyžaduje **dva kódy z po sobě
 jdoucích oken** autentikátoru: opíšete aktuální kód, počkáte na přetočení
 a opíšete i následující. Jedno odkoukané číslo nestačí.
 
-**Pojistka:** posledního správce realmu nejde odebrat ani mu odvolat token —
-realm nesmí zůstat bez správy. Zásah má jen provozovatel na serveru.
+**Pojistka:** posledního správce realmu nejde smazat ani mu zneplatnit
+pověření — realm nesmí zůstat bez správy. Zásah má jen provozovatel
+na serveru.
 
 Tatáž správa přímo na serveru, knihovnou (viz výše — provozovatel přes ssh):
 
@@ -90,13 +91,13 @@ omezenou platnost dvěma nezávislými mechanismy:
    špatný kód ani zaškrcení párování neshodí. Zapíše `totp.paired`
    a smaže `totp.txt` i `totp.uri`; `totp.secret` zůstává a ověřuje dál —
    mizí jen zobrazitelná podoba tajemství.
-2. **Nejdéle N dní** (`qr_ttl_days`, výchozí 14) — nespárované zavedení
-   expiruje a přihlášení vrací důvod `expired`; správce vydá nový QR
-   (odvolat + spárovat). Deklarovaný správce s expirovaným nespárovaným
-   zavedením dostane nový QR automaticky při dalším reconcile.
+2. **Nejdéle N dní** (`qr_ttl_days`, výchozí 14) — nespárovaný párovací
+   token expiruje a přihlášení vrací důvod `expired`; správce zneplatní
+   pověření a vydá nový token. Deklarovaný správce s expirovaným
+   nespárovaným tokenem dostane nový automaticky při dalším reconcile.
 
 Konzole obojí respektuje: po spárování ukáže „Spárováno", po expiraci
-vyzve k vydání nového pověření. Soubory expirovaného zavedení na disku
+vyzve k vydání nového tokenu. Soubory expirovaného tokenu na disku
 zůstávají — skrývá se jen jejich zobrazení, dokud je někdo nevymění.
 
 ### Zavedení bez čtečky
@@ -137,11 +138,22 @@ admin.components()                # zaznamy s key_id a otiskem
 admin.revoke_component("app:report")
 ```
 
-Rozsahy se přidávají a odebírají **bez zásahu do klíče**. Dřív se daly zadat
-jen při registraci, takže přestěhování serveru znamenalo odvolat aplikaci
-a rozdat nový klíč do všech instalací. Změna platí okamžitě, bez restartu.
-Konzole to má na stránce Aplikace ve dvou krocích: založit aplikaci, pak
-k ní přidat rozsahy (a křížkem u rozsahu je zase odebrat).
+Rozsahy i `detail` se mění **bez zásahu do klíče**. Dřív se obojí dalo
+zadat jen při registraci, takže přestěhování serveru — nebo změna názoru
+na to, kolik smí aplikace vidět — znamenalo aplikaci zneplatnit a rozdat
+nový klíč do všech instalací. Změna platí okamžitě, bez restartu: bumpne se
+generace, na které stojí cache klíčů ve službě.
+
+```python
+admin.add_origin("app:report", "10.42.0.0/16")
+admin.remove_origin("app:report", "10.42.0.0/16")
+admin.set_detail("app:report", True)     # smi videt duvod zamitnuti
+```
+
+Konzole to má na stránce Aplikace **v řádku každé aplikace**: pole na
+přidání rozsahu pod už přidanými, křížek u rozsahu ho odebere, přepínač
+u sloupce s důvody ho zapne nebo vypne. Registrace zůstává dole, protože
+zakládá něco nového.
 
 Přijímá se IPv4 i IPv6, samostatná adresa i CIDR. Překlep se odmítne hned —
 neuloží se, protože nerozpoznanou položku origin ACL přeskakuje a aplikace
@@ -176,3 +188,34 @@ from access_manager.audit import read_events
 read_events("/var/lib/access-manager/realm-example.com",
             kind="authenticate", subject="user:hana")
 ```
+
+### Kdo se ptal, ne jen koho
+
+Záznam ověření nese kromě `subject` (koho se ptalo) i to, **kdo se ptal**:
+
+```json
+{ "kind": "authenticate", "subject": "user:demo", "purpose": "login",
+  "component": "workbench", "key_id": "k3", "origin": "2001:db8::1",
+  "outcome": "ok", "gen": 29, "t": "…" }
+```
+
+| pole | co říká |
+|---|---|
+| `subject` | koho se ptalo — `user:demo`, `admin:jindrich` |
+| `component` | která aplikace o ověření požádala |
+| `key_id` | kterým klíčem; po výměně klíče je z něj poznat který |
+| `origin` | z jaké adresy — měřeno `resolve_origin`, stejně jako origin ACL |
+
+Nepředané pole se **nepíše**. Lokální volání přes `Access.local` žádnou
+adresu ani klíč nemá; prázdná hodnota by předstírala, že se měřily a nic
+nevyšly. Přihlášení správce do konzole nemá `component` (je to konzole, ne
+aplikace), ale `origin` ano.
+
+Zbylé druhy událostí: `write` (zápis s aktérem a operací), `origin_denied`
+(požadavek odmítnutý origin ACL, s `component`, `key_id` a `origin`)
+a `session` (odhlášení, zamítnutý CSRF token, relace zabitá po odebrání
+správce).
+
+Co se do auditu **nedostane**, protože v jeho okamžiku ještě není znám realm
+— neplatný klíč, neexistující realm při přihlášení — najdete v provozním logu
+služby, viz [instalace.md](instalace.md).

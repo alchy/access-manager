@@ -25,19 +25,21 @@ def _zaregistruj(prihlaseny_klient, jmeno, detail=False):
 
 
 def _pridej_rozsah(prihlaseny_klient, jmeno, rozsah):
-    """Druhy krok: povoleny rozsah. Jmeno i rozsah jdou formularem."""
+    """Povoleny rozsah. Jmeno je v CESTE - formular stoji v radku sve
+    aplikace, takze cil je dany radkem. Rozsah zustava ve formulari:
+    CIDR obsahuje lomitko a v ceste by se rozpadl."""
     klient, csrf = prihlaseny_klient
     return klient.post(
-        "/applications/ranges/add",
-        data={"csrf": csrf, "jmeno": jmeno, "rozsah": rozsah},
+        f"/applications/{jmeno}/ranges/add",
+        data={"csrf": csrf, "rozsah": rozsah},
     )
 
 
 def _odeber_rozsah(prihlaseny_klient, jmeno, rozsah):
     klient, csrf = prihlaseny_klient
     return klient.post(
-        "/applications/ranges/remove",
-        data={"csrf": csrf, "jmeno": jmeno, "rozsah": rozsah},
+        f"/applications/{jmeno}/ranges/remove",
+        data={"csrf": csrf, "rozsah": rozsah},
     )
 
 
@@ -250,7 +252,7 @@ def test_an_empty_range_field_flashes_an_error(prihlaseny_klient):
     _zaregistruj(prihlaseny_klient, "core")
     klient, csrf = prihlaseny_klient
     odpoved = klient.post(
-        "/applications/ranges/add", data={"csrf": csrf, "jmeno": "core", "rozsah": "  "}
+        "/applications/core/ranges/add", data={"csrf": csrf, "rozsah": "  "}
     )
     assert odpoved.status_code == 302
     vypis = klient.get("/applications").get_data(as_text=True)
@@ -266,8 +268,8 @@ def test_removing_a_range_that_is_not_there_flashes_an_error(prihlaseny_klient):
 
 
 @pytest.mark.parametrize("cesta", [
-    "/applications/ranges/add",
-    "/applications/ranges/remove",
+    "/applications/core/ranges/add",
+    "/applications/core/ranges/remove",
 ])
 def test_range_routes_without_csrf_are_rejected_and_change_nothing(
     prihlaseny_klient, cesta,
@@ -276,7 +278,7 @@ def test_range_routes_without_csrf_are_rejected_and_change_nothing(
     _pridej_rozsah(prihlaseny_klient, "core", "10.42.0.0/16")
     klient, _ = prihlaseny_klient
 
-    odpoved = klient.post(cesta, data={"jmeno": "core", "rozsah": "10.42.0.0/16"})
+    odpoved = klient.post(cesta, data={"rozsah": "10.42.0.0/16"})
     assert odpoved.status_code == 400
 
     vypis = klient.get("/applications").get_data(as_text=True)
@@ -284,10 +286,53 @@ def test_range_routes_without_csrf_are_rejected_and_change_nothing(
 
 
 @pytest.mark.parametrize("cesta", [
-    "/applications/ranges/add",
-    "/applications/ranges/remove",
+    "/applications/core/ranges/add",
+    "/applications/core/ranges/remove",
 ])
 def test_range_routes_without_a_session_redirect_to_login(prostredi, cesta):
-    odpoved = prostredi.post(cesta, data={"jmeno": "core", "rozsah": "10.0.0.0/8"})
+    odpoved = prostredi.post(cesta, data={"rozsah": "10.0.0.0/8"})
     assert odpoved.status_code == 302
     assert "/login" in odpoved.headers["Location"]
+
+
+# == uprava se dela tam, kde ta vec je ================================
+
+
+def test_the_detail_flag_can_be_switched_from_the_listing(prihlaseny_klient):
+    """Drive se `detail` dal nastavit JEN pri registraci - zmenit ho znamenalo
+    odvolat a registrovat znovu, tedy vymenit klic ve vsech instalacich."""
+    _zaregistruj(prihlaseny_klient, "core")
+    klient, csrf = prihlaseny_klient
+
+    vypis = klient.get("/applications").get_data(as_text=True)
+    assert "Zapnout" in vypis
+
+    klient.post("/applications/core/detail", data={"csrf": csrf, "detail": "on"})
+    vypis = klient.get("/applications").get_data(as_text=True)
+    assert "Vypnout" in vypis
+
+    klient.post("/applications/core/detail", data={"csrf": csrf, "detail": "off"})
+    assert "Zapnout" in klient.get("/applications").get_data(as_text=True)
+
+
+def test_switching_detail_without_csrf_is_rejected(prihlaseny_klient):
+    _zaregistruj(prihlaseny_klient, "core")
+    klient, _ = prihlaseny_klient
+    assert klient.post(
+        "/applications/core/detail", data={"detail": "on"}
+    ).status_code == 400
+
+
+def test_the_range_form_lives_in_the_row_of_its_application(prihlaseny_klient):
+    """Pridani a odebrani rozsahu drive stalo na dvou ruznych mistech: krizek
+    v radku, ale pridani az na konci stranky s vyberem cile ze seznamu."""
+    _zaregistruj(prihlaseny_klient, "core")
+    _zaregistruj(prihlaseny_klient, "druha")
+    klient, _ = prihlaseny_klient
+    vypis = klient.get("/applications").get_data(as_text=True)
+
+    # Kazda aplikace ma vlastni formular mirici na SVOU cestu.
+    assert 'action="/applications/core/ranges/add"' in vypis
+    assert 'action="/applications/druha/ranges/add"' in vypis
+    # Zadny vyber cile ze seznamu uz na strance neni.
+    assert "<select" not in vypis

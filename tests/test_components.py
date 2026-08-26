@@ -77,3 +77,66 @@ def test_registration_moves_the_generation(tmp_path):
     pred = access.generation()
     a.register_component("core")
     assert access.generation() > pred
+
+
+# == detail jde prepnout bez vymeny klice =============================
+
+
+def test_detail_can_be_switched_without_replacing_the_key(tmp_path):
+    """Tataz uvaha jako u rozsahu: bez tohohle by zmena nazoru na to, kolik
+    smi aplikace videt, znamenala odvolat a registrovat znovu - tedy vymenit
+    klic ve vsech jejich instalacich."""
+    spravce = admin(tmp_path)
+    spravce.register_component("app:mzdy")
+    otisk = spravce.components()[0].key_hash
+    assert spravce.components()[0].detail is False
+
+    spravce.set_detail("app:mzdy", True)
+    assert spravce.components()[0].detail is True
+    assert spravce.components()[0].key_hash == otisk      # klic se nesahnul
+
+    spravce.set_detail("app:mzdy", False)
+    assert spravce.components()[0].detail is False
+    assert spravce.components()[0].key_hash == otisk
+
+
+def test_switching_detail_bumps_the_generation(tmp_path):
+    """Generace nese cache klicu ve sluzbe - bez bumpu by zmena zacala platit
+    az po restartu."""
+    spravce = admin(tmp_path)
+    spravce.register_component("app:mzdy")
+    pred = Access.local(tmp_path, realm=REALM).generation()
+    spravce.set_detail("app:mzdy", True)
+    assert Access.local(tmp_path, realm=REALM).generation() > pred
+
+
+def test_setting_detail_to_the_same_value_is_a_no_op(tmp_path):
+    """Bez zmeny se nema bumpnout generace ani zapsat audit - jinak by
+    kazde odeslani formulare vyrobilo udalost o nicem."""
+    spravce = admin(tmp_path)
+    spravce.register_component("app:mzdy")
+    spravce.set_detail("app:mzdy", True)
+    pred = Access.local(tmp_path, realm=REALM).generation()
+
+    spravce.set_detail("app:mzdy", True)
+    assert Access.local(tmp_path, realm=REALM).generation() == pred
+
+
+def test_setting_detail_on_an_unknown_component_is_an_error(tmp_path):
+    with pytest.raises(ValueError, match="neexistuje"):
+        admin(tmp_path).set_detail("app:neni", True)
+
+
+def test_switching_detail_lands_in_the_audit(tmp_path):
+    from access_manager.audit import read_events
+
+    spravce = admin(tmp_path)
+    spravce.register_component("app:mzdy")
+    spravce.set_detail("app:mzdy", True)
+    zapisy = [
+        u for u in read_events(koren(tmp_path), kind="write")
+        if u.get("op") == "set_detail"
+    ]
+    assert len(zapisy) == 1
+    assert zapisy[0]["name"] == "app:mzdy"
+    assert zapisy[0]["detail"] is True

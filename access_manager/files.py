@@ -343,10 +343,17 @@ class FileStore:
         *,
         purpose: str,
         component: str | None = None,
+        key_id: str | None = None,
+        origin: str | None = None,
     ) -> Verdict:
-        """Odpoved na "jsi to ty?" - nikdy na "smis to?".
+        """Overeni TOTOZNOSTI - nikdy opravneni (spec §1, §5).
 
-        `component` jde jen do auditu - o overeni samotnem nerozhoduje.
+        `component`, `key_id` a `origin` jdou JEN do auditu - o overeni
+        samotnem nerozhoduji. Odpovidaji na "kdo se ptal", zatimco `subject`
+        odpovida na "koho se ptal": bez nich se z auditu neda zjistit, z jake
+        adresy se nekdo uspesne overil, jen ze ktere byl odmitnut
+        (`origin_denied`) - a to je pri vysetrovani presne naopak.
+
         Chyba z `check_purpose`/`check_identity` neni udalost uzivatele
         (je to chyba volajiciho), takze se neloguje - vyjimka utece drive,
         nez dojde na vypocet verdiktu.
@@ -359,6 +366,11 @@ class FileStore:
             subject=f"user:{name}",
             purpose=purpose,
             component=component,
+            # Nepredane pole se do radku NEPISE (stejne jako `reason`):
+            # lokalni volani pres `Access.local` zadnou adresu ani klic nema
+            # a prazdna hodnota by predstirala, ze se meril a nic nevysel.
+            **({"key_id": key_id} if key_id else {}),
+            **({"origin": origin} if origin else {}),
             outcome=verdikt.outcome,
             **({"reason": verdikt.reason} if verdikt.reason else {}),
             gen=verdikt.gen,
@@ -413,7 +425,9 @@ class FileStore:
         self._complete_pairing(directory)
         return Verdict.ok(user.subject_id, user.principals, gen=gen)
 
-    def authenticate_admin(self, name: str, first, second) -> Verdict:
+    def authenticate_admin(
+        self, name: str, first, second, *, origin: str | None = None,
+    ) -> Verdict:
         """Vstup do konzole: dva kody z po sobe jdoucich oken.
 
         NENI to verejny endpoint ani povrch fasad - vola to konzole uvnitr
@@ -426,6 +440,10 @@ class FileStore:
             kind="authenticate",
             subject=f"admin:{name}",
             purpose="admin",
+            # Komponenta tu zadna neni (je to konzole), adresa ale ano -
+            # a prihlaseni spravce je nejzajimavejsi udalost v realmu, takze
+            # "odkud" tu chybelo nejcitelneji.
+            **({"origin": origin} if origin else {}),
             outcome=verdikt.outcome,
             **({"reason": verdikt.reason} if verdikt.reason else {}),
             gen=verdikt.gen,
@@ -674,6 +692,38 @@ class FileStore:
             self._audit(
                 kind="write", actor=self.actor, op="add_origin",
                 name=name, origin=origin,
+            )
+
+    def set_detail(self, name: str, detail: bool) -> None:
+        """Prepne, jestli komponenta smi videt DUVOD zamitnuti - bez vymeny
+        klice.
+
+        Tataz uvaha jako u `add_origin`: bez tohohle by zmena znamenala
+        odvolat a registrovat znovu, tedy vymenit klic ve vsech instalacich
+        aplikace jen proto, ze se zmenil nazor na to, kolik smi videt.
+
+        `detail` neni oprávnění navic, je to VYPNUTI postranniho kanalu
+        (spec §3.1): komu se to zapne, ten z odpovedi rozezna `unknown_user`
+        od `bad_code` - a tim si umi vypsat uzivatele. Proto to smi dostat
+        jen duveryhodne zapojeni.
+        """
+        name = _check_component_name(name)
+        detail = bool(detail)
+        with _locked(self.home):
+            data = self._components_table()
+            if name not in data["components"]:
+                raise ValueError(f"komponenta {name!r} neexistuje")
+            zaznam = data["components"][name]
+            if bool(zaznam.get("detail", False)) == detail:
+                return                    # bez zmeny se negeneruje ani audit
+            zaznam["detail"] = detail
+            _replace(self.home / COMPONENTS, json.dumps(data, indent=2, sort_keys=True))
+            # Generace nese cache klicu v serveru - bez bumpu by zmena zacala
+            # platit az po restartu (stejne jako u rozsahu).
+            self._bump_gen()
+            self._audit(
+                kind="write", actor=self.actor, op="set_detail",
+                name=name, detail=detail,
             )
 
     def remove_origin(self, name: str, origin: str) -> None:

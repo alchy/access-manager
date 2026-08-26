@@ -163,7 +163,7 @@ class RemoteStore:
         purpose: str,
         component: str | None = None,
     ) -> Verdict:
-        """Odpoved na "jsi to ty?" - vzdy z dratu, NIKDY z cache.
+        """Overeni totoznosti - vzdy z dratu, NIKDY z cache.
 
         `component` se ignoruje: na strane sluzby ho urcuje klic samotny
         (kazda komponenta ma svuj), parametr tu zustava jen kvuli stejnemu

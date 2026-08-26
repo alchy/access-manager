@@ -256,6 +256,9 @@ def create_app(cfg: ServiceConfig):
         flask.g.realm = realm
         flask.g.store = stores[realm]
         flask.g.component = component
+        # Adresa uz je spocitana (origin ACL ji prave pouzil) - `authenticate`
+        # ji potrebuje do auditu, at je z nej poznat i "odkud", ne jen "kdo".
+        flask.g.origin = origin
         return None
 
     @app.get("/healthz")
@@ -341,6 +344,8 @@ def create_app(cfg: ServiceConfig):
             verdikt = flask.g.store.authenticate(
                 username, credentials, purpose=purpose,
                 component=flask.g.component.name,
+                key_id=flask.g.component.key_id,
+                origin=flask.g.origin,
             )
         except ValueError:
             return _bad_request()

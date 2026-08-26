@@ -64,7 +64,7 @@ POST /v1/authenticate
 To jsou **všechny** tvary; odpověď je vždy `200`, aby stavový kód nebyl
 postranní kanál. `principals` je setříděné (jinak nejde porovnat ani
 cachovat), `gen` je přibalená generace pro invalidaci cache. Komponenta
-s `detail: true` v registraci dostane u `denied` navíc
+s `detail: true` dostane u `denied` navíc
 `"reason": "bad_code" | "replay" | "unknown_user" | ...` — výchozí stav je
 bez důvodu, protože kdo rozliší `unknown_user` od `bad_code`, umí si vypsat
 uživatele. Pověření je mapa `mechanismus → hodnota` (dnes jediný

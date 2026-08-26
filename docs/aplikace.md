@@ -27,7 +27,7 @@ vlastní CA přes `ca="/cesta/ca.pem"` — ověření certifikátu nemá vypína
 při startu zkontroluje verzi API a `whoami`, síťové výpadky přečkává retry
 s backoffem a krátce cachuje odpovědi `user()` s invalidací podle generace.
 
-## Přihlášení („jsi to ty?“)
+## Ověření totožnosti
 
 ```python
 verdikt = access.authenticate("hana", {"totp": kod}, purpose="login")
@@ -48,8 +48,11 @@ verdikt.gen                    # cislo generace pro invalidaci cache
 Čtyři veřejné tvary: `ok`, `denied`, `need_factor`, `throttled` — nic pátého.
 Podrobný důvod odmítnutí (`verdikt.reason`: `bad_code`, `replay`,
 `unknown_user`…) vidí lokální zapojení vždy a vzdálené jen tehdy, když má
-komponenta v registraci `detail: true`; jinak je `None` — kdo umí rozlišit
-`unknown_user` od `bad_code`, umí si vypsat uživatele.
+komponenta `detail: true`; jinak je `None` — kdo umí rozlišit
+`unknown_user` od `bad_code`, umí si vypsat uživatele. `detail` je tedy
+**vypnutí postranního kanálu**, ne oprávnění navíc — patří jen důvěryhodnému
+zapojení. Přepíná se kdykoli (`set_detail`, v konzoli přepínačem v řádku
+aplikace), bez výměny klíče.
 
 **Účel (`purpose`) je povinný** a má tvar `login` nebo `unlock:<cíl>` —
 anti-replay je per účel, takže týž kód legitimně poslouží přihlášení

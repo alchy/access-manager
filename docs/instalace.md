@@ -27,7 +27,7 @@ Balíček nemá žádné povinné závislosti. Podle role si přidáte extra:
 |---|---|---|
 | *(nic)* | aplikace s lokálním zapojením | — |
 | `[remote]` | aplikace připojené k službě | httpx |
-| `[totp]` | zakládání identit (párovací QR) | pyotp, qrcode |
+| `[totp]` | zakládání identit (párovací token) | pyotp, qrcode |
 | `[server]` | provoz služby | flask, waitress |
 | `[dev]` | vývoj a testy | vše výše + pytest, ruff |
 
@@ -57,7 +57,7 @@ python -m access_manager.server -c conf.d/
 Přepínač `-c` (`--config`) je **povinný** a ukazuje na adresář, ne na soubor.
 
 Při startu služba načte konfiguraci, provede **reconcile** deklarovaných realmů
-(doplní jen to, co chybí — nová párovací QR vypíše jako cesty k `totp.txt`)
+(doplní jen to, co chybí — nové párovací tokeny vypíše jako cesty k `totp.txt`)
 a začne poslouchat: **API na portu 22000**, správcovská webová konzole na
 portu 22001 (přihlášení a správu realmů popisuje [admin.md](admin.md)).
 Co služba zaznamenává a kam, popisuje [Provozní log](#provozní-log) níže.
@@ -183,7 +183,7 @@ Do provozního logu jde tedy:
 - **přihlášení do konzole odmítnuté dřív, než je úložiště** (`console_login`
   s důvodem `bad_form` nebo `unknown_realm`) — zdeformovaný nebo neexistující
   realm,
-- **události procesu** — přenačtení konfigurace, vydaná zavedení.
+- **události procesu** — přenačtení konfigurace, vydané párovací tokeny.
 
 Všechno ostatní — úspěšné i neúspěšné ověření, zápisy, odepřený původ,
 odhlášení, zamítnutý CSRF token — má realm známý a najdete to v auditu.
@@ -328,7 +328,7 @@ Totéž s vlastním jménem a certifikátem, `proxy_pass` na `127.0.0.1:22001`
 a dvěma rozdíly:
 
 ```nginx
-    # Konzole zobrazuje párovací QR jako obrázky v data: URI - bez `img-src data:`
+    # Konzole zobrazuje párovací token jako QR v data: URI - bez `img-src data:`
     # by se správci nezobrazil kód, který má opsat do telefonu.
     add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'" always;
     add_header Referrer-Policy         "no-referrer" always;

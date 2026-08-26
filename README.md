@@ -1,14 +1,14 @@
 # access-manager
 
-**An authenticator and a group directory.** It answers one question and
+**An authenticator and a group directory.** It verifies **identity** and
 attaches, in the same breath, where that person belongs:
 
-    "is this you?"  ->  ok, user:jindrich, [group:mzdy, group:ucetni, ...]
+    authenticate("jindrich", ...)  ->  ok, user:jindrich, [group:mzdy, group:ucetni, ...]
 
 Today there is a single mechanism: a phone authenticator (TOTP).
 
-It **deliberately does not answer** *"may they?"* — and holds no ACLs for
-that question either. Permissions belong to whoever knows their own objects;
+It **deliberately does not decide authorisation** — and holds no ACLs for
+that either. Permissions belong to whoever knows their own objects;
 access-manager does not know them and is not supposed to. The reasoning
 lives in [docs/design.md](docs/design.md) (Czech), §5.
 
@@ -24,6 +24,25 @@ Two things worth knowing up front:
 2. **`group:users` and `group:public` are reserved** — "anyone
    authenticated" and "anyone"; every person carries them and they cannot
    be taken away.
+
+## Vocabulary
+
+The Czech docs are normative ([design.md](docs/design.md) §1.1). The mapping,
+because the distinction matters and is easy to blur:
+
+| term | what it is | on disk | lifetime |
+|---|---|---|---|
+| **credential** (*pověření*) | the secret a person proves themselves with | `totp.secret` | until revoked |
+| **pairing token** (*párovací token*) | its displayable form — a QR plus the same content to type; this is what you hand over | `totp.uri`, `totp.txt` | until paired **or** expired |
+| **pairing** (*spárování*) | the moment the person first used the credential successfully | `totp.paired` | — |
+| **application key** (*klíč aplikace*) | what an application proves itself with; only its digest is stored | `components.json` | until revoked |
+
+The pairing token dies at first successful login; the credential keeps
+verifying. That is why a QR cannot be shown again afterwards while the
+person still logs in fine.
+
+**Revoke** always means *"invalid from now on"*, never *"tidied away"*.
+Locking a user (`disable_user`) destroys nothing and is reversible.
 
 ## Realms
 
@@ -111,21 +130,22 @@ headless machines.
 |---|---|
 | [docs/instalace.md](docs/instalace.md) | native installation, systemd, nginx/trusted-proxy sample |
 | [docs/install-container.md](docs/install-container.md) | running in a container: rootless podman, systemd, proxy, pitfalls |
-| [docs/admin.md](docs/admin.md) | realms, admins, application keys, QR validity, audit |
+| [docs/admin.md](docs/admin.md) | realms, admins, application keys, pairing-token validity, audit |
 | [docs/aplikace.md](docs/aplikace.md) | connecting an application, usage examples |
 | [docs/api.md](docs/api.md) | REST API and the trust model |
-| [docs/design.md](docs/design.md) | the normative design and its reasoning |
+| [docs/design.md](docs/design.md) | the normative design and its reasoning; §1.1 is the normative glossary |
 
 ## Status
 
 Complete: the file storage layer (verification, group expansion,
 anti-replay per purpose, full write half with identity lifecycle), realms
-(admins, QR validity, application keys, per-realm audit, reconcile), the
-REST service (flask/waitress behind a proxy, throttling), `Access.remote`
-and the web console (all five pages — users, groups, applications, admins,
-audit — CZ/EN switch, CSRF on every mutation, sessions die on service
-restart by design) — 359 tests, all running without network or a live
-server (the console is driven through `create_console_app(cfg).test_client()`).
+(admins, pairing-token validity, application keys, per-realm audit,
+reconcile), the REST service (flask/waitress behind a proxy, throttling,
+structured operational log), `Access.remote` and the web console (all five
+pages — users, groups, applications, admins, audit — CZ/EN switch, CSRF on
+every mutation, sessions die on service restart by design) — 461 tests, all
+running without network or a live server (the console is driven through
+`create_console_app(cfg).test_client()`).
 
 ## License
 

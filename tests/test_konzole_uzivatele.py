@@ -90,8 +90,10 @@ def test_disabling_changes_the_state_shown_in_the_listing(prihlaseny_klient):
     odpoved = klient.post("/users/tereza/disable", data={"csrf": csrf})
     assert odpoved.status_code == 302
 
-    zakazany = klient.get("/users").get_data(as_text=True)
-    assert "Zakázáno" in zakazany
+    zamceny = klient.get("/users").get_data(as_text=True)
+    assert "Zamčeno" in zamceny
+    # Zamek je docasny a vratny - radek proto nabizi odemknuti, ne zamknuti.
+    assert "Odemknout uživatele" in zamceny
 
 
 def test_deleting_removes_the_user_from_the_listing(prihlaseny_klient):
@@ -248,3 +250,156 @@ def test_an_empty_query_does_not_filter(prihlaseny_klient):
     telo = klient.get("/users?q=%20%20").get_data(as_text=True)
     assert "hana" in telo and "pavel" in telo
     assert "2 celkem" in telo
+
+
+# == roletka s poslednimi prihlasenimi ================================
+
+
+def test_the_listing_shows_the_last_logins_per_person(prihlaseny_klient, tmp_path):
+    """Obdoba grepu z auditu primo u cloveka: cas, odkud, kdo pozadal, stav."""
+    from helpers import TAJEMSTVI, kod
+
+    from access_manager.files import FileStore
+
+    _pridej(prihlaseny_klient, "tereza")
+    klient, _ = prihlaseny_klient
+    # Vlastni tajemstvi, at jde kod spocitat.
+    adresar = koren(tmp_path / "data") / "user-tereza"
+    (adresar / "totp.secret").write_text(TAJEMSTVI + "\n", encoding="utf-8")
+
+    store = FileStore(koren(tmp_path / "data"), realm=REALM)
+    store.authenticate("tereza", {"totp": kod()}, purpose="login",
+                       component="workbench", origin="2001:db8::1")
+    store.authenticate("tereza", {"totp": "000000"}, purpose="login",
+                       component="workbench", origin="10.0.0.9")
+
+    telo = klient.get("/users").get_data(as_text=True)
+    assert "<details>" in telo
+    assert "2001:db8::1" in telo
+    assert "10.0.0.9" in telo
+    assert "workbench" in telo
+    assert "bad_code" in telo
+
+
+def test_only_the_last_five_logins_are_shown(prihlaseny_klient, tmp_path):
+    from access_manager.audit import append_event
+
+    _pridej(prihlaseny_klient, "tereza")
+    klient, _ = prihlaseny_klient
+    for i in range(8):
+        append_event(koren(tmp_path / "data"), {
+            "t": f"2026-08-26T10:0{i}:00+00:00", "kind": "authenticate",
+            "subject": "user:tereza", "outcome": "ok",
+            "origin": f"10.0.0.{i}", "component": "workbench",
+        }, retention_days=90)
+
+    telo = klient.get("/users").get_data(as_text=True)
+    # Nejnovejsich pet, nejnovejsi prvni - starsi tri uz ne.
+    for i in (3, 4, 5, 6, 7):
+        assert f"10.0.0.{i}" in telo
+    for i in (0, 1, 2):
+        assert f"10.0.0.{i}" not in telo
+    assert telo.index("10.0.0.7") < telo.index("10.0.0.3")
+
+
+def test_someone_who_never_logged_in_says_so(prihlaseny_klient):
+    _pridej(prihlaseny_klient, "tereza")
+    klient, _ = prihlaseny_klient
+    telo = klient.get("/users").get_data(as_text=True)
+    assert "Zatím žádné ověření" in telo
+
+
+def test_the_login_dropdown_uses_the_same_log_styling_as_the_audit_page(
+    prihlaseny_klient, tmp_path,
+):
+    """Vypis auditu ma vypadat stejne, at ho clovek potka kdekoli - tedy
+    tataz trida `log` (a tim i tentyz mensi font) v roletce i na strance
+    auditu. A tabulka nesmi zustat smrsknuta vlevo: `.log-posuv` posouva
+    jen ji, sama si drzi plnou sirku."""
+    from access_manager.audit import append_event
+
+    _pridej(prihlaseny_klient, "tereza")
+    klient, _ = prihlaseny_klient
+    # Bez udalosti se roletka vykresli prazdna a tabulka vubec nevznikne.
+    append_event(koren(tmp_path / "data"), {
+        "t": "2026-08-26T10:00:00+00:00", "kind": "authenticate",
+        "subject": "user:tereza", "outcome": "ok", "origin": "10.0.0.1",
+    }, retention_days=90)
+
+    telo = klient.get("/users").get_data(as_text=True)
+    assert '<table class="tabulka log vnorena">' in telo
+    assert '<div class="log-posuv">' in telo
+    # `display: block` by z tabulky udelal blok smrsknuty na obsah.
+    assert "table.vnorena { margin: 0; border: none" in telo
+
+
+# == pojmenovani a nabidka akci =======================================
+
+
+def test_the_row_offers_only_the_action_that_can_work(prihlaseny_klient):
+    """`pair` odmita cloveka, ktery uz tajemstvi ma ("prepsani by ho zamklo
+    ven"), `revoke` nema co odvolavat, kdyz zadne neni. Tlacitko, ktere muze
+    jen spadnout, na radku nema co delat."""
+    _pridej(prihlaseny_klient, "tereza")
+    klient, csrf = prihlaseny_klient
+
+    # Cerstve zalozeny clovek povereni MA, ale jeste se nesparoval - tlacitko
+    # proto mluvi o TOKENU, ne o sparovani, ktere zadne neni.
+    telo = klient.get("/users").get_data(as_text=True)
+    assert "Zneplatnit párovací token" in telo
+    assert "Zneplatnit spárování" not in telo
+    assert "Vydat párovací token" not in telo
+
+    klient.post("/users/tereza/revoke", data={"csrf": csrf})
+
+    # Po odvolani je to obracene.
+    telo = klient.get("/users").get_data(as_text=True)
+    assert "Vydat párovací token" in telo
+    assert "Zneplatnit párovací token" not in telo
+
+
+def test_the_buttons_name_the_thing_they_act_on(prihlaseny_klient):
+    """Jedno podstatne jmeno, tri slovesa. "Sparovat" slibovalo spravci ukon,
+    ktery provest nemuze - parovani dokoncuje az clovek svym telefonem."""
+    _pridej(prihlaseny_klient, "tereza")
+    klient, _ = prihlaseny_klient
+    telo = klient.get("/users").get_data(as_text=True)
+    assert "Zobrazit párovací token" in telo
+    assert "Spárovat" not in telo
+    assert "Zobrazit QR" not in telo
+    # Stav o parovani mluvit SMI - tam se opravdu deje.
+    assert "Nespárováno" in telo
+
+
+def test_the_revoke_button_names_what_actually_exists(prihlaseny_klient, tmp_path):
+    """Zneplatneni maze tutez sadu vzdycky, ale rikat "sparovani" nekomu,
+    kdo se jeste nesparoval, by byla lez - popisek se ridi stavem radku."""
+    _pridej(prihlaseny_klient, "tereza")
+    klient, _ = prihlaseny_klient
+
+    telo = klient.get("/users").get_data(as_text=True)
+    assert "Zneplatnit párovací token" in telo
+    assert "Zneplatnit spárování" not in telo
+
+    # Prvni uspesne prihlaseni => `totp.paired`, stav "aktivni".
+    (koren(tmp_path / "data") / "user-tereza" / "totp.paired").write_text("1")
+
+    telo = klient.get("/users").get_data(as_text=True)
+    assert "Zneplatnit spárování" in telo
+    assert "Zneplatnit párovací token" not in telo
+
+
+def test_credential_actions_come_before_account_actions(prihlaseny_klient):
+    """Akce nad POVERENIM (cim se clovek prokazuje) a nad UCTEM (jestli tu
+    vubec je) delaji ruzne veci a maji byt oddelene - tim spis, ze ty druhe
+    jsou ucinnejsi."""
+    _pridej(prihlaseny_klient, "tereza")
+    klient, _ = prihlaseny_klient
+    telo = klient.get("/users").get_data(as_text=True)
+
+    povereni = telo.index("Zneplatnit párovací token")
+    hranice = telo.index('class="oddelovac"')
+    zamek = telo.index("Zamknout uživatele")
+    smazat = telo.index("Smazat uživatele")
+
+    assert povereni < hranice < zamek < smazat

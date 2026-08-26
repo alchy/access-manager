@@ -18,7 +18,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .. import log
-from ..audit import read_events
+from ..audit import read_events, recent_by_subject
 from ..config import ServiceConfig
 from ..files import FileStore
 from ..origin import resolve_origin
@@ -33,6 +33,10 @@ _TEMPLATES = Path(__file__).parent / "templates"
 #: Vychozi sirka okna auditu bez filtru - "nedavne udalosti", ne cela
 #: historie (retence je typicky 90 dni, cely vypis by byl neprehledny).
 _AUDIT_VYCHOZI_DNI = 7
+
+#: Kolik prihlaseni ukaze roletka u cloveka ve vypisu. Je to "co se delo
+#: naposled", ne historie - na tu je stranka auditu s filtrem.
+_POSLEDNICH_PRIHLASENI = 5
 
 
 def _zavedeni_k_opsani(adresar: Path) -> tuple[str | None, str | None]:
@@ -352,7 +356,7 @@ def create_console_app(cfg: ServiceConfig):
         # v souladu a jedno z nich by pritom rotace zahodila.
 
         store = _store_pro(jmeno_realmu, actor=f"admin:{jmeno}")
-        verdikt = store.authenticate_admin(jmeno, kod1, kod2)
+        verdikt = store.authenticate_admin(jmeno, kod1, kod2, origin=origin)
 
         if verdikt.outcome == "throttled":
             chyba = _prelozit("login.throttled").format(s=verdikt.retry_after)
@@ -422,10 +426,10 @@ def create_console_app(cfg: ServiceConfig):
             for principal in clovek.principals
             if principal.startswith("group:") and principal not in (PUBLIC, USERS)
         )
+        adresar = store.home / f"user-{jmeno}"
         if not clovek.enabled:
             stav, stav_text = "disabled", _prelozit("uzivatele.disabled")
         else:
-            adresar = store.home / f"user-{jmeno}"
             tajemstvi = adresar / "totp.secret"
             vydano = adresar / "totp.issued"
             sparovano = adresar / "totp.paired"
@@ -455,6 +459,51 @@ def create_console_app(cfg: ServiceConfig):
                 stav, stav_text = "active", _prelozit("uzivatele.active")
         return {
             "jmeno": jmeno, "stav": stav, "stav_text": stav_text, "skupiny": skupiny,
+            # Kdy bylo zavedeni vydano a kdy se spotrebovalo. `totp.paired`
+            # pise `_complete_pairing` v okamziku PRVNIHO uspesneho prihlaseni
+            # - je to tedy razitko prave toho pozadavku, ktery QR ze stranky
+            # odebral. Nikam se to dopisovat nemusi, uz to na disku je.
+            "vydano": _razitko(adresar / "totp.issued"),
+            "sparovano": _razitko(adresar / "totp.paired"),
+        }
+
+    def _razitko(cesta: Path) -> str | None:
+        """Unixove razitko ze souboru jako ISO v UTC, nebo None.
+
+        `totp.issued` a `totp.paired` drzi cislo; audit i provozni log pisou
+        ISO v UTC. Prevod je tady, at se v rozhrani nepotkaji dva tvary casu.
+        Poskozeny soubor je "nevim" - stejna uvaha jako v
+        `FileStore._enrolment_expired`, jen tam je fail-closed a tady staci
+        neukazat nic.
+        """
+        if not cesta.is_file():
+            return None
+        try:
+            razitko = int(cesta.read_text(encoding="utf-8").strip())
+        except (ValueError, OSError):
+            return None
+        return datetime.fromtimestamp(razitko, UTC).isoformat(timespec="seconds")
+
+    def _radek_prihlaseni(udalost: dict) -> dict:
+        """Jeden radek roletky. Stejna ctverice a stejne tridy jako stranka
+        auditu (`_radek_udalosti`) - je to tyz zaznam, jen uzsi vyber."""
+        outcome = udalost.get("outcome")
+        if outcome == "ok":
+            trida = "vysledek-ok"
+        elif outcome == "denied":
+            trida = "vysledek-denied"
+        else:
+            trida = "vysledek-jiny"
+        return {
+            "cas": udalost.get("t", ""),
+            # Chybejici pole je pomlcka, ne prazdno: lokalni volani adresu
+            # nema (viz `FileStore.authenticate`) a prazdna bunka by vypadala
+            # jako rozbite vykresleni.
+            "odkud": udalost.get("origin") or "—",
+            "kdo_pozadal": udalost.get("component") or "—",
+            "vysledek_text": outcome or "",
+            "vysledek_trida": trida,
+            "reason": udalost.get("reason", ""),
         }
 
     def _vyfiltruj(jmena, dotaz):
@@ -479,6 +528,20 @@ def create_console_app(cfg: ServiceConfig):
         # zobrazeni - a vetsinu z nich pak nikdo necte.
         vybrani = _vyfiltruj(vsichni, dotaz)
         uzivatele = [_radek_cloveka(store, jmeno) for jmeno in vybrani]
+        # JEDEN pruchod auditem pro celou stranku, ne jeden na kazdeho -
+        # `recent_by_subject` cte od nejnovejsiho dne a konci, jakmile ma
+        # kazdy dost. Az PO filtru, ze stejneho duvodu jako radky vyse.
+        prihlaseni = recent_by_subject(
+            store.home,
+            [f"user:{jmeno}" for jmeno in vybrani],
+            kind="authenticate",
+            limit=_POSLEDNICH_PRIHLASENI,
+        )
+        for radek in uzivatele:
+            radek["prihlaseni"] = [
+                _radek_prihlaseni(u)
+                for u in prihlaseni.get(f"user:{radek['jmeno']}", ())
+            ]
         return flask.render_template(
             "uzivatele.html", uzivatele=uzivatele, dotaz=dotaz,
             celkem=len(vsichni), videno=len(vybrani),
@@ -759,17 +822,25 @@ def create_console_app(cfg: ServiceConfig):
     def _aplikace_odvolat(jmeno):
         return _aplikace_mutace(jmeno, flask.g.store.revoke_component)
 
-    def _aplikace_rozsah(akce):
+    @app.post("/applications/<jmeno>/detail")
+    @prihlasen
+    def _aplikace_detail(jmeno):
+        # Cilovy stav chodi formularem, ne prepinacem "obrat to": dva
+        # soubezne otevrene vypisy by se jinak prehazovaly navzajem.
+        chce = flask.request.form.get("detail") == "on"
+        return _aplikace_mutace(
+            jmeno, lambda n: flask.g.store.set_detail(n, chce)
+        )
+
+    def _aplikace_rozsah(jmeno, akce):
         """Spolecny tvar pro pridani i odebrani rozsahu.
 
-        Jmeno aplikace i rozsah chodi FORMULAREM, ne v ceste. U rozsahu proto,
-        ze CIDR obsahuje lomitko a v ceste by se rozpadl na dva segmenty.
-        U jmena proto, ze cil se vybira ze seznamu: kdyby byl v ceste, musel by
-        vyber prepisovat action JavaScriptem - a bez nej by formular tise
-        pridal rozsah prvni aplikaci v poradi. Konzole ma fungovat i bez JS.
+        Rozsah chodi FORMULAREM, ne v ceste: CIDR obsahuje lomitko a v ceste
+        by se rozpadl na dva segmenty. Jmeno uz v ceste byt MUZE - formular
+        stoji primo v radku sve aplikace, takze cil je dany radkem a nevybira
+        se ze seznamu. Drive tu seznam byl a jmeno muselo chodit s nim.
         """
         over_csrf()
-        jmeno = flask.request.form.get("jmeno", "").strip()
         rozsah = flask.request.form.get("rozsah", "").strip()
         if not jmeno or not rozsah:
             flask.flash(
@@ -785,15 +856,15 @@ def create_console_app(cfg: ServiceConfig):
             flask.flash(_prelozit("spolecne.done"), "ok")
         return flask.redirect(flask.url_for("_aplikace_seznam"))
 
-    @app.post("/applications/ranges/add")
+    @app.post("/applications/<jmeno>/ranges/add")
     @prihlasen
-    def _aplikace_rozsah_pridat():
-        return _aplikace_rozsah(flask.g.store.add_origin)
+    def _aplikace_rozsah_pridat(jmeno):
+        return _aplikace_rozsah(jmeno, flask.g.store.add_origin)
 
-    @app.post("/applications/ranges/remove")
+    @app.post("/applications/<jmeno>/ranges/remove")
     @prihlasen
-    def _aplikace_rozsah_odebrat():
-        return _aplikace_rozsah(flask.g.store.remove_origin)
+    def _aplikace_rozsah_odebrat(jmeno):
+        return _aplikace_rozsah(jmeno, flask.g.store.remove_origin)
 
     # == spravci ==============================================================
     #
@@ -841,13 +912,30 @@ def create_console_app(cfg: ServiceConfig):
         return {
             "jmeno": jmeno, "stitek": f"{store.realm}-admin-{jmeno}",
             "stav": stav, "stav_text": stav_text,
+            "vydano": _razitko(vydano),
+            "sparovano": _razitko(sparovano),
         }
 
     @app.get("/admins")
     @prihlasen
     def _spravci_seznam():
         store = flask.g.store
-        spravci = [_radek_spravce(store, jmeno) for jmeno in store.admins()]
+        jmena = store.admins()
+        spravci = [_radek_spravce(store, jmeno) for jmeno in jmena]
+        # Jeden pruchod auditem pro celou stranku - viz `_uzivatele_seznam`.
+        # Lisi se jen prefix subjektu: spravce a clen stejneho jmena jsou
+        # dve ruzne identity (viz `Enrolment.principal`).
+        prihlaseni = recent_by_subject(
+            store.home,
+            [f"admin:{jmeno}" for jmeno in jmena],
+            kind="authenticate",
+            limit=_POSLEDNICH_PRIHLASENI,
+        )
+        for radek in spravci:
+            radek["prihlaseni"] = [
+                _radek_prihlaseni(u)
+                for u in prihlaseni.get(f"admin:{radek['jmeno']}", ())
+            ]
         return flask.render_template("spravci.html", spravci=spravci)
 
     def _spravci_mutace(jmeno, akce, presmerovani=None):
@@ -973,14 +1061,20 @@ def create_console_app(cfg: ServiceConfig):
         udalost_text = " ".join(
             kus for kus in (kind, udalost.get("op") or udalost.get("purpose")) if kus
         )
-        kdo = (
-            udalost.get("subject") or udalost.get("actor")
-            or udalost.get("component") or ""
-        )
+        # `component` uz do "kdo" NEPATRI - ma vlastni sloupec. Zustava
+        # subjekt (koho se ptalo) nebo akter (kdo zapsal); pozadavek odmitnuty
+        # origin ACL zadneho nema, protoze padl driv, nez do hry vstoupila
+        # jakakoli identita.
+        kdo = udalost.get("subject") or udalost.get("actor") or "—"
         return {
             "cas": udalost.get("t", ""),
             "udalost": udalost_text,
             "kdo": kdo,
+            # Chybejici pole je pomlcka, ne prazdno: lokalni volani adresu
+            # nema a prazdna bunka by vypadala jako rozbite vykresleni.
+            "odkud": udalost.get("origin") or "—",
+            "aplikace": udalost.get("component") or "—",
+            "key_id": udalost.get("key_id", ""),
             "vysledek_text": text,
             "vysledek_trida": trida,
             "reason": udalost.get("reason", ""),
@@ -993,21 +1087,29 @@ def create_console_app(cfg: ServiceConfig):
         dnes = datetime.now(UTC).date()
         vychozi_od = (dnes - timedelta(days=_AUDIT_VYCHOZI_DNI)).isoformat()
         vychozi_do = dnes.isoformat()
-        od = _validni_den(flask.request.args.get("from", "")) or vychozi_od
-        do = _validni_den(flask.request.args.get("to", "")) or vychozi_do
-        subjekt = flask.request.args.get("subject", "").strip() or None
+        # Jmena MUSI sedet s `name=` ve formulari (audit.html). Drive tu
+        # stalo "from"/"to"/"subject", zatimco formular posilal
+        # "od"/"do"/"subjekt" - tri z peti filtru proto tise nedelaly nic
+        # a datova pole se po odeslani vracela na vychozi rozsah.
+        od = _validni_den(flask.request.args.get("od", "")) or vychozi_od
+        do = _validni_den(flask.request.args.get("do", "")) or vychozi_do
+        kdo = flask.request.args.get("kdo", "").strip() or None
         kind = flask.request.args.get("kind", "").strip() or None
+        odkud = flask.request.args.get("odkud", "").strip() or None
+        aplikace = flask.request.args.get("aplikace", "").strip() or None
         outcome = flask.request.args.get("outcome", "").strip() or None
         udalosti = read_events(
             store.home, day_from=od, day_to=do,
-            subject=subjekt, outcome=outcome, kind=kind,
+            who=kdo, outcome=outcome, kind=kind,
+            origin=odkud, component=aplikace,
         )
         # Nejnovejsi nahoru - `read_events` vraci chronologicky (soubor po
         # souboru, radek po radku), coz je pro cteni logu pozpatku.
         radky = [_radek_udalosti(u) for u in reversed(udalosti)]
         return flask.render_template(
             "audit.html", udalosti=radky, od=od, do=do,
-            subjekt=subjekt or "", kind=kind or "", outcome=outcome or "",
+            kdo=kdo or "", kind=kind or "", outcome=outcome or "",
+            odkud=odkud or "", aplikace=aplikace or "",
         )
 
     return app

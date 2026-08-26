@@ -5,10 +5,11 @@ V REALMu je hana clenem mzdy a ucetni obsahuje mzdy zretezenim - uzaver tak
 uz obsahuje group:ucetni, i kdyz je hana clenem jen primo mzdy.
 """
 import pytest
-from helpers import REALM
+from helpers import REALM, koren
 from test_config import zapis
 
 from access_manager import Admin
+from access_manager.audit import read_events
 from access_manager.config import load_config
 from access_manager.server import create_app
 
@@ -151,3 +152,20 @@ def test_an_unknown_v1_path_is_404(prostredi):
     client, klic, _ = prostredi
     odpoved = client.get("/v1/nesmysl", headers=hlavicky(klic))
     assert odpoved.status_code == 404
+
+
+def test_authenticate_audits_the_asking_component_key_and_origin(prostredi, tmp_path):
+    """Cely retezec "kdo se ptal" az do auditu: sluzba adresu uz spocitala
+    pro origin ACL, tak ji ma predat dal."""
+    client, klic, _ = prostredi
+    client.post(
+        "/v1/authenticate",
+        json={"username": "hana", "credentials": {"totp": "000000"},
+              "purpose": "login"},
+        headers={"Authorization": f"Bearer {klic}"},
+    )
+    udalost = read_events(koren(tmp_path / "data"), kind="authenticate")[-1]
+    assert udalost["subject"] == "user:hana"
+    assert udalost["component"]
+    assert udalost["key_id"]
+    assert udalost["origin"]

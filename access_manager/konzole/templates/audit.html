@@ -4,38 +4,48 @@
 <h1>{{ t('audit.title') }}</h1>
 {{ napoveda('audit') }}
 
-<h2>{{ t('audit.filter') }}</h2>
-<form method="get" action="{{ url_for('_audit_seznam') }}" class="pole-radek">
-  <label>
-    <span>{{ t('audit.from') }}</span>
-    <input type="date" name="od" value="{{ od }}">
-  </label>
-  <label>
-    <span>{{ t('audit.to') }}</span>
-    <input type="date" name="do" value="{{ do }}">
-  </label>
-  <label>
-    <span>{{ t('audit.subject') }}</span>
-    <input type="text" name="subjekt" value="{{ subjekt }}" autocomplete="off">
-  </label>
-  <label>
-    <span>{{ t('audit.kind') }}</span>
-    <input type="text" name="kind" value="{{ kind }}" autocomplete="off">
-  </label>
-  <label>
-    <span>{{ t('audit.result') }}</span>
-    <input type="text" name="outcome" value="{{ outcome }}" autocomplete="off">
-  </label>
-  <button type="submit" class="odeslat">{{ t('audit.filter') }}</button>
-</form>
+{# Formular je PRAZDNY a stoji mimo tabulku; pole se na nej odkazuji pres
+   `form="filtr"`. Jinak to nejde: `<form>` nesmi obalit `<tr>`, a bez poli
+   primo v bunkach by filtr nesel zarovnat pod sloupec, ktery filtruje -
+   sirky sloupcu urcuje az prohlizec podle obsahu, takze nastavit je zvenci
+   znamena hadat. Takhle zarovnani drzi layout tabulky sam. #}
+<form id="filtr" method="get" action="{{ url_for('_audit_seznam') }}"></form>
 
-<table class="tabulka">
+<div class="filtr-akce">
+  <button type="submit" form="filtr" class="odeslat">{{ t('audit.apply') }}</button>
+  {# Reset je ODKAZ na holou stranku, ne tlacitko: vyprazdnit pole by
+     znamenalo JS, kdezto tohle je prosty GET bez parametru. #}
+  <a href="{{ url_for('_audit_seznam') }}">{{ t('audit.reset') }}</a>
+</div>
+
+<div class="log-posuv">
+<table class="tabulka log">
   <thead>
     <tr>
       <th>{{ t('audit.time') }}</th>
       <th>{{ t('audit.event') }}</th>
       <th>{{ t('audit.who') }}</th>
+      <th>{{ t('audit.origin') }}</th>
+      <th>{{ t('audit.component') }}</th>
       <th>{{ t('audit.result') }}</th>
+    </tr>
+    <tr class="filtr-radek">
+      <td>
+        <label><span>{{ t('audit.from') }}</span>
+          <input type="date" name="od" form="filtr" value="{{ od }}"></label>
+        <label><span>{{ t('audit.to') }}</span>
+          <input type="date" name="do" form="filtr" value="{{ do }}"></label>
+      </td>
+      <td><input type="text" name="kind" form="filtr" value="{{ kind }}"
+                 autocomplete="off"></td>
+      <td><input type="text" name="kdo" form="filtr" value="{{ kdo }}"
+                 autocomplete="off"></td>
+      <td><input type="text" name="odkud" form="filtr" value="{{ odkud }}"
+                 autocomplete="off"></td>
+      <td><input type="text" name="aplikace" form="filtr" value="{{ aplikace }}"
+                 autocomplete="off"></td>
+      <td><input type="text" name="outcome" form="filtr" value="{{ outcome }}"
+                 autocomplete="off"></td>
     </tr>
   </thead>
   <tbody>
@@ -44,12 +54,21 @@
       <td class="mono">{{ radek.cas }}</td>
       <td>{{ radek.udalost }}</td>
       <td class="mono">{{ radek.kdo }}</td>
+      <td class="mono">{{ radek.odkud }}</td>
+      <td class="mono">
+        {{ radek.aplikace }}
+        {% if radek.key_id %}<span class="poznamka">({{ radek.key_id }})</span>{% endif %}
+      </td>
       <td>
         {{ stavovy_stitek(radek.vysledek_trida, radek.vysledek_text) }}
         {% if radek.reason %}<span class="poznamka">({{ radek.reason }})</span>{% endif %}
       </td>
     </tr>
     {% endfor %}
+    {% if not udalosti %}
+    <tr><td colspan="6" class="poznamka">{{ t('spolecne.nothing_found') }}</td></tr>
+    {% endif %}
   </tbody>
 </table>
+</div>
 {% endblock %}
