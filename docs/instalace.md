@@ -372,30 +372,31 @@ proběhne reconcile, který existujícího nic nemění. Ověření po restartu 
 
 ## Kontejner
 
-`Dockerfile` je v kořeni repozitáře:
+Provoz v kontejneru (podman, rootless, start s systémem, reverzní proxy před
+publikovanými porty) má vlastní dokument: **[install-container.md](install-container.md)**.
+Je to cílený způsob nasazení; tenhle dokument popisuje nativní instalaci, která
+zůstává podporovanou variantou.
+
+Zkrácene:
 
 ```bash
-docker build -t access-manager .
-docker run -v am-data:/var/lib/access-manager \
-           -v ./conf.d:/etc/access-manager/conf.d:ro \
-           -p 22000:22000 access-manager
+deploy/container-build.sh          # postavi obraz
+sudo deploy/install-container.sh   # uzivatel, subuid/subgid, linger, unit
+sudo systemctl enable --now access-manager-container
 ```
 
-Tři věci, na které se v kontejneru zapomíná:
+Tři věci, které se v kontejneru dělají jinak než tady:
 
-1. `listeners.api` nastavte na `0.0.0.0:22000` — `EXPOSE` sám nestačí.
-   Totéž pro `listeners.console`, pokud konzoli publikujete (`-p 22001:22001`);
-   ve výchozím stavu zůstane uvnitř kontejneru a je nedostupná.
-2. Obraz běží jako **nerootový uživatel `spravce`**. Připojený `conf.d` musí
-   být pro něj čitelný a datový svazek zapisovatelný — jinak start skončí na
-   `PermissionError` u prvního zápisu. Řeší se to `chown`em na svazku nebo
-   `--user` při spuštění.
-3. Healthcheck obrazu klepe na `http://127.0.0.1:22000/healthz`. Vazba na
-   `0.0.0.0` mu nevadí (smyčku pokrývá taky), ale **změna portu** ho rozbije —
-   kdo přebíjí port, ať přebije i healthcheck.
+1. **Cesty v konfiguraci jsou cesty uvnitř kontejneru** — `data` je
+   `/var/lib/access-manager`, ne cesta na hostiteli.
+2. **`listeners` musí být `0.0.0.0`**, jinak by se poslouchalo na smyčce
+   kontejneru; ven vede jen to, co podman publikuje (a to je `127.0.0.1`).
+3. **`trusted_proxies` je jiné** — proxy k službě nedorazí z `127.0.0.1`, ale
+   z adresy kontejneru.
 
 ## Kudy dál
 
+- Provoz v kontejneru: [install-container.md](install-container.md)
 - Správa realmů, správců a klíčů aplikací: [admin.md](admin.md)
 - Připojení aplikace: [aplikace.md](aplikace.md)
 - REST API a provozní endpointy: [api.md](api.md)

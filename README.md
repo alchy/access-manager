@@ -87,9 +87,12 @@ python -m access_manager.server -c conf.d/
 The REST API listens on port 22000, the management console on 22001. TLS
 is terminated by a reverse proxy in front of the service — the proxy must
 be listed in `trusted_proxies` so the origin ACL measures real client
-addresses. A systemd unit sits in `deploy/`, a `Dockerfile` at the repository
-root; in a container, bind `listeners.api` to `0.0.0.0:22000` (EXPOSE alone
-is not enough) and adjust the healthcheck if you change the port.
+addresses. The intended deployment is a **rootless podman container** started by systemd
+(`deploy/install-container.sh`, see
+[docs/install-container.md](docs/install-container.md)); ports are published on
+`127.0.0.1` only, so a reverse proxy in front of it is mandatory, not optional.
+A native systemd unit for running without a container sits in `deploy/` as the
+supported alternative.
 
 The service reloads on **SIGHUP** - it re-reads `conf.d/`, reconciles the
 declared realms and swaps both applications in place. Sockets stay bound, so
@@ -106,7 +109,8 @@ headless machines.
 
 | document | contents |
 |---|---|
-| [docs/instalace.md](docs/instalace.md) | installation, systemd, nginx/trusted-proxy sample, Docker |
+| [docs/instalace.md](docs/instalace.md) | native installation, systemd, nginx/trusted-proxy sample |
+| [docs/install-container.md](docs/install-container.md) | running in a container: rootless podman, systemd, proxy, pitfalls |
 | [docs/admin.md](docs/admin.md) | realms, admins, application keys, QR validity, audit |
 | [docs/aplikace.md](docs/aplikace.md) | connecting an application, usage examples |
 | [docs/api.md](docs/api.md) | REST API and the trust model |

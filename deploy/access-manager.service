@@ -1,4 +1,12 @@
-# access-manager jako systemd služba.
+# access-manager jako systemd služba - NATIVNI varianta (bez kontejneru).
+#
+# Cilene nasazeni je kontejner: deploy/access-manager-container.service
+# a docs/install-container.md. Tenhle unit zustava podporovanou variantou
+# pro toho, kdo podmana nechce nebo nemuze.
+#
+# Pozor pri prechodu tam a zpet: konfigurace pro kontejner ma v `data`
+# a `listeners` hodnoty platne UVNITR kontejneru. Pro nativni beh je
+# treba vratit hostitelskou cestu a naslouchani na 127.0.0.1.
 #
 # Tohle je unit z referenčního nasazení, ne šablona z hlavy — běží přesně
 # takhle. Cesty odpovídají layoutu, kde instance sedí v jednom adresáři:

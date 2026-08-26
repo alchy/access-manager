@@ -1,0 +1,63 @@
+# access-manager v kontejneru, rootless podman, start pri bootu.
+#
+# Kontejner bezi jako uzivatel `access-manager` - ne jako root. Aby to slo
+# bez prihlaseni, musi mit uzivatel zapnuty linger a delegovane subuid/subgid;
+# oboji zaridi deploy/install-container.sh.
+#
+# Porty se publikuji na 127.0.0.1 - sluzba NENI dostupna zvenci. Pred ni
+# patri reverzni proxy s TLS na hostiteli. Viz docs/install-container.md.
+#
+# Instalace:
+#     sudo deploy/install-container.sh
+#     systemctl enable --now access-manager-container
+
+[Unit]
+Description=access-manager v kontejneru (podman, rootless; API :22000, konzole :22001)
+Documentation=https://github.com/alchy/access-manager
+Wants=network-online.target
+After=network-online.target
+
+# Uzivatelsky manager drzi /run/user/<uid> a sbernici, bez kterych rootless
+# podman nenastartuje. Pri bootu by se to jinak zavodilo - linger ho spusti,
+# ale nikdo negarantuje, ze driv nez tuhle sluzbu.
+Requires=user@980.service
+After=user@980.service
+
+[Service]
+Type=simple
+User=access-manager
+Group=access-manager
+
+# Rootless podman bez prihlaseni: potrebuje vedet, kde ma runtime adresar
+# (drzi ho pri zivote linger) a kde ma domov (tam lezi uloziste obrazu).
+Environment=HOME=/www/access-manager
+Environment=XDG_RUNTIME_DIR=/run/user/980
+# Bez teto sbernice crun neprolozi kontejner do uzivatelskeho systemd
+# a start skonci na `creating systemd unit ... got failed`. Sbernici drzi
+# pri zivote linger; ze systemoveho unitu se k ni jinak nelze dostat.
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/980/bus
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+
+# Jediny zdroj pravdy o parametrech behu je container-run.sh; unit ho jen vola,
+# aby se rucni spusteni a provoz nemohly rozejit. Parametry se prebijeji
+# souborem nize (AM_CONF, AM_DATA, AM_API_PORT, ...).
+EnvironmentFile=-/etc/sysconfig/access-manager-container
+ExecStart=/usr/local/bin/access-manager-container --foreground
+
+# Reload = SIGHUP dovnitr kontejneru, uplne stejne jako u nativni sluzby:
+# prenacte conf.d, dojede reconcile, vymeni obe aplikace. Sokety zustavaji,
+# prihlasene relace konzole to prezijou.
+ExecReload=/usr/bin/podman kill --signal HUP access-manager
+
+ExecStopPost=-/usr/bin/podman rm -f access-manager
+
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+# Rootless podman si sam zaklada cgroupy pro kontejner - bez delegace mu to
+# systemd nedovoli a start skonci na chybe cgroup manageru.
+Delegate=yes
+
+[Install]
+WantedBy=multi-user.target
