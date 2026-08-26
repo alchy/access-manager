@@ -165,3 +165,39 @@ def test_an_expired_admin_enrolment_is_hidden_too(prihlaseny_klient, tmp_path):
     assert "<pre" not in telo
     assert "otpauth://" not in telo
     assert 'class="stav stav-expired"' in klient.get("/admins").get_data(as_text=True)
+
+
+def test_the_days_left_are_computed_in_one_place(tmp_path):
+    """Konzole si zbyvajici dny pocitala sama, a to DVAKRAT - jednou u lidi,
+    jednou u spravcu - vedle tretiho vypoctu v `_enrolment_expired`. Tri
+    vypocty teze veci se drive nebo pozdeji rozejdou."""
+    from access_manager.files import FileStore
+
+    Admin.local(tmp_path, realm=REALM).add_user("hana")
+    store = FileStore(koren(tmp_path), realm=REALM, qr_ttl_days=14)
+    adresar = koren(tmp_path) / "user-hana"
+
+    assert store.enrolment_days_left(adresar) == 14
+    assert store.enrolment_expired(adresar) is False
+
+    _vypsi_zavedeni_do_minulosti(adresar, 10)
+    assert store.enrolment_days_left(adresar) == 4
+
+    # Po TTL obojí drzi spolu: nula dni a `expired`.
+    _vypsi_zavedeni_do_minulosti(adresar, 15)
+    assert store.enrolment_days_left(adresar) == 0
+    assert store.enrolment_expired(adresar) is True
+
+
+def test_a_corrupt_issued_file_reads_as_expired_everywhere(tmp_path):
+    """Fail-closed musi platit v obou odpovedich, jinak by vypis hlasil
+    "plati jeste N dni" u tokenu, ktery prihlaseni odmita."""
+    from access_manager.files import FileStore
+
+    Admin.local(tmp_path, realm=REALM).add_user("hana")
+    store = FileStore(koren(tmp_path), realm=REALM, qr_ttl_days=14)
+    adresar = koren(tmp_path) / "user-hana"
+    (adresar / "totp.issued").write_text("neni cislo", encoding="utf-8")
+
+    assert store.enrolment_days_left(adresar) == 0
+    assert store.enrolment_expired(adresar) is True

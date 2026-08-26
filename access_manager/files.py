@@ -272,6 +272,25 @@ class FileStore:
             return True
         return time.time() - vydano > self.qr_ttl_days * 86400
 
+    def enrolment_days_left(self, directory: Path) -> int:
+        """Kolik dni zbyva nesparovanemu parovacimu tokenu; nikdy zaporne.
+
+        Konzole si to driv pocitala sama, a to DVAKRAT - jednou u lidi,
+        jednou u spravcu - vlastnim zaokrouhlenim vedle `_enrolment_expired`.
+        Tri vypocty teze veci se drive nebo pozdeji rozejdou; tohle je jeden.
+
+        Poskozeny `totp.issued` znamena nula - stejny fail-closed jako
+        `_enrolment_expired`, at obe odpovedi drzi spolu.
+        """
+        issued = directory / "totp.issued"
+        if not issued.is_file():
+            return 0
+        try:
+            vydano = int(issued.read_text(encoding="utf-8").strip())
+        except (ValueError, OSError):
+            return 0
+        return max(0, int(self.qr_ttl_days - (time.time() - vydano) // 86400))
+
     def enrolment_expired(self, directory: Path) -> bool:
         """Verejny obal nad `_enrolment_expired` pro konzoli.
 

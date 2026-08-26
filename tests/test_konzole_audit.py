@@ -162,3 +162,32 @@ def test_the_english_language_switches_filter_texts(prihlaseny_klient):
     telo = klient.get("/audit?lang=en").get_data(as_text=True)
     assert "Who" in telo
     assert "Kdo" not in telo
+
+
+def test_the_who_filter_matches_a_substring_like_the_people_listing(
+    prihlaseny_klient,
+):
+    """Dve vyhledavaci pole v teze konzoli se nemaji chovat ruzne. Filtr nad
+    vypisem lidi bere podretezec ("novak" najde "jan.novak@example.com");
+    v auditu byla presna shoda, takze prefix `admin:` se musel opsat."""
+    klient, _ = prihlaseny_klient
+    klient.post(
+        "/login",
+        data={"realm": REALM, "jmeno": "outsider", "kod1": "000000", "kod2": "000000"},
+    )
+
+    # Bez prefixu i jen kus jmena.
+    for dotaz in ("jindrich", "JINDRICH", "ndri", "admin:jindrich"):
+        telo = klient.get(f"/audit?kdo={dotaz}").get_data(as_text=True)
+        assert "admin:jindrich" in telo, dotaz
+        assert "admin:outsider" not in telo, dotaz
+
+
+def test_the_who_filter_still_finds_writes_by_their_actor(prihlaseny_klient):
+    """Zapisy nesou jmeno pod `actor`, ne `subject` - bez toho by filtr
+    podle toho, co je videt ve sloupci "Kdo", radky zapisu ztratil."""
+    klient, csrf = prihlaseny_klient
+    klient.post("/users/add", data={"jmeno": "tereza", "csrf": csrf})
+
+    telo = klient.get("/audit?kdo=jindrich").get_data(as_text=True)
+    assert "write add_user" in telo

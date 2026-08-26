@@ -143,7 +143,7 @@ anti-replay per purpose, full write half with identity lifecycle), realms
 reconcile), the REST service (flask/waitress behind a proxy, throttling,
 structured operational log), `Access.remote` and the web console (all five
 pages — users, groups, applications, admins, audit — CZ/EN switch, CSRF on
-every mutation, sessions die on service restart by design) — 461 tests, all
+every mutation, sessions die on service restart by design) — 469 tests, all
 running without network or a live server (the console is driven through
 `create_console_app(cfg).test_client()`).
 

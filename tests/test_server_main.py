@@ -400,3 +400,81 @@ def test_sighup_handler_never_lets_an_exception_escape():
         obsluha(signal_modul.SIGHUP, None)   # nesmi vyhodit
     finally:
         signal_modul.signal(signal_modul.SIGHUP, puvodni)
+
+
+# == konfigurace logu se skutecne pouzije =============================
+#
+# `log.configure` vola JEN `main`, takze tovarny aplikaci ho neexercisuji -
+# az do teto sady byl prvni skutecny dukaz, ze novy format logu funguje,
+# az curl do nasazene sluzby. Na vec, ktera se dotyka kazdeho pozadavku,
+# je to tenke.
+
+
+def _spust_main(tmp_path, log_config=None):
+    """Zavede minimalni realm a projde `main` az k naslouchani (to je mock).
+
+    Vraci nic - podstatny je vystup, ktery si test prevezme `capsys`.
+    """
+    conf_dir = tmp_path / "conf.d"
+    (conf_dir / "realms").mkdir(parents=True)
+    service = {"data": str(tmp_path / "data")}
+    if log_config is not None:
+        service["log"] = log_config
+    (conf_dir / "service.json").write_text(json.dumps(service), encoding="utf-8")
+    (conf_dir / "realms" / "example.com.json").write_text(
+        json.dumps({"name": "example.com", "admins": ["jindrich"]}), encoding="utf-8"
+    )
+
+    class MockThread:
+        def __init__(self, target=None, **kwargs):
+            self.target = target
+
+        def start(self):
+            pass
+
+        def join(self):
+            pass
+
+    with patch("access_manager.server._require_server") as mock_require:
+        mock_flask = Mock()
+        mock_flask.Flask.return_value = Mock()
+        mock_waitress = Mock()
+        mock_waitress.serve = lambda *a, **k: None
+        mock_require.return_value = (mock_flask, mock_waitress)
+        with patch("access_manager.server.threading.Thread", MockThread):
+            main(["-c", str(conf_dir)])
+
+
+def test_main_applies_the_configured_log_format(tmp_path, capsys):
+    """`format: "text"` z konfigurace musi opravdu prohodit formatovac -
+    ne jen lezet v `ServiceConfig`."""
+    _spust_main(tmp_path, {"format": "text"})
+    radky = [r for r in capsys.readouterr().out.splitlines() if "enrolment_issued" in r]
+    assert radky
+    assert not radky[0].startswith("{")          # zadny JSON
+    assert " info enrolment_issued: path=" in radky[0]
+
+
+def test_main_defaults_to_json_without_a_log_section(tmp_path, capsys):
+    _spust_main(tmp_path)
+    radky = [r for r in capsys.readouterr().out.splitlines() if r.startswith("{")]
+    assert radky
+    zaznam = json.loads(radky[0])
+    assert zaznam["event"] == "enrolment_issued"
+    assert zaznam["level"] == "info"
+
+
+def test_main_applies_the_configured_log_level(tmp_path, capsys):
+    """`level: "warning"` musi `info` radky umlcet - jinak je uroven
+    v konfiguraci jen ozdoba."""
+    _spust_main(tmp_path, {"level": "warning"})
+    zachyceno = capsys.readouterr()
+    assert "enrolment_issued" not in zachyceno.out
+    assert "enrolment_issued" not in zachyceno.err
+
+
+def test_an_unknown_log_format_does_not_stop_the_service(tmp_path, capsys):
+    """Log neni duvod nenastartovat sluzbu - spadne se na `json`."""
+    _spust_main(tmp_path, {"format": "nesmysl"})
+    radky = [r for r in capsys.readouterr().out.splitlines() if r.startswith("{")]
+    assert json.loads(radky[0])["event"] == "enrolment_issued"

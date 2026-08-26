@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import functools
 import secrets
-import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -436,25 +435,17 @@ def create_console_app(cfg: ServiceConfig):
             if not tajemstvi.is_file() and not vydano.is_file():
                 stav, stav_text = "no_credential", _prelozit("uzivatele.no_credential")
             elif vydano.is_file() and not sparovano.is_file():
-                try:
-                    vydano_ts = int(vydano.read_text(encoding="utf-8").strip())
-                except (ValueError, OSError):
-                    # Poskozeny soubor - viz stejna uvaha v
-                    # FileStore._enrolment_expired.
-                    vydano_ts = 0
                 if store.enrolment_expired(adresar):
-                    # Bez tehle vetve spadne vyprsele zavedeni do "ceka" a
-                    # `max(0, ...)` ho vypise jako "plati jeste 0 dni" -
-                    # tedy jako by na nej porad slo cekat.
+                    # Bez tehle vetve spadne vyprsely token do "ceka"
+                    # a vypise se jako "plati jeste 0 dni" - tedy jako by
+                    # na nej porad slo cekat.
                     stav = "expired"
                     stav_text = _prelozit("uzivatele.expired")
                 else:
-                    zbyva = max(
-                        0,
-                        int(store.qr_ttl_days - (time.time() - vydano_ts) // 86400),
-                    )
                     stav = "waiting"
-                    stav_text = _prelozit("uzivatele.waiting").format(dni=zbyva)
+                    stav_text = _prelozit("uzivatele.waiting").format(
+                        dni=store.enrolment_days_left(adresar)
+                    )
             else:
                 stav, stav_text = "active", _prelozit("uzivatele.active")
         return {
@@ -892,21 +883,15 @@ def create_console_app(cfg: ServiceConfig):
         if not tajemstvi.is_file() and not vydano.is_file():
             stav, stav_text = "no_credential", _prelozit("uzivatele.no_credential")
         elif vydano.is_file() and not sparovano.is_file():
-            try:
-                vydano_ts = int(vydano.read_text(encoding="utf-8").strip())
-            except (ValueError, OSError):
-                # Poskozeny soubor - viz stejna uvaha v FileStore._enrolment_expired.
-                vydano_ts = 0
             if store.enrolment_expired(adresar):
                 # Viz `_radek_cloveka` - stejna past s "plati jeste 0 dni".
                 stav = "expired"
                 stav_text = _prelozit("uzivatele.expired")
             else:
-                zbyva = max(
-                    0, int(store.qr_ttl_days - (time.time() - vydano_ts) // 86400)
-                )
                 stav = "waiting"
-                stav_text = _prelozit("uzivatele.waiting").format(dni=zbyva)
+                stav_text = _prelozit("uzivatele.waiting").format(
+                    dni=store.enrolment_days_left(adresar)
+                )
         else:
             stav, stav_text = "active", _prelozit("spravci.paired")
         return {
@@ -1093,7 +1078,9 @@ def create_console_app(cfg: ServiceConfig):
         # a datova pole se po odeslani vracela na vychozi rozsah.
         od = _validni_den(flask.request.args.get("od", "")) or vychozi_od
         do = _validni_den(flask.request.args.get("do", "")) or vychozi_do
-        kdo = flask.request.args.get("kdo", "").strip() or None
+        # `.lower()` jako u filtru nad vypisem lidi - `read_events` porovnava
+        # podretezec proti male variante, takze dotaz musi prijit stejne.
+        kdo = flask.request.args.get("kdo", "").strip().lower() or None
         kind = flask.request.args.get("kind", "").strip() or None
         odkud = flask.request.args.get("odkud", "").strip() or None
         aplikace = flask.request.args.get("aplikace", "").strip() or None

@@ -95,10 +95,18 @@ def read_events(root, day_from=None, day_to=None, *, subject=None,
                 component=None) -> list[dict]:
     """Precti udalosti s filtrem. Dny jako 'RRRR-MM-DD', vcetne.
 
-    `subject` sedi presne na pole `subject`. `who` je sirsi: sedi na subjekt
-    NEBO aktera, tedy na tyz sloupec, jaky ukazuje konzole - kdo filtruje
-    podle toho, co v tabulce vidi, nesmi prijit o radky zapisu jen proto,
-    ze u nich je jmeno pod jinym klicem.
+    `subject` sedi PRESNE na pole `subject` - to je smlouva pro volajici
+    z kodu. `who` je pro cloveka u konzole a je sirsi hned dvakrat: sedi na
+    subjekt NEBO aktera (tedy na tyz sloupec, jaky ukazuje konzole - kdo
+    filtruje podle toho, co v tabulce vidi, nesmi prijit o radky zapisu jen
+    proto, ze u nich je jmeno pod jinym klicem) a porovnava se PODRETEZCEM,
+    bez ohledu na velikost pismen.
+
+    Podretezec je tataz uvaha jako u filtru nad vypisem lidi: spravce hleda
+    "novak" a chce najit i "jan.novak@example.com". V auditu navic nese
+    kazdy subjekt prefix (`user:`, `admin:`), takze presna shoda by ho
+    nutila ho opsat - a dve vyhledavaci pole v teze konzoli se nemaji
+    chovat ruzne.
     """
     adresar = Path(root) / ADRESAR
     if not adresar.is_dir():
@@ -120,8 +128,9 @@ def read_events(root, day_from=None, day_to=None, *, subject=None,
                 continue
             if subject and udalost.get("subject") != subject:
                 continue
-            if who and who not in (
-                udalost.get("subject") or "", udalost.get("actor") or "",
+            if who and not any(
+                who in (udalost.get(klic) or "").lower()
+                for klic in ("subject", "actor")
             ):
                 continue
             if outcome and udalost.get("outcome") != outcome:
