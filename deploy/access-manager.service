@@ -1,0 +1,56 @@
+# access-manager jako systemd služba.
+#
+# Tohle je unit z referenčního nasazení, ne šablona z hlavy — běží přesně
+# takhle. Cesty odpovídají layoutu, kde instance sedí v jednom adresáři:
+#
+#     /www/access-manager/          domov instance (WorkingDirectory)
+#       ├── repo/                   klon, nainstalovaný editovatelně do .venv
+#       ├── .venv/                  virtualenv s [server,totp]
+#       ├── conf.d/                 konfigurace (service.json, realms/*.json)
+#       └── data/                   úložiště instance — "data" v service.json
+#
+# Kdo má jiný layout, přepíše čtyři řádky: WorkingDirectory, ExecStart
+# (interpret i -c) a ReadWritePaths. `data` v service.json a ReadWritePaths
+# musí ukazovat na tentýž adresář, jinak start skončí na právech.
+#
+# Instalace:
+#     install -m 0644 deploy/access-manager.service /etc/systemd/system/
+#     systemctl daemon-reload
+#     systemctl enable --now access-manager
+#     journalctl -u access-manager -f
+#
+# Podrobnosti k provozu (konfigurace, proxy, přenačtení): docs/instalace.md
+
+[Unit]
+Description=access-manager — autentizace a adresář skupin (API :22000, konzole :22001)
+Documentation=https://github.com/alchy/access-manager
+After=network.target
+
+[Service]
+Type=simple
+User=access-manager
+Group=access-manager
+WorkingDirectory=/www/access-manager
+
+# Editable instalace: zdroj je /www/access-manager/repo, po úpravě kódu stačí restart.
+ExecStart=/www/access-manager/.venv/bin/python -m access_manager.server -c /www/access-manager/conf.d/
+
+# SIGHUP: znovu nacte conf.d, dojede reconcile a vymeni obe aplikace za behu.
+# Sokety zustavaji navazane, prihlasene relace konzole prezijou. Rozbita
+# konfigurace reload jen odmitne (do journalu) a sluzba bezi dal na stare.
+# Zmena listeners se timhle NEuplatni - ta chce restart.
+ExecReload=/bin/kill -HUP $MAINPID
+
+Restart=on-failure
+RestartSec=5
+
+# Hardening. /www není pod ProtectSystem=full ani ProtectHome, takže data zůstávají
+# zapisovatelná; ReadWritePaths je tu explicitně, aby byl záměr čitelný.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=yes
+ReadWritePaths=/www/access-manager/data
+
+[Install]
+WantedBy=multi-user.target

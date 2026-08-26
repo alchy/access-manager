@@ -87,9 +87,9 @@ python -m access_manager.server -c conf.d/
 The REST API listens on port 22000, the management console on 22001. TLS
 is terminated by a reverse proxy in front of the service — the proxy must
 be listed in `trusted_proxies` so the origin ACL measures real client
-addresses. A `Dockerfile` sits at the repository root; in a container,
-bind `listeners.api` to `0.0.0.0:22000` (EXPOSE alone is not enough) and
-adjust the healthcheck if you rebind.
+addresses. A systemd unit sits in `deploy/`, a `Dockerfile` at the repository
+root; in a container, bind `listeners.api` to `0.0.0.0:22000` (EXPOSE alone
+is not enough) and adjust the healthcheck if you change the port.
 
 The service reloads on **SIGHUP** - it re-reads `conf.d/`, reconciles the
 declared realms and swaps both applications in place. Sockets stay bound, so
@@ -106,7 +106,7 @@ headless machines.
 
 | document | contents |
 |---|---|
-| [docs/instalace.md](docs/instalace.md) | installation, service, nginx/trusted-proxy sample, Docker |
+| [docs/instalace.md](docs/instalace.md) | installation, systemd, nginx/trusted-proxy sample, Docker |
 | [docs/admin.md](docs/admin.md) | realms, admins, application keys, QR validity, audit |
 | [docs/aplikace.md](docs/aplikace.md) | connecting an application, usage examples |
 | [docs/api.md](docs/api.md) | REST API and the trust model |
