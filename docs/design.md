@@ -1,11 +1,14 @@
 # Access-manager: REST API a klientská knihovna
 
-*Access-manager je samostatná komponenta s vlastním procesem — používá ho
-**core i apky**, takže nemůže bydlet uvnitř ani jednoho. Může běžet v jiném
-kontejneru než oba.*
+*Samostatná služba s vlastním procesem. Používá ji víc aplikací najednou,
+takže nemůže bydlet uvnitř žádné z nich; běží klidně v jiném kontejneru
+než ony.*
 
 *Rozsah: **čistě autentikátor a adresář skupin.** Politiku ani relace nedrží
 — proč, je v §5.*
+
+*Tenhle dokument popisuje **to, co je postavené**. Co v něm není, neexistuje;
+otevřené otázky jsou v §7.*
 
 ---
 
@@ -14,24 +17,31 @@ kontejneru než oba.*
 Access-manager odpovídá na otázky o **identitě**. O oknech, právech ani
 relacích nerozhoduje.
 
-| ptá se ho | na co |
-|---|---|
-| **core** | je tohle hana? v jakých je skupinách? existuje `group:ucetni`? |
-| **apka** | je tohle jindřich? v jakých je skupinách? |
+Umí přesně tři věci:
 
-Apka se ptá na totéž co core, a to je záměr: aplikace, která nemá s viewBase
-nic společného, si ho může vzít jako přihlašovací službu a nic dalšího
-neřešit.
-
-| co zůstává ve viewBase | proč |
+| otázka | endpoint |
 |---|---|
-| `allowed(principals, acl)` a všechna ACL | komponenta naše objekty nezná — §5 |
-| relace | jinak každý restart access-manageru odhlásí všechny diváky |
-| tokeny pro apky | tabulka vydaných tokenů má tutéž vlastnost jako relace: restart ve 3 ráno by je zneplatnil všechny |
-| topologie | které okno ukazuje který obsah, kdo ho založil, jaké nabídky visí kde |
+| je tohle hana? *(kód z autentikátoru)* | `POST /v1/authenticate` |
+| v jakých je skupinách? | `GET /v1/users/hana` |
+| existuje `group:ucetni`? | `POST /v1/principals/check` |
+
+Všechny aplikace se ptají na totéž a dostanou totéž. Žádná nemá zvláštní
+postavení; kdo potřebuje jen přihlašovací službu, vezme si `authenticate`
+a o zbytek se nestará.
+
+Co **zůstává volající aplikaci** a nikdy sem nepřejde:
+
+| co | proč |
+|---|---|
+| oprávnění a všechna jejich pravidla | access-manager ty objekty nezná — §5 |
+| relace | jinak by restart access-manageru odhlásil všechny |
+| tokeny, které aplikace vydává svým klientům | tabulka vydaných tokenů má tutéž vlastnost jako relace: restart ve 3 ráno by je zneplatnil všechny |
 
 **Hranice jednou větou:** access-manager říká *kdo jsi a kam patříš*;
-viewBase počítá *co z toho plyne pro tenhle objekt*.
+volající počítá *co z toho plyne pro jeho objekt*.
+
+**Mechanismus je dnes jediný: TOTP** — kód z autentikátoru v telefonu.
+Nic dalšího (heslo, WebAuthn, certifikát) implementované není.
 
 ### 1.1 Slovník
 
@@ -74,19 +84,19 @@ Kanál je **autentizovaný od začátku**, ne „až v provozu" — jinak si
 `SubjectContext` pošle kdokoli, kdo na službu dosáhne.
 
 ```
-Authorization: Bearer <klíč komponenty>
+Authorization: Bearer <klíč aplikace>
 ```
 
-Klíč je per komponenta, ne jeden sdílený: únik klíče jedné apky nesmí být
-klíčem ke všemu. Konfigurace mapuje klíč na **jméno komponenty** (`core`,
-`app:workbench.graph`) a to jméno se s požadavkem nese dál — do auditu
-a do ACL na původ (§2b).
+Klíč je **per aplikace**, ne jeden sdílený: únik klíče jedné aplikace nesmí
+být klíčem ke všemu. Server drží jen jeho otisk (sha256) a mapu na **jméno
+aplikace** (`app:mzdy`); to jméno se s požadavkem nese dál — do auditu a do
+ACL na původ (§2b). V kódu se ta věc jmenuje `Component`.
 
 **Jaké to jméno je, je access-manageru jedno.** Nerozumí mu a nic z něj
 neodvozuje — stejně jako u `purpose`: neprůhledné, ale ne dekorativní.
-Potřebuje od něj dvě věci: aby bylo pro každou komponentu jiné a aby se
-neměnilo pod rukama. Kdyby dvě apky sdílely jméno, audit přestane odpovídat
-na otázku „kdo se ptal" a odvolání jedné z nich vypne obě.
+Potřebuje od něj dvě věci: aby bylo pro každou aplikaci jiné a aby se
+neměnilo pod rukama. Kdyby dvě aplikace sdílely jméno, audit přestane
+odpovídat na otázku „kdo se ptal" a zneplatnění jedné z nich vypne obě.
 
 Kdo se neprokáže, dostane `401` a **žádný jiný rozdíl** — neexistující
 a nepovolený endpoint vypadají stejně.
@@ -104,11 +114,10 @@ Pravdu drží **peer socketu**. Hlavička s předaným původem se bere v úvahu
 ignoruje. Bez toho si `X-Forwarded-For: 10.0.0.1` pošle kdokoli a celé ACL
 je ozdoba.
 
-```yaml
-origins:
-  trusted_proxies: ["10.0.0.0/8"]      # nginx / ingress
-  forwarded_header: X-Forwarded-For    # co ta proxy posílá
-  hops: 1                              # kolik prvků zprava jsou naše proxy
+```json
+{ "trusted_proxies": ["10.0.0.0/8"],
+  "forwarded_header": "X-Forwarded-For",
+  "hops": 1 }
 ```
 
 `hops` je tam proto, že klient si může poslat vlastní `X-Forwarded-For`
@@ -117,33 +126,22 @@ to, co napsal útočník.
 
 ### Na co ACL sedí
 
-```yaml
-components:
-  core:
-    key_id: k1
-    origins: ["10.42.0.0/16"]          # pod CIDR
-  app:workbench.graph:
-    key_id: k2
-    origins: ["10.42.3.7"]
+Na **jednu jedinou věc: kde platí klíč aplikace.** Žádná další úroveň
+neexistuje — ACL se nedá navěsit na endpoint, na uživatele ani na způsob
+ověření.
 
-endpoints:
-  "/v1/users/*/credentials":
-    origins: ["10.9.0.0/24"]           # zavádění jen ze správcovské sítě
-
-mechanisms:
-  password:
-    origins: ["10.0.0.0/8"]            # samotné heslo jen zevnitř
+```json
+{ "components": {
+    "app:mzdy":   { "key_id": "k1", "origins": ["10.42.0.0/16"] },
+    "app:report": { "key_id": "k2", "origins": ["10.42.3.7"] } } }
 ```
 
-Tři úrovně, protože oddělují tři různé věci: **kdo** (klíč komponenty platí
-jen odsud), **co** (zavádění pověření jen ze správcovské sítě) a **čím**
-(holé heslo jen zevnitř). To poslední je ta „chování podle původu u každého
-typu ověření" — nezakazuje přihlášení zvenčí, jen zvedá laťku: z neuvedeného
-původu se `password` chová, jako by nebyl nabídnut, a odpověď je
-`need_factor`.
-
 Adresy jsou CIDR, IPv4 i IPv6 — pod v Kubernetes dostane často v6 a seznam
-jednotlivých adres by tam nebyl k ničemu.
+jednotlivých adres by tam nebyl k ničemu. Zapisují se v konzoli nebo přes
+`add_origin`/`remove_origin`; klíč se u toho nemění.
+
+Kdo hledá složitější pravidla, hledá marně a je to záměr: **origin ACL je
+filtr plochy, ne autorizace.** Co smí projít dál, rozhoduje volající (§5).
 
 ### Odmítnutí
 
@@ -175,13 +173,30 @@ Odmítnutí jde do auditu s původem a **identifikátorem klíče, ne klíčem**
 
 ## 3. Endpointy
 
-Cesty jsou verzované (`/v1/`), aby wrapper poznal neslučitelnou verzi hned
-při startu, ne až u prvního dotazu.
+Cesty jsou verzované (`/v1/`), aby klientská knihovna poznala neslučitelnou
+verzi hned při startu, ne až u prvního dotazu.
+
+**API je čtecí.** Celý jeho seznam:
+
+```http
+POST /v1/authenticate         §3.1    ověření totožnosti
+GET  /v1/users · /v1/users/<jméno>    §3.2, §3.2b
+GET  /v1/groups · /v1/groups/<jméno>  §3.2b
+POST /v1/principals/check     §3.3    existují tyhle principály?
+GET  /v1/whoami                       kdo jsem já, ta aplikace
+GET  /v1/generation           §3.4    kdy zahodit cache
+GET  /healthz · /readyz · /v1/version §3.4  provozní cesty, bez klíče
+```
+
+**Zapisuje se knihovnou nebo konzolí, ne po drátě.** Zakládání lidí, skupin
+a aplikací, vydávání a zneplatňování pověření — to všechno dělá `Admin`
+(§6) na stroji se službou, nebo správce v konzoli. Zápisový klíč, který
+by obešel obojí, neexistuje a přes REST se dostat nedá.
 
 ### 3.1 Ověření člověka
 
 **Ověřuje se pověření, ne oprávnění.** `authenticate` ověřuje **totožnost**;
-o **oprávnění** rozhoduje viewBase a sem se ta otázka nedostane (§5). Ta dvě
+o **oprávnění** rozhoduje volající a sem se ta otázka nedostane (§5). Ta dvě
 slova znamenají různé věci a celý model stojí na tom, že se nesmažou.
 
 ```http
@@ -204,21 +219,18 @@ odpověď porovnat ani cachovat. `gen` je číslo generace přibalené ke každ�
 odpovědi — bez něj by se na `GET /v1/generation` muselo chodit zvlášť, aby
 volající věděl, kdy zahodit cache.
 
-**Pověření je mapa mechanismus → hodnota**, ne jedno pole — díky tomu jsou
-mechanismy zásuvné a dvoufázové přihlášení se vejde do téhož volání:
+**Pověření je mapa mechanismus → hodnota**, ne jedno pole. Dnes má ta mapa
+**jediný platný klíč, `totp`**; tvar je mapa proto, aby přidání dalšího
+mechanismu nebylo změnou protokolu.
 
 ```json
-{ "credentials": { "password": "…" } }
-{ "credentials": { "password": "…", "totp": "123456" } }
+{ "credentials": { "totp": "123456" } }
 ```
 
-**Co je potřeba, rozhoduje komponenta, ne volající.** Jinak si klient sám
-vybere slabší způsob. Proto verdikt `need_factor` s tím, co chybí — nikoli
-„second factor": když je TOTP jediný mechanismus, není druhý. Komponenta
-říká *co* chybí, ne kolikáté to je.
-
-Součástí toho rozhodnutí je **původ požadavku** (§2b): tentýž člověk s týmž
-pověřením může zevnitř projít a zvenčí dostat `need_factor`.
+**Co je potřeba, rozhoduje služba, ne volající.** Jinak si klient sám vybere
+slabší způsob. Proto verdikt `need_factor` s tím, co chybí — nikoli „second
+factor": když je TOTP jediný mechanismus, není druhý. Neznámé jméno
+mechanismu se chová, jako by nepřišlo.
 
 - **`purpose` je povinný** a má tvar `login` nebo `unlock:<cíl>`. Anti-replay
   má účel: týž kód je legitimně potřeba dvakrát během jednoho
@@ -227,21 +239,21 @@ pověřením může zevnitř projít a zvenčí dostat `need_factor`.
   odemykání je tam ze stejného důvodu o patro níž: kdo si ráno odemkne mzdy
   a hned nato terminál, narazí jinak na tutéž past.
 
-  Komponenta účelu **nerozumí** — je to neprůhledný klíč přihrádky
-  s použitými kódy. Nekontroluje, jestli `mzdy` je skutečné okno; o oknech
-  neví nic (§1). Ověřuje jen **tvar**, aby se z volného řetězce nedalo
-  udělat „pokaždé nový účel" a anti-replay tím vypnout.
+  Access-manager účelu **nerozumí** — je to neprůhledný klíč přihrádky
+  s použitými kódy. Nekontroluje, jestli `mzdy` něčemu odpovídá; o objektech
+  volajícího neví nic (§1). Ověřuje jen **tvar**, aby se z volného řetězce
+  nedalo udělat „pokaždé nový účel" a anti-replay tím vypnout.
 
-  Účel skládá **viewBase**, ne divák: klient ho neposílá, server ho sestaví
-  z okna, které se odemyká.
+  Účel skládá **volající aplikace**, ne její uživatel: nechodí z prohlížeče,
+  sestaví ho server z toho, co se odemyká.
 
 - **Použité kódy se prořezávají** po uplynutí platnosti. Šestimístná hodnota
   se časem vrátí, takže bez prořezávání seznam nejen roste, ale po čase
   začne odmítat legitimní kódy.
 
-- **Verdikt, ne `true`/`false` — ale ten podrobný patří do auditu.** Ve
-  viewBase2 se tři různé příčiny hlásily stejnou hláškou a stálo to hodinu
-  hledání. Ta hodina se hledala **v logu**, takže tam ten rozdíl musí být:
+- **Verdikt, ne `true`/`false` — ale ten podrobný patří do auditu.** Tři
+  různé příčiny hlášené stejnou hláškou už jednou stály hodinu hledání.
+  Ta hodina se hledala **v logu**, takže tam ten rozdíl musí být:
 
   `ok` · `bad_code` · `need_factor` · `replay` · `throttled` · `no_secret` ·
   `unknown_user` · `disabled` · `expired`
@@ -279,23 +291,6 @@ pověřením může zevnitř projít a zvenčí dostat `need_factor`.
   postranní kanál. Jediná výjimka je `403` za nepovolený původ (§2b), a ta
   padá dřív, než kdokoli přečte jméno.
 
-### 3.1b Hesla — až přijdou
-
-**Dnes je mechanismus jediný: autentikátor v telefonu (TOTP).** Heslo
-implementované není a `bad_password` proto ve verdiktech nefiguruje — jméno
-pro stav, který nemůže nastat, je slib.
-
-Až heslo přijde, nese vlastní pravidla; levnější je napsat je teď než po
-prvním incidentu:
-
-- **hash, nikdy plaintext** — argon2id, parametry v konfiguraci, ne v kódu,
-- **ověření trvá stejně dlouho** u neexistujícího uživatele jako
-  u existujícího; jinak je odezva postranní kanál na výčet uživatelů,
-- **heslo se nikdy nedostane do logu** — redakce podle klíčů platí i uvnitř
-  komponenty,
-- **změna hesla ukončí relace** — jinak zůstane přihlášený právě ten, komu
-  ho měníš kvůli úniku.
-
 ### 3.2 Kdo je kdo
 
 ```http
@@ -310,10 +305,11 @@ Vrací se **plochý tranzitivní uzávěr**, ne přímé členství. Je to nejč
 dotaz vůbec (obnova každé relace) a zároveň přesně to, co potřebuje
 `allowed(principals, acl)` — jeden průnik množin.
 
-**Zřetězení skupin rozbaluje komponenta, ne viewBase.** Kdyby viewBase
-dostávalo graf a rozbalovalo si ho samo, přestane být celá autorizace jednou
-funkcí a přibude druhé místo, kde se počítá příslušnost. Detekce cyklu patří
-sem, jednou — ne do každého volajícího.
+**Zřetězení skupin rozbaluje access-manager, ne volající.** Kdyby volající
+dostával graf a rozbaloval si ho sám, přibude druhé místo, kde se počítá
+příslušnost — a v každém dalším klientovi znovu. Detekce cyklu patří sem,
+jednou. Je to tatáž bolest jako u LDAPu, kde si vnořené členství počítá
+každý klient a polovina špatně.
 
 Používá se při **obnově relace**: principálové se počítají při každém
 dotazu, ne při přihlášení — právě to dělá ze smazání uživatele účinný zásah
@@ -336,22 +332,18 @@ v mzdách, je i v účtárně. **ACL se ukládá tak, jak je napsané** — rozb
 se až při dotazu. Kdyby se rozbalovalo při zápisu, přidání člověka do
 skupiny by nezabralo na ACL, která už existují.
 
-### 3.2c Zavedení a životní cyklus pověření
+### 3.2c Životní cyklus pověření
 
-```http
-POST   /v1/users                      { "username": "hana" }
-POST   /v1/users/hana/credentials     { "mechanism": "totp" }   -> secret, QR
-DELETE /v1/users/hana/credentials/totp
-POST   /v1/users/hana/disable
-POST   /v1/users/hana/enable
-DELETE /v1/users/hana
-```
+**Po drátě nevede.** Zakládání lidí, vydávání a zneplatňování pověření,
+členství ve skupinách — to všechno dělá `Admin` (§6) na stroji se službou,
+nebo správce ve webové konzoli. Slovník těch úkonů a jejich přesný dosah je
+v §1.1.
 
-Bez rotace a odvolání nemá **ztracený telefon** řešení.
-
-Má to jeden důsledek pro dnešní kód: `python -m viewbase.admin adduser`
-zakládá TOTP tajemství do `~/.viewbase`. Jakmile identity vlastní tahle
-komponenta, **stěhuje se sem** — jinak jsou evidence dvě a rozejdou se.
+Je to záměr, ne mezera: kdyby zápis visel na témž klíči jako čtení, umí
+každá aplikace se svým klíčem založit identitu a vydat jí pověření —
+a rozdíl mezi „ptám se" a „rozhoduju, kdo existuje" tím zmizí. Kdo potřebuje
+zapisovat vzdáleně, sáhne po ssh na stroj se službou; není to nedopatření,
+je to ta hranice.
 
 ### 3.3 Existují tyhle principály?
 
@@ -429,51 +421,49 @@ požadavku**: anti-replay použitých kódů i počítadlo pokusů patří do sd
 spotřebovaný kód přijala znovu — a `purpose` by ztratil smysl.
 
 **Restartuje se.** Krátký výpadek se proto **přečkává, neselhává**: klient
-zkouší znovu s krátkým backoffem. A `Instance()` nesmí při startu selhat
-okamžitě — viewBase a access-manager se nasazují spolu, takže by z toho byla
-crash-loop. Ověření má **deadline**, ne nulovou trpělivost.
+zkouší znovu s krátkým backoffem. A start volající aplikace nesmí selhat
+okamžitě — obojí se často nasazuje spolu, takže by z toho byla crash-loop.
+Ověření má **deadline**, ne nulovou trpělivost.
 
-**Restart nikoho neodhlásí,** protože relace vlastní viewBase. To není
+**Restart nikoho neodhlásí,** protože relace vlastní volající. To není
 náhoda, to je pravidlo.
 
 ## 5. Politika sem nepatří
 
-Access-manager nikdy nedostane otázku *„smí hana číst
-`screen:provoz/window:mzdy`?"* — a nedostane ani otázku *„jaké ACL platí pro
-tu adresu?"*. **Politiku nedrží vůbec.** Je to čistě autentikátor a adresář
-skupin: odpoví, kdo jsi a kam patříš. Co z toho plyne pro konkrétní okno,
-počítá viewBase, protože je jediný, kdo ta okna zná.
+Access-manager nikdy nedostane otázku *„smí hana číst tenhle dokument?"* —
+a nedostane ani otázku *„jaká pravidla pro něj platí?"*. **Politiku nedrží
+vůbec.** Je to čistě autentikátor a adresář skupin: odpoví, kdo jsi a kam
+patříš. Co z toho plyne pro konkrétní objekt, počítá volající, protože je
+jediný, kdo ten objekt zná.
 
-**Hlavní důvod: komponenta ty objekty nezná.** Plochy, okna a obsahy vznikají
-a zanikají za běhu z kódu vývojáře; aby na ně uměla odpovědět, musela by je
-mít u sebe všechny — a registrovat každé otevřené okno do cizí služby není
-nepohodlí, ale nesmysl. Ten důvod platí, i kdyby bylo API krásně typované.
-(Review to odmítalo argumentem, že řetězcové `authorize(subject, action,
-resource)` nejde vynutit ani otestovat — pravda, ale je to argument o naší
-disciplíně, který by šel obejít lepším typováním. Tenhle obejít nejde.)
+**Hlavní důvod: access-manager ty objekty nezná.** Vznikají a zanikají za
+běhu v kódu volajícího; aby na ně uměl odpovědět, musel by je mít u sebe
+všechny — a registrovat každý vzniklý objekt do cizí služby není nepohodlí,
+ale nesmysl. Ten důvod platí, i kdyby bylo API krásně typované: řetězcové
+`authorize(subject, action, resource)` sice nejde vynutit ani otestovat, ale
+to je argument o disciplíně, který by šel obejít lepším typováním. Tenhle
+obejít nejde.
 
 K tomu tři provozní důvody, které míří ke stejnému závěru:
 
-1. **Vysílací smyčka by měla službu v horké cestě.** Práva se čtou až
-   v okamžiku doručení — to je pozdní vazba a celý smysl modelu. Přes síť by
-   to znamenalo jeden dotaz na každou doručenou zprávu; při deseti divácích
-   a živém grafu stovky za vteřinu.
+1. **Byla by v horké cestě.** Kdo čte práva až v okamžiku doručení — a to
+   je celý smysl pozdní vazby — dělal by přes síť jeden dotaz na každou
+   doručenou zprávu. U živého provozu jsou to stovky za vteřinu.
 2. **Cache ten problém neřeší, jen posune.** Odpověď zestárne přesně ve
    chvíli, kdy se práva změní — tedy v jediném okamžiku, na kterém záleží.
 3. **Autorizace se musí dát otestovat bez sítě.** Dnes se celá testuje bez
    serveru; je to tvrdé pravidlo, ne náhoda.
 
-Plyne z toho jedna věc dovnitř viewBase: **ACL zůstávají v manifestu**, který
-je jediný zdroj pravdy (D-53). Přebíjení politiky ze služby by z něj udělalo
-zdroj druhý, a dva zdroje pravdy o právech jsou horší stav než jeden
-nepohodlný.
+Plyne z toho jedna věc pro volajícího: **jeho pravidla zůstávají u něj**
+a jsou jediným zdrojem pravdy. Přebíjení politiky ze služby by udělalo zdroj
+druhý, a dva zdroje pravdy o právech jsou horší stav než jeden nepohodlný.
 
 ## 6. Klientská knihovna je normativní
 
 Závazná je **knihovna**, ne drát — tvar zpráv je její vnitřek a mění se
-s verzí. Je to totéž rozhodnutí jako u appkitu: ten protokol mluví jenom
-viewBase se svými komponentami, takže volný drát kupuje jedinou svobodu —
-napsat si klienta ručně — a přesně z ní vzejde znovu vymyšlený anti-replay.
+s verzí. Volný drát kupuje jedinou svobodu, totiž napsat si klienta ručně,
+a přesně z ní vzejde znovu vymyšlený anti-replay. Kdo přesto potřebuje mluvit
+po drátě, drží se §3; zaručené je ale rozhraní knihovny.
 
 ```python
 from access_manager import Access, Admin
@@ -481,7 +471,7 @@ from access_manager import Access, Admin
 # kontejner jinde
 access = Access.remote(os.environ["ACCESS_MANAGER_URL"],
                        key=os.environ["ACCESS_MANAGER_KEY"],
-                       component="core")
+                       component="app:mzdy")
 
 # jeden stroj, bez služby
 access = Access.local("~/.access-manager")
@@ -524,30 +514,36 @@ Co knihovna dělá, aby to nedělal každý sám:
 - **sanaci a redakci** toho, co jde do logu: kód ani klíč se do něj nedostanou.
 
 Knihovna nemá **žádné povinné závislosti**. HTTP vrstva i TOTP jsou volitelné
-extra, takže apka, která jen volá `authenticate`, si nenainstaluje nic —
-a viewBase kvůli ní nemusí měnit svoje.
+extra, takže aplikace, která jen volá `authenticate`, si kvůli ní
+nenainstaluje nic.
 
 ## 7. Otevřené body
 
-Rozhodnuté a tím uzavřené:
+Uzavřené — rozhodnuté a postavené:
 
-- ~~Kdo drží politiku~~ — **nikdo tady**; komponenta politiku nedrží vůbec (§5).
-- ~~Vydávání tokenů~~ — **zůstává ve viewBase**; tabulka vydaných tokenů má
-  tutéž vlastnost jako relace a restart ve 3 ráno by je zneplatnil všechny.
+- ~~Kdo drží politiku~~ — **nikdo tady**; access-manager ji nedrží vůbec (§5).
+- ~~Vydávání tokenů, které aplikace dává svým klientům~~ — **zůstává
+  volajícímu**; tabulka vydaných tokenů má tutéž vlastnost jako relace
+  a restart ve 3 ráno by je zneplatnil všechny.
+- ~~Omezování pokusů~~ (`throttled`) — postavené. Běží **až po** kontrole
+  původu (§2b): kdyby běželo dřív, zamkne kdokoli z internetu cizí účet
+  střelbou z blokované adresy.
+- ~~Fragmentovaná konfigurace~~ — postavená. `conf.d/*.json` se při startu
+  sečtou, skalární konflikt **zavře start**. Má to důsledek, který musí být
+  napsaný, než na něj někdo doplatí: **sjednocením nejde nic odebrat.**
+  Neexistuje fragment, který řekne „hanu z účtárny pryč" — musí se změnit
+  ten, který ji tam dává.
 
 Otevřené:
 
-1. **Ukládání** — zatím soubor: čtení se paralelizuje, expiraci si hlídá
-   každý komponent sám a `gen` mu řekne, kdy zahodit cache. Víc replik
-   v Kubernetes ukazuje na databázi, protože anti-replay a počítadlo pokusů
-   musí být sdílené — v paměti procesu by druhá replika spotřebovaný kód
-   přijala znovu.
-2. **Fragmentovaná konfigurace** — uživatelé, skupiny i klienti jako
-   jednotlivé soubory, které se při startu sečtou. Množiny se sjednocují,
-   skaláry v konfliktu **zavřou start**. Má to jeden důsledek, který musí být
-   napsaný, než na něj někdo doplatí: **sjednocením nejde nic odebrat.**
-   Neexistuje soubor, který řekne „hanu z účtárny pryč" — musí se změnit ten,
-   který ji tam dává. Zatím neimplementováno.
-3. **Omezování pokusů** (`throttled`) — navržené, neimplementované. Musí
-   běžet **až po** kontrole původu, jinak kdokoli z internetu zamkne cizí účet
-   střelbou z blokované adresy.
+1. **Úložiště pro víc replik.** Dnes soubory: čtení se paralelizuje,
+   `gen` řekne volajícímu, kdy zahodit cache, a souběžný zápis drží zámek
+   nad realmem. Víc replik ukazuje na databázi, protože anti-replay
+   spotřebovaných kódů a počítadlo pokusů musí být **sdílené** — v paměti
+   procesu by druhá replika spotřebovaný kód přijala znovu a `purpose` by
+   ztratil smysl. Do té doby je nasazení **jednoprocesové**.
+
+2. **Druhý mechanismus ověření.** Dnes je jediný, TOTP (§1). Tvar
+   `credentials` je mapa právě proto, aby přidání dalšího nebylo změnou
+   protokolu — ale žádný další navržený není a `need_factor` proto dnes
+   znamená vždycky totéž: chybí `totp`.
