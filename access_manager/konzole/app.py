@@ -15,7 +15,9 @@ import secrets
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
+from .. import log
 from ..audit import read_events
 from ..config import ServiceConfig
 from ..files import FileStore
@@ -31,6 +33,24 @@ _TEMPLATES = Path(__file__).parent / "templates"
 #: Vychozi sirka okna auditu bez filtru - "nedavne udalosti", ne cela
 #: historie (retence je typicky 90 dni, cely vypis by byl neprehledny).
 _AUDIT_VYCHOZI_DNI = 7
+
+
+def _zavedeni_k_opsani(adresar: Path) -> tuple[str | None, str | None]:
+    """Vrat (uri, tajemstvi) k rucnimu opsani, nebo (None, None).
+
+    Cte se `totp.uri`, NIKDY `totp.secret` - a je to zamer. Parovanim se
+    `totp.uri` i `totp.txt` mazou (`_complete_pairing`), zatimco tajemstvi
+    zustava a overuje dal: "mizi jen jeho zobrazitelna podoba". Kdyby se
+    string bral z `totp.secret`, tahle podoba by se po sparovani vratila -
+    presne to, co mazani artefaktu ma zarusit. Takhle ma string TOTOZNOU
+    zivotnost jako QR vedle nej.
+    """
+    cesta = adresar / "totp.uri"
+    if not cesta.is_file():
+        return None, None
+    uri = cesta.read_text(encoding="utf-8").strip()
+    hodnoty = parse_qs(urlparse(uri).query).get("secret")
+    return uri, (hodnoty[0] if hodnoty else None)
 
 
 def _require_flask():
@@ -166,6 +186,16 @@ def create_console_app(cfg: ServiceConfig):
         posilany = flask.request.form.get("csrf")
         ulozeny = flask.session.get("csrf")
         if not posilany or not ulozeny or not secrets.compare_digest(posilany, ulozeny):
+            # Do AUDITU, ne do provozniho logu: sem se dojde jen za strazcem,
+            # takze realm i spravce jsou znami a je kam zapsat. Zaroven je to
+            # presne ta udalost, ktera ma prezit rotaci provozniho logu.
+            store = flask.g.get("store")
+            if store is not None:
+                store.audit_event(
+                    kind="session", op="csrf_denied",
+                    actor=f"admin:{flask.session.get('admin')}",
+                    path=flask.request.path,
+                )
             flask.abort(400)
 
     @app.before_request
@@ -203,6 +233,10 @@ def create_console_app(cfg: ServiceConfig):
                 # konci BUDOUCI prihlaseni, ne roli; zabiti session by
                 # rozbilo tok odvolej-vlastni-token -> zobraz novy QR ->
                 # znovu sparuj.
+                store.audit_event(
+                    kind="session", op="evicted", actor=f"admin:{admin}",
+                    reason="admin_removed",
+                )
                 flask.session.clear()
                 return flask.redirect(flask.url_for("_prihlasovaci_stranka"))
             flask.g.store = store
@@ -270,6 +304,9 @@ def create_console_app(cfg: ServiceConfig):
         jmeno = flask.request.form.get("jmeno", "")
         kod1 = _kod_z_formulare(flask.request.form, "kod1")
         kod2 = _kod_z_formulare(flask.request.form, "kod2")
+        # Puvod se meri stejne jako u API a auditu (resolve_origin), ne z
+        # holeho remote_addr - jinak by log za proxy ukazoval proxy.
+        origin = resolve_origin(flask.request.environ, cfg)
 
         # Normalizace DRIV, nez se cokoli porovna nebo ulozi do session:
         # authenticate_admin normalizuje jmeno pres check_identity uvnitr
@@ -279,18 +316,40 @@ def create_console_app(cfg: ServiceConfig):
         # KAZDY dalsi pozadavek by strazce odrazel zpatky na /login. Zdeformo-
         # vane jmeno/realm hlasi STEJNOU hlasku jako spatny kod - zadny
         # postranni kanal.
+        # Oba nasledujici pripady konci DRIV, nez existuje uloziste, do
+        # ktereho by se auditovalo - realm bud neprosel kontrolou tvaru, nebo
+        # zadny takovy neni. Auditni stopa je per-realm, takze pro ne neni
+        # kam zapsat a provozni log je jejich JEDINA stopa. Bez nej se pokus
+        # nezjevi nikde a provozovatel se v konzoli nedopatra, proc se nekdo
+        # neprihlasi (presne to stalo hodinu, viz spec §3.1).
+        #
+        # Loguje se tvar, jak PRISEL - zdeformovany. To je ta informace,
+        # kterou clovek hleda; normalizovany by nerekl nic.
         try:
             jmeno_realmu = check_realm(jmeno_realmu)
             jmeno = check_identity(jmeno)
         except ValueError:
+            log.info(
+                "console_login", outcome="denied", reason="bad_form",
+                origin=origin, realm=jmeno_realmu, name=jmeno,
+            )
             return flask.render_template(
                 "login.html", chyba=_prelozit("login.failed"), **_kontext_pristupu()
             )
 
         if jmeno_realmu not in realmy:
+            log.info(
+                "console_login", outcome="denied", reason="unknown_realm",
+                origin=origin, realm=jmeno_realmu, name=jmeno,
+            )
             return flask.render_template(
                 "login.html", chyba=_prelozit("login.failed"), **_kontext_pristupu()
             )
+
+        # Odsud dal je realm znamy - vsechno ostatni (ok, bad_code, replay,
+        # throttled, ...) zapise do auditu `authenticate_admin`. Do provozniho
+        # logu uz to NEJDE: dve mista teze udalosti by se musela drzet
+        # v souladu a jedno z nich by pritom rotace zahodila.
 
         store = _store_pro(jmeno_realmu, actor=f"admin:{jmeno}")
         verdikt = store.authenticate_admin(jmeno, kod1, kod2)
@@ -320,6 +379,10 @@ def create_console_app(cfg: ServiceConfig):
     @prihlasen
     def _odhlasit():
         over_csrf()
+        flask.g.store.audit_event(
+            kind="session", op="logout",
+            actor=f"admin:{flask.session.get('admin')}",
+        )
         flask.session.clear()
         return flask.redirect(flask.url_for("_prihlasovaci_stranka"))
 
@@ -375,11 +438,19 @@ def create_console_app(cfg: ServiceConfig):
                     # Poskozeny soubor - viz stejna uvaha v
                     # FileStore._enrolment_expired.
                     vydano_ts = 0
-                zbyva = max(
-                    0, int(store.qr_ttl_days - (time.time() - vydano_ts) // 86400)
-                )
-                stav = "waiting"
-                stav_text = _prelozit("uzivatele.waiting").format(dni=zbyva)
+                if store.enrolment_expired(adresar):
+                    # Bez tehle vetve spadne vyprsele zavedeni do "ceka" a
+                    # `max(0, ...)` ho vypise jako "plati jeste 0 dni" -
+                    # tedy jako by na nej porad slo cekat.
+                    stav = "expired"
+                    stav_text = _prelozit("uzivatele.expired")
+                else:
+                    zbyva = max(
+                        0,
+                        int(store.qr_ttl_days - (time.time() - vydano_ts) // 86400),
+                    )
+                    stav = "waiting"
+                    stav_text = _prelozit("uzivatele.waiting").format(dni=zbyva)
             else:
                 stav, stav_text = "active", _prelozit("uzivatele.active")
         return {
@@ -485,10 +556,19 @@ def create_console_app(cfg: ServiceConfig):
         cesta = adresar / "totp.txt"
         obrazec = cesta.read_text(encoding="utf-8") if cesta.is_file() else None
         sparovano = (adresar / "totp.paired").is_file()
+        # Vyprsele zavedeni uz `authenticate` odmita (`expired`) - ukazovat
+        # k nemu dal QR a tajemstvi znamena posilat cloveka opsat neco, co
+        # mu stejne neprojde. Artefakty na disku zustavaji; skryva se jen
+        # jejich zobrazeni, dokud nekdo nevyda nove.
+        vyprselo = store.enrolment_expired(adresar)
         stitek = f"{store.realm}-member-{jmeno}"
+        # Tyz obsah jako QR, jen k opsani - kdo sedi u konzole a nema cim
+        # skenovat, jinak nema jak zavedeni dokoncit.
+        uri, secret = _zavedeni_k_opsani(adresar)
         return _bez_ukladani(flask.render_template(
             "qr.html", jmeno=jmeno, obrazec=obrazec, sparovano=sparovano,
-            stitek=stitek, zpet=flask.url_for("_uzivatele_seznam"),
+            vyprselo=vyprselo, stitek=stitek, uri=uri, secret=secret,
+            zpet=flask.url_for("_uzivatele_seznam"),
         ))
 
     # == skupiny =============================================================
@@ -746,11 +826,16 @@ def create_console_app(cfg: ServiceConfig):
             except (ValueError, OSError):
                 # Poskozeny soubor - viz stejna uvaha v FileStore._enrolment_expired.
                 vydano_ts = 0
-            zbyva = max(
-                0, int(store.qr_ttl_days - (time.time() - vydano_ts) // 86400)
-            )
-            stav = "waiting"
-            stav_text = _prelozit("uzivatele.waiting").format(dni=zbyva)
+            if store.enrolment_expired(adresar):
+                # Viz `_radek_cloveka` - stejna past s "plati jeste 0 dni".
+                stav = "expired"
+                stav_text = _prelozit("uzivatele.expired")
+            else:
+                zbyva = max(
+                    0, int(store.qr_ttl_days - (time.time() - vydano_ts) // 86400)
+                )
+                stav = "waiting"
+                stav_text = _prelozit("uzivatele.waiting").format(dni=zbyva)
         else:
             stav, stav_text = "active", _prelozit("spravci.paired")
         return {
@@ -827,10 +912,19 @@ def create_console_app(cfg: ServiceConfig):
         cesta = adresar / "totp.txt"
         obrazec = cesta.read_text(encoding="utf-8") if cesta.is_file() else None
         sparovano = (adresar / "totp.paired").is_file()
+        # Vyprsele zavedeni uz `authenticate` odmita (`expired`) - ukazovat
+        # k nemu dal QR a tajemstvi znamena posilat cloveka opsat neco, co
+        # mu stejne neprojde. Artefakty na disku zustavaji; skryva se jen
+        # jejich zobrazeni, dokud nekdo nevyda nove.
+        vyprselo = store.enrolment_expired(adresar)
         stitek = f"{store.realm}-admin-{jmeno}"
+        # Tyz obsah jako QR, jen k opsani - kdo sedi u konzole a nema cim
+        # skenovat, jinak nema jak zavedeni dokoncit.
+        uri, secret = _zavedeni_k_opsani(adresar)
         return _bez_ukladani(flask.render_template(
             "qr.html", jmeno=jmeno, obrazec=obrazec, sparovano=sparovano,
-            stitek=stitek, zpet=flask.url_for("_spravci_seznam"),
+            vyprselo=vyprselo, stitek=stitek, uri=uri, secret=secret,
+            zpet=flask.url_for("_spravci_seznam"),
         ))
 
     # == audit ================================================================

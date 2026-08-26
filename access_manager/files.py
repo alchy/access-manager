@@ -272,6 +272,15 @@ class FileStore:
             return True
         return time.time() - vydano > self.qr_ttl_days * 86400
 
+    def enrolment_expired(self, directory: Path) -> bool:
+        """Verejny obal nad `_enrolment_expired` pro konzoli.
+
+        Konzole potrebuje TUTEZ odpoved, jakou dostane prihlaseni - jinak
+        ukazuje QR a tajemstvi k zavedeni, ktere uz `authenticate` odmita
+        s `expired`.
+        """
+        return self._enrolment_expired(directory)
+
     def _complete_pairing(self, directory: Path) -> None:
         """Prvni uspesne prihlaseni: QR uz neni co ukazovat.
 

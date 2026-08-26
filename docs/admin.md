@@ -85,12 +85,38 @@ admin.pair("hana")                # nove parovani (existujici NIKDY neprepise)
 Párovací QR je zobrazené tajemství, ne registrační tiket, a proto má
 omezenou platnost dvěma nezávislými mechanismy:
 
-1. **Do spárování** — po prvním úspěšném přihlášení se `totp.txt`/`totp.uri`
-   smažou; tajemství dál ověřuje, ale už není co sejmout.
+1. **Do spárování** — konec obstará **první úspěšné přihlášení**, ne první
+   pokus: `_complete_pairing` běží až na úspěšné větvi ověření, takže
+   špatný kód ani zaškrcení párování neshodí. Zapíše `totp.paired`
+   a smaže `totp.txt` i `totp.uri`; `totp.secret` zůstává a ověřuje dál —
+   mizí jen zobrazitelná podoba tajemství.
 2. **Nejdéle N dní** (`qr_ttl_days`, výchozí 14) — nespárované zavedení
    expiruje a přihlášení vrací důvod `expired`; správce vydá nový QR
    (odvolat + spárovat). Deklarovaný správce s expirovaným nespárovaným
    zavedením dostane nový QR automaticky při dalším reconcile.
+
+Konzole obojí respektuje: po spárování ukáže „Spárováno", po expiraci
+vyzve k vydání nového pověření. Soubory expirovaného zavedení na disku
+zůstávají — skrývá se jen jejich zobrazení, dokud je někdo nevymění.
+
+### Zavedení bez čtečky
+
+Stránka **Zobrazit QR** nese pod QR kódem sekci **Zadat ručně** s toutéž
+hodnotou k opsání: base32 tajemství a celé `otpauth://` URI, obojí
+s tlačítkem Kopírovat. Je to pro případ, kdy není čím skenovat — konzole
+přes ssh, terminál bez telefonu po ruce.
+
+Není to druhé pověření, je to **tentýž obsah v jiném tvaru**, a má proto
+i tutéž životnost: čte se z `totp.uri`, které se párováním i expirací
+ztrácí přesně jako `totp.txt`. Kdyby se bralo z `totp.secret`, přežilo by
+spárování a mazání artefaktů by ztratilo smysl.
+
+Totéž jde i mimo web — soubory leží vedle sebe v adresáři identity:
+
+```bash
+cat .../user-hana/totp.txt    # QR jako text
+cat .../user-hana/totp.uri    # otpauth:// URI
+```
 
 ## Klíče aplikací
 

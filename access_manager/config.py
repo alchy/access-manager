@@ -30,6 +30,7 @@ class ServiceConfig:
     throttle: dict
     realms: tuple[dict, ...]
     console_secure_cookie: bool
+    log: dict
 
 
 def load_config(conf_dir: Path) -> ServiceConfig:
@@ -82,6 +83,16 @@ def load_config(conf_dir: Path) -> ServiceConfig:
     # sam (viz instalace.md).
     console_secure_cookie = bool(config.get("console_secure_cookie", False))
 
+    # Provozni log (viz provoz.py). `json` je vychozi: radky cte stroj -
+    # log driver kontejneru, journald, sberac - a `text` je ustupek cloveku,
+    # ktery se diva bez `jq`. Nezname jmeno formatu NEzavira start; log neni
+    # duvod nenastartovat sluzbu, spadne se na `json`.
+    log_config = config.get("log", {})
+    if "level" not in log_config:
+        log_config["level"] = "info"
+    if "format" not in log_config:
+        log_config["format"] = "json"
+
     trusted_proxies_list = config.get("trusted_proxies", [])
     if not isinstance(trusted_proxies_list, list):
         trusted_proxies_list = [trusted_proxies_list]
@@ -113,4 +124,5 @@ def load_config(conf_dir: Path) -> ServiceConfig:
         throttle=throttle_config,
         realms=realms,
         console_secure_cookie=console_secure_cookie,
+        log=log_config,
     )

@@ -334,6 +334,39 @@ drží odpověď minutu, odvolání okamžité není. Jeden triviální dotaz to
 zavírá bez push kanálu: nezměněné číslo znamená, že cache platí dál;
 změněné, že se má zahodit.
 
+### 3.5 Dva záznamy, jedna dělicí čára
+
+Služba vede **dvě** stopy a každá odpovídá na jinou otázku:
+
+- **auditní stopa** — co se stalo *uvnitř realmu*: kdo co zapsal, jak dopadlo
+  ověření. Leží v `realm-<x>/audit/`, má retenci, čte ji konzole.
+- **provozní log** — jak se vede *procesu*: co odmítl dřív, než vůbec věděl,
+  o který realm jde. Jde na `stdout`/`stderr`, čte ho provozovatel.
+
+Pravidlo, které mezi ně dělí, plyne z rozvržení úložiště, ne ze vkusu:
+**auditní stopa je per-realm**. Událost, která nastane dřív, než je realm
+určený — neplatný klíč komponenty (§2), zdeformovaný nebo neexistující realm
+při přihlášení do konzole — nemá kam být zapsána. Právě ta patří do provozního
+logu.
+
+> Je-li znám realm, událost jde do auditu — a nikam jinam.
+> Do provozního logu jde právě to, co do auditu zapsat nelze.
+
+Žádná událost tedy není v obou. Dvě kopie by se musely držet v souladu
+a jednu z nich by rotace provozního logu stejně zahodila; kdo hledá, musí
+vědět, kde se dívá, a ne přeskakovat mezi dvěma místy, z nichž každé ví něco
+jiného.
+
+**Proud dělá triáž.** Běžný provoz jde na `stdout`, potíže na `stderr`.
+Odmítnutý požadavek **není** chyba procesu — služba se právě zachovala
+správně. Kdyby ležel na chybovém proudu vedle „přenačtení SELHALO", nerozliší
+provozovatel jedno od druhého a `stream` v logu kontejneru nenese žádnou
+informaci.
+
+Podrobný důvod odmítnutí patří do obou stop podle téhož klíče (§3.1) — ven,
+k volajícímu, jde pořád jen čtveřice tvarů. Kód, klíč ani hlavička
+`Authorization` se do logu nedostanou nikdy.
+
 ## 4. Co z Kubernetes plyne pro API
 
 **Běží ve víc replikách.** Proto musí být služba **bezstavová vůči

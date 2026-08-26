@@ -20,6 +20,7 @@ import threading
 from ipaddress import ip_address, ip_network
 from pathlib import Path
 
+from . import log
 from .config import ServiceConfig, load_config
 from .files import FileStore
 from .konzole.app import create_console_app
@@ -127,17 +128,17 @@ def _prenacti(conf_dir: Path, api: _Prepinac, konzole: _Prepinac) -> None:
     # to rekneme nahlas, nez aby se operator divil, proc zmena nic nedela.
     stare_listenery = getattr(_prenacti, "_listenery", None)
     if stare_listenery is not None and cfg.listeners != stare_listenery:
-        print(
-            "SIGHUP: zmena listeners se za behu neuplatni, chce to restart "
-            f"(bezi na {stare_listenery})",
-            file=sys.stderr,
+        log.warning(
+            "listeners_ignored",
+            reason="zmena listeners se za behu neuplatni, chce to restart",
+            running=str(stare_listenery),
         )
     else:
         _prenacti._listenery = dict(cfg.listeners)
 
     deklarace = [{**cfg.defaults, **d} for d in cfg.realms]
     for z in reconcile(cfg.data, deklarace):
-        print(f"nove zavedeni: {z.directory / 'totp.txt'}", file=sys.stderr)
+        log.info("enrolment_issued", path=str(z.directory / "totp.txt"))
 
     novy_api = create_app(cfg)
     nova_konzole = create_console_app(cfg)
@@ -172,12 +173,12 @@ def _zapoj_sighup(prenacti) -> None:
     def obsluha(_signal, _ramec):
         try:
             prenacti()
-            print("SIGHUP: konfigurace prenactena", file=sys.stderr)
+            log.info("config_reloaded")
         except Exception as chyba:  # noqa: BLE001 - sluzba nesmi spadnout
-            print(
-                "SIGHUP: prenacteni SELHALO, bezi dal ta stara "
-                f"konfigurace: {chyba}",
-                file=sys.stderr,
+            log.warning(
+                "config_reload_failed",
+                reason="bezi dal ta stara konfigurace",
+                error=str(chyba),
             )
 
     signal.signal(signal.SIGHUP, obsluha)
@@ -238,10 +239,10 @@ def create_app(cfg: ServiceConfig):
             # prozradila, ktere klice existuji.
             # Klic ani hlavicka Authorization sem NIKDY nepatri - jen puvod
             # a cesta, at je 401 vubec videt v provoznim logu (spec §3).
-            print(
-                f"401 unauthorized: puvod={origin} cesta={flask.request.path}",
-                file=sys.stderr,
-            )
+            # Realm neni znamy (klic nesedi na zadnou komponentu), takze
+            # neexistuje auditni stopa, do ktere by se to dalo zapsat -
+            # tenhle radek je JEDINA stopa po takovem pokusu.
+            log.info("unauthorized", origin=origin, path=flask.request.path)
             return flask.jsonify({"error": "unauthorized"}), 401
 
         if not _origin_allowed(component, origin):
@@ -384,6 +385,15 @@ def main(argv=None):
     conf_dir = Path(args.config)
     cfg = load_config(conf_dir)
 
+    # Handlery zapojit HNED po konfiguraci a pred reconcile - jinak by prvni
+    # radky sluzby (`enrolment_issued`) sly jeste pres logging.lastResort,
+    # tedy bez formatu a na spatny proud. SIGHUP uroven ani format nemeni:
+    # prehazovat handlery pod bezicimi vlakny je vic rizika nez uzitku.
+    log.configure(
+        level=str(cfg.log.get("level", "info")),
+        fmt=str(cfg.log.get("format", "json")),
+    )
+
     # Instancni defaults se slouci do kazde deklarace, ktera si vlastni
     # hodnotu nerekla sama - deklarace smi prebit instancni defaults,
     # ne naopak.
@@ -394,7 +404,7 @@ def main(argv=None):
     # Spusti reconcile a vypise nove zavedeni
     nova = reconcile(cfg.data, deklarace)
     for z in nova:
-        print(f"nove zavedeni: {z.directory / 'totp.txt'}")
+        log.info("enrolment_issued", path=str(z.directory / "totp.txt"))
 
     # Zaloz aplikace - API i konzole se stavi tady, v hlavnim vlakne;
     # konzole pak jen svou serve() spousti v demonskem vlakne nize.

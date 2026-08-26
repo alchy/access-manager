@@ -15,7 +15,7 @@ def _pridej(prihlaseny_klient, jmeno):
     return klient.post("/admins/add", data={"csrf": csrf, "jmeno": jmeno})
 
 
-def test_adding_an_admin_redirects_to_a_qr_page_without_the_secret(
+def test_adding_an_admin_redirects_to_a_qr_page_with_the_credential(
     prihlaseny_klient, tmp_path,
 ):
     odpoved = _pridej(prihlaseny_klient, "marie")
@@ -31,7 +31,10 @@ def test_adding_an_admin_redirects_to_a_qr_page_without_the_secret(
     tajemstvi = (
         koren(tmp_path / "data") / "admin-marie" / "totp.secret"
     ).read_text(encoding="utf-8").strip()
-    assert tajemstvi not in telo
+    # Sdilena `qr.html` plati pro spravce stejne jako pro cleny: QR i tyz
+    # obsah k opsani.
+    assert tajemstvi in telo
+    assert "otpauth://" in telo
 
     seznam = klient.get("/admins").get_data(as_text=True)
     assert tajemstvi not in seznam

@@ -173,15 +173,15 @@ služba zaznamenala:
 
 ```bash
 curl -s -o /dev/null https://auth.example.com/v1/whoami
-grep '401 unauthorized' ~/logs/service.log | tail -1
+grep unauthorized ~/logs/service.log | tail -1
 ```
 
 ```
-401 unauthorized: puvod=2a01:4f8:1c1b:8c66::1 cesta=/v1/whoami
+2026-08-26T05:55:09+02:00 stdout F {"t":"2026-08-26T03:55:09+00:00","level":"info","event":"unauthorized","origin":"2a01:4f8:1c1b:8c66::1","path":"/v1/whoami"}
 ```
 
-Musí tam být **adresa klienta**. Když tam vidíte `10.89.0.2` (nebo veřejnou IP
-stroje), hlavička se nevěří a `trusted_proxies` je špatně.
+V `origin` musí být **adresa klienta**. Když tam vidíte `10.89.0.2` (nebo
+veřejnou IP stroje), hlavička se nevěří a `trusted_proxies` je špatně.
 
 ## Události kontejneru
 
@@ -270,15 +270,42 @@ tam, kde byla: `data/realm-<název>/audit/RRRR-MM-DD.jsonl`.
 ~/logs/service.log
 ```
 
-Rotuje se po 10 MB (`--log-opt max-size`). Formát má na začátku řádku časové
-razítko a proud, vlastní hláška je za `stderr F`:
+Rotuje se po 10 MB (`--log-opt max-size`). Na začátku řádku je razítko
+a **proud**, za `F` je vlastní záznam služby — jeden JSON objekt na řádek:
 
 ```
-2026-08-26T05:55:09+02:00 stderr F 401 unauthorized: puvod=… cesta=/v1/whoami
+2026-08-26T05:55:09+02:00 stdout F {"t":"…","level":"info","event":"unauthorized","origin":"…","path":"/v1/whoami"}
+2026-08-26T06:04:50+02:00 stderr F {"t":"…","level":"warning","event":"config_reload_failed","reason":"bezi dal ta stara konfigurace","error":"…"}
 ```
+
+**Proud dělá triáž.** Běžný provoz jde na `stdout`, potíže na `stderr` —
+odmítnutý požadavek není chyba procesu, služba se právě zachovala správně.
+Takže:
+
+```bash
+grep ' stderr F ' ~/logs/service.log     # jen to, co chce pozornost
+```
+
+Formát a úroveň se nastavují v `service.json`, viz [instalace.md](instalace.md):
+
+```json
+{ "log": { "level": "info", "format": "json" } }
+```
+
+`"format": "text"` vypíše tytéž údaje čitelně bez `jq`. Neznámý název formátu
+start nezavře — spadne se na `json`.
 
 Totéž jde přes `podman logs access-manager` nebo — protože kontejner běží
 v popředí pod systemd — přes `journalctl -u access-manager-container`.
+
+### Co v provozním logu NENÍ
+
+Provozní log nese jen to, co **nešlo zapsat do auditu**: požadavky odmítnuté
+dřív, než bylo jasné, o který realm jde (neplatný klíč, neznámý realm při
+přihlášení do konzole), a události procesu. Všechno ostatní — přihlášení,
+odmítnutí kódu, zápisy, odepřený původ — má realm známý a patří do **auditní
+stopy**, kterou čte konzole. Žádná událost není v obou; provozní log se po
+10 MB zahodí, audit má retenci.
 
 ### Časová zóna
 
@@ -296,8 +323,9 @@ by se v budoucnu dívalo na místní čas:
 AM_TZ=Europe/Prague        # v /etc/sysconfig/access-manager-container
 ```
 
-Časová razítka v `service.log` píše podman, ne služba, takže ta jsou v zóně
-hostitele bez ohledu na `AM_TZ`.
+Razítko na začátku řádku píše podman, takže je v zóně hostitele bez ohledu
+na `AM_TZ`. Razítko `t` **uvnitř** JSON objektu si píše služba sama a je
+v UTC — stejně jako audit, aby se dva záznamy téže události nelišily zónou.
 
 ### Vlastnictví souborů a `keep-id`
 

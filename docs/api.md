@@ -20,7 +20,10 @@ Kontroly běží v neporušitelném pořadí:
 1. **Původ** — pravdu drží peer socketu; `X-Forwarded-For` se čte jen od
    adres v `trusted_proxies` (`hops`-tý prvek zprava).
 2. **Klíč** → komponenta+realm. Chybějící i špatný klíč = **`401`
-   a žádný jiný rozdíl** (do stderr logu služby jde původ a cesta).
+   a žádný jiný rozdíl**. Bez komponenty není znám realm, takže není kam
+   to auditovat — původ a cesta jdou do provozního logu služby jako
+   `{"event":"unauthorized",…}`. Klíč ani hlavička `Authorization` do logu
+   nejdou nikdy.
 3. **Origin ACL** — původ mimo `origins` komponenty = **`403` a nic dál**
    (žádná počítadla, žádné parsování); jde do auditu realmu s `key_id`.
    Prázdné `origins` = jen smyčka.

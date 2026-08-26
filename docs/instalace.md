@@ -60,7 +60,7 @@ Při startu služba načte konfiguraci, provede **reconcile** deklarovaných rea
 (doplní jen to, co chybí — nová párovací QR vypíše jako cesty k `totp.txt`)
 a začne poslouchat: **API na portu 22000**, správcovská webová konzole na
 portu 22001 (přihlášení a správu realmů popisuje [admin.md](admin.md)).
-Neautorizované pokusy (401) se logují na stderr.
+Co služba zaznamenává a kam, popisuje [Provozní log](#provozní-log) níže.
 
 Obojí se ve výchozím stavu váže na **smyčku** — zvenčí se k tomu nikdo
 nedostane, dokud před to nepostavíte proxy (níže) nebo si neuděláte ssh tunel:
@@ -94,7 +94,8 @@ neprocházejí do hloubky a `realms/` je jediný, na který se služba dívá.
   "hops": 1,
   "console_secure_cookie": true,
   "defaults": { "qr_ttl_days": 14, "audit_retention_days": 90 },
-  "throttle": { "attempts": 5, "window_s": 60 } }
+  "throttle": { "attempts": 5, "window_s": 60 },
+  "log": { "level": "info", "format": "json" } }
 ```
 
 `conf.d/realms/example.com.json` — deklarace realmu:
@@ -157,6 +158,66 @@ cat /var/lib/access-manager/realm-example.com/admin-jindrich/totp.txt
 QR je uložené jako **text**, takže `cat` přes ssh stačí i na stroji bez
 obrazovky. Přihlášení do konzole chce realm, jméno správce a **dva kódy ze
 dvou po sobě jdoucích oken** — podrobně v [admin.md](admin.md).
+
+## Provozní log
+
+Služba píše **jeden JSON objekt na řádek**. Není to auditní stopa — ty dva
+záznamy odpovídají na jinou otázku a čte je někdo jiný:
+
+| | provozní log | auditní stopa |
+|---|---|---|
+| kde | `stdout`/`stderr` procesu | `data/realm-<název>/audit/RRRR-MM-DD.jsonl` |
+| rozsah | celý proces | jeden realm |
+| čte | provozovatel na stroji | konzole na webu |
+| retence | co si nechá systemd/podman | `audit_retention_days` (90 dní) |
+
+**Dělicí čára není libovolná.** Auditní stopa je per-realm, takže událost,
+která nastane dřív, než je realm určený, nemá kam být zapsána — a právě ta
+patří do provozního logu. Co realm zná, patří do auditu a nikam jinam: dvě
+kopie by se musely držet v souladu a jednu z nich by rotace stejně zahodila.
+
+Do provozního logu jde tedy:
+
+- **neplatný nebo chybějící klíč API** (`unauthorized`) — bez komponenty není
+  realm,
+- **přihlášení do konzole odmítnuté dřív, než je úložiště** (`console_login`
+  s důvodem `bad_form` nebo `unknown_realm`) — zdeformovaný nebo neexistující
+  realm,
+- **události procesu** — přenačtení konfigurace, vydaná zavedení.
+
+Všechno ostatní — úspěšné i neúspěšné ověření, zápisy, odepřený původ,
+odhlášení, zamítnutý CSRF token — má realm známý a najdete to v auditu.
+
+### Proud dělá triáž
+
+Běžný provoz jde na **`stdout`**, potíže na **`stderr`**. Odmítnutý požadavek
+není chyba procesu — služba se právě zachovala správně — a na chybovém proudu
+nemá co dělat. Pod systemd to znamená, že `journalctl -p warning` ukáže právě
+to, co chce pozornost:
+
+```
+{"t":"2026-08-26T03:55:09+00:00","level":"info","event":"unauthorized","origin":"2a01:4f8::1","path":"/v1/whoami"}
+{"t":"2026-08-26T04:04:50+00:00","level":"warning","event":"config_reload_failed","reason":"bezi dal ta stara konfigurace","error":"neplatny JSON v service.json"}
+```
+
+Razítko `t` je vždy v **UTC**, stejně jako audit — dva záznamy téže události
+se nesmí lišit zónou.
+
+### Nastavení
+
+```json
+{ "log": { "level": "info", "format": "json" } }
+```
+
+`format` přijímá `json` (výchozí) a `text` — tytéž údaje čitelně bez `jq`.
+Neznámý název formátu **start nezavře**, spadne se na `json`: log není důvod
+nenastartovat službu. Úroveň ani formát se **nemění SIGHUPem** — přehazovat
+handlery pod běžícími vlákny je víc rizika než užitku, chce to restart.
+
+Kód, klíč ani hlavička `Authorization` se do logu nedostanou nikdy. Hodnoty,
+které přišly z formuláře (`realm`, `name` u `console_login`), se logují **tak,
+jak přišly** — i zdeformované, protože právě ten tvar provozovatel hledá —
+ale zkrácené na 256 znaků.
 
 ## Služba pod systemd
 

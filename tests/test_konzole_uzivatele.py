@@ -39,16 +39,43 @@ def test_adding_a_user_redirects_to_a_qr_page_with_an_ascii_code(
     assert "<pre" in telo
     obrazec = telo.split("<pre", 1)[1].split(">", 1)[1].split("</pre>", 1)[0]
     assert obrazec.count("\n") > 10
-    # zadne tajemstvi mimo tenhle ascii QR - ani jako nazev souboru, ani
-    # (hlavni test) jako SKUTECNA hodnota tajemstvi nikde na strance.
     assert "totp.secret" not in telo.lower()
+
     tajemstvi = (
         koren(tmp_path / "data") / "user-tereza" / "totp.secret"
     ).read_text(encoding="utf-8").strip()
-    assert tajemstvi not in telo
+    # Tajemstvi na TEHLE strance byt smi - je to tataz hodnota, kterou nese
+    # QR o kus vys, jen k opsani (kdo sedi u konzole, nema cim skenovat).
+    assert tajemstvi in telo
+    assert "otpauth://" in telo
 
+    # Ve VYPISU nemá co delat - tam se nikdy nic k opsani nezobrazuje.
     seznam = klient.get("/users").get_data(as_text=True)
     assert tajemstvi not in seznam
+
+
+def test_pairing_removes_the_typed_secret_together_with_the_qr(
+    prihlaseny_klient, tmp_path,
+):
+    """`_complete_pairing` maze `totp.uri` i `totp.txt`: "mizi jen zobrazitelna
+    podoba tajemstvi". String se cte prave z `totp.uri`, takze musi zmizet
+    s QR naraz - kdyby se bral z `totp.secret`, prezil by a tim by to
+    pravidlo zrusil."""
+    _pridej(prihlaseny_klient, "tereza")
+    klient, _ = prihlaseny_klient
+
+    adresar = koren(tmp_path / "data") / "user-tereza"
+    tajemstvi = (adresar / "totp.secret").read_text(encoding="utf-8").strip()
+    assert tajemstvi in klient.get("/users/qr/tereza").get_data(as_text=True)
+
+    # Prvni uspesne prihlaseni = sparovano.
+    (adresar / "totp.paired").write_text("1", encoding="utf-8")
+    (adresar / "totp.uri").unlink()
+    (adresar / "totp.txt").unlink()
+
+    telo = klient.get("/users/qr/tereza").get_data(as_text=True)
+    assert tajemstvi not in telo
+    assert "otpauth://" not in telo
 
 
 def test_disabling_changes_the_state_shown_in_the_listing(prihlaseny_klient):

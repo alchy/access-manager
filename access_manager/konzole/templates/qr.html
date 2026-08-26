@@ -8,9 +8,36 @@
   <span class="mono">{{ stitek }}</span>
 </p>
 
-{% if obrazec %}
+{# Poradi vetvi neni libovolne: vyprsele zavedeni ma na disku `totp.txt`
+   i `totp.uri` porad, takze by jinak spadlo do prvni vetve a ukazalo QR
+   i tajemstvi k necemu, co uz `authenticate` odmita. #}
+{% if vyprselo %}
+<p>{{ t('uzivatele.qr_expired') }}</p>
+{% elif obrazec %}
 <pre class="qr">{{ obrazec }}</pre>
 <p class="poznamka">{{ t('uzivatele.qr_note') }}</p>
+
+{# Tyz obsah jako QR vyse, jen k opsani. Ma i tutez zivotnost - `totp.uri`
+   se parovanim maze stejne jako `totp.txt`, takze obojí zmizi naráz. #}
+{% if secret %}
+<h2>{{ t('uzivatele.manual_title') }}</h2>
+<p class="poznamka">{{ t('uzivatele.manual_note') }}</p>
+
+<p>{{ t('uzivatele.manual_secret') }}</p>
+<p class="mono klic-hodnota" id="totp-secret">{{ secret }}</p>
+<button type="button"
+        onclick="navigator.clipboard.writeText(document.getElementById('totp-secret').textContent.trim())">
+  {{ t('aplikace.copy') }}
+</button>
+
+<p>{{ t('uzivatele.manual_uri') }}</p>
+<p class="mono klic-hodnota" id="totp-uri">{{ uri }}</p>
+<button type="button"
+        onclick="navigator.clipboard.writeText(document.getElementById('totp-uri').textContent.trim())">
+  {{ t('aplikace.copy') }}
+</button>
+{% endif %}
+
 {% elif sparovano %}
 <p>{{ t('spravci.paired') }}</p>
 {% else %}

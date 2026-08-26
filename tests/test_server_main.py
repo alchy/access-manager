@@ -235,8 +235,10 @@ def test_main_prints_new_enrolments(tmp_path, capsys):
             main(["-c", str(conf_dir)])
 
     captured = capsys.readouterr()
-    assert "nove zavedeni:" in captured.out
-    assert "totp.txt" in captured.out
+    radky = [json.loads(r) for r in captured.out.strip().splitlines()]
+    zavedeni = [r for r in radky if r["event"] == "enrolment_issued"]
+    assert zavedeni
+    assert all("totp.txt" in r["path"] for r in zavedeni)
 
 
 def test_serve_keeps_forwarded_headers(tmp_path):

@@ -100,3 +100,68 @@ def test_revoke_and_pair_reset_the_validity(tmp_path):
     admin.pair("hana")
     hodnota = int((directory / "totp.issued").read_text().strip())
     assert hodnota > stare + 14 * 86400
+
+
+# == vyprsele zavedeni se v konzoli uz nezobrazuje =====================
+
+
+def _vypsi_zavedeni_do_minulosti(adresar, dni):
+    """Posun `totp.issued` o `dni` zpatky - TTL se pocita prave z nej."""
+    import time
+    (adresar / "totp.issued").write_text(
+        str(int(time.time()) - dni * 86400), encoding="utf-8"
+    )
+
+
+def test_an_expired_enrolment_hides_the_qr_and_the_typed_secret(
+    prihlaseny_klient, tmp_path,
+):
+    """Po TTL uz `authenticate` hlasi `expired`. Ukazovat k tomu dal QR
+    a tajemstvi znamena posilat cloveka opsat neco, co mu neprojde."""
+    klient, csrf = prihlaseny_klient
+    klient.post("/users/add", data={"jmeno": "tereza", "csrf": csrf})
+    adresar = koren(tmp_path / "data") / "user-tereza"
+    tajemstvi = (adresar / "totp.secret").read_text(encoding="utf-8").strip()
+
+    # Cerstve zavedeni: obojí je videt.
+    telo = klient.get("/users/qr/tereza").get_data(as_text=True)
+    assert "<pre" in telo
+    assert tajemstvi in telo
+
+    _vypsi_zavedeni_do_minulosti(adresar, 15)      # qr_ttl_days je 14
+
+    telo = klient.get("/users/qr/tereza").get_data(as_text=True)
+    assert "<pre" not in telo
+    assert tajemstvi not in telo
+    assert "otpauth://" not in telo
+    # Artefakty na disku zustavaji - skryva se jen jejich zobrazeni.
+    assert (adresar / "totp.txt").is_file()
+    assert (adresar / "totp.uri").is_file()
+
+
+def test_an_expired_enrolment_is_not_reported_as_still_waiting(
+    prihlaseny_klient, tmp_path,
+):
+    """Drive spadlo vyprsele zavedeni do "ceka" a `max(0, ...)` ho vypsalo
+    jako "plati jeste 0 dni" - tedy jako by na nej slo dal cekat."""
+    klient, csrf = prihlaseny_klient
+    klient.post("/users/add", data={"jmeno": "tereza", "csrf": csrf})
+    _vypsi_zavedeni_do_minulosti(koren(tmp_path / "data") / "user-tereza", 15)
+
+    telo = klient.get("/users").get_data(as_text=True)
+    assert 'class="stav stav-expired"' in telo
+    assert 'class="stav stav-waiting"' not in telo
+    assert "0 dní" not in telo
+
+
+def test_an_expired_admin_enrolment_is_hidden_too(prihlaseny_klient, tmp_path):
+    """`qr.html` i vypis jsou pro spravce tytez - musi se chovat stejne."""
+    klient, csrf = prihlaseny_klient
+    klient.post("/admins/add", data={"jmeno": "marie", "csrf": csrf})
+    adresar = koren(tmp_path / "data") / "admin-marie"
+    _vypsi_zavedeni_do_minulosti(adresar, 15)
+
+    telo = klient.get("/admins/qr/marie").get_data(as_text=True)
+    assert "<pre" not in telo
+    assert "otpauth://" not in telo
+    assert 'class="stav stav-expired"' in klient.get("/admins").get_data(as_text=True)

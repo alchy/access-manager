@@ -3,6 +3,8 @@
 401 bez rozdilu (neexistujici a nepovoleny vypadaji stejne); 403 za puvod
 pada driv, nez se cokoli cte; prazdne origins znamena jen smycku.
 """
+import json
+
 import pytest
 from helpers import REALM, koren
 from test_config import zapis  # helper na zapis fragmentu
@@ -48,7 +50,10 @@ def test_a_wrong_key_is_the_same_401(prostredi):
     assert odpoved.status_code == 401
 
 
-def test_a_401_is_logged_to_stderr_without_the_key(prostredi, capsys):
+def test_a_401_is_logged_to_the_operational_log_without_the_key(prostredi, capsys):
+    """Odmitnuty klic nezna realm, takze ho nema kam auditovat - provozni log
+    je jeho JEDINA stopa. Na stdout, ne stderr: sluzba se zachovala spravne,
+    neni to jeji chyba."""
     client, _, _ = prostredi
     spatny_klic = "am_k1_" + "0" * 64
     hlavicka = {"Authorization": f"Bearer {spatny_klic}"}
@@ -56,10 +61,17 @@ def test_a_401_is_logged_to_stderr_without_the_key(prostredi, capsys):
     assert odpoved.status_code == 401
 
     zachyceno = capsys.readouterr()
-    assert "401" in zachyceno.err
-    assert "/v1/users" in zachyceno.err
-    assert spatny_klic not in zachyceno.err
-    assert "Bearer" not in zachyceno.err
+    radek = json.loads(zachyceno.out.strip().splitlines()[-1])
+    assert radek["event"] == "unauthorized"
+    assert radek["level"] == "info"
+    assert radek["path"] == "/v1/users"
+    assert radek["origin"]
+    # Bezny provoz na chybovy proud nepatri - jinak `stream` v logu
+    # kontejneru nic nerozlisi.
+    assert zachyceno.err == ""
+    # Klic ani hlavicka se do logu nesmi dostat NIKDY (spec §3).
+    assert spatny_klic not in zachyceno.out
+    assert "Bearer" not in zachyceno.out
 
 
 def test_a_valid_key_from_a_wrong_origin_is_403(prostredi):
