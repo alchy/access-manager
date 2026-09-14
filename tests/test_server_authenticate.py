@@ -80,6 +80,22 @@ def test_denied_shows_reason_with_detail(prostredi):
     assert telo["reason"] == "bad_code"
 
 
+def test_a_non_ascii_code_is_a_verdict_not_a_500(prostredi):
+    # Driv TypeError z `hmac.compare_digest` -> 500 -> klient retryoval
+    # s backoffem a jeden preklep udelal osm pozadavku mimo audit.
+    client, _, hlucny, data = prostredi
+    odpoved = client.post(
+        "/v1/authenticate", headers=hlavicky(hlucny),
+        json={
+            "username": "hana", "credentials": {"totp": "ěščřžý"}, "purpose": "login",
+        },
+    )
+    assert odpoved.status_code == 200
+    assert odpoved.get_json()["outcome"] == "denied"
+    assert odpoved.get_json()["reason"] == "bad_code"
+    assert read_events(koren(data), kind="authenticate")[0]["reason"] == "bad_code"
+
+
 def test_need_factor_lists_required(prostredi):
     client, tichy, _, _ = prostredi
     odpoved = client.post(

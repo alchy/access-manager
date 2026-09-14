@@ -426,7 +426,12 @@ class FileStore:
         if not code:
             return Verdict.need_factor(("totp",), gen=gen)
 
-        step = _matching_step(secret.read_text(encoding="utf-8").strip(), code)
+        # Nevalidni tvar je tentyz bad_code jako spatny kod - vcetne pocitadla
+        # pokusu a auditu. Jiny reason by prozradil, jak vstup vypadal.
+        step = (
+            _matching_step(secret.read_text(encoding="utf-8").strip(), code)
+            if _is_code(code) else None
+        )
         if step is None:
             self._record_failure(directory)
             return Verdict.refused("bad_code", gen=gen)
@@ -490,7 +495,11 @@ class FileStore:
             return Verdict.throttled(zbyva, gen=gen)
 
         tajemstvi = secret.read_text(encoding="utf-8").strip()
-        step = _matching_step(tajemstvi, first)
+        # Stejne jako u uzivatele: nevalidni tvar kterehokoli z kodu je bad_code.
+        step = (
+            _matching_step(tajemstvi, first)
+            if _is_code(first) and _is_code(second) else None
+        )
         if step is None or not _code_at_step(tajemstvi, step + 1, second):
             self._record_failure(directory)
             return Verdict.refused("bad_code", gen=gen)
@@ -1252,12 +1261,27 @@ def _qr_text(uri: str) -> str:
     return buffer.getvalue()
 
 
+def _is_code(code) -> bool:
+    """Ma vstup od klienta vubec tvar TOTP kodu - jen ASCII cislice?
+
+    `hmac.compare_digest` na str s ne-ASCII znakem nevrati False, ale hodi
+    TypeError. Ceske rozlozeni klavesnice bez Shiftu posle misto "123456"
+    "ěščřžý" - a vyjimka pak utekla driv, nez se pokus zapocital do
+    omezovani a zapsal do auditu (sluzba vracela 500). `isdigit` samo
+    nestaci: projde mu i "²" nebo arabsko-indicke cislice.
+    """
+    text = str(code)
+    return text.isascii() and text.isdigit()
+
+
 def _matching_step(secret: str, code: str, now: float | None = None) -> int | None:
     """Ktery casovy krok ten kod odpovida - nebo `None`.
 
     `pyotp.verify` odpovi jen ano/ne, jenze pro anti-replay potrebujeme VEDET
     KTERY krok se spotreboval; bez toho by "pouzity kod" nesel zapamatovat.
     """
+    if not _is_code(code):
+        return None
     pyotp = _require_totp()
 
     totp = pyotp.TOTP(secret)
@@ -1271,6 +1295,8 @@ def _matching_step(secret: str, code: str, now: float | None = None) -> int | No
 
 def _code_at_step(secret: str, step: int, code) -> bool:
     """Sedi kod PRESNE na dany krok? Zadna tolerance - sousednost je tvrda."""
+    if not _is_code(code):
+        return False
     pyotp = _require_totp()
     totp = pyotp.TOTP(secret)
     return hmac.compare_digest(totp.at(step * totp.interval), str(code))

@@ -68,6 +68,27 @@ def test_an_expired_window_unlocks(tmp_path):
     assert access.authenticate("hana", {"totp": kod()}, purpose="login")
 
 
+def test_non_ascii_codes_count_like_wrong_ones(tmp_path):
+    # Driv vyjimka utekla pred `_record_failure` - neomezeny pocet pokusu.
+    zaloz(tmp_path, "hana")
+    access = store_access(tmp_path)
+    for _ in range(5):
+        access.authenticate("hana", {"totp": "ěščřžý"}, purpose="login")
+    verdikt = access.authenticate("hana", {"totp": kod()}, purpose="login")
+    assert verdikt.outcome == "throttled"
+
+
+def test_non_ascii_admin_codes_count_like_wrong_ones(tmp_path):
+    from access_manager.files import FileStore
+    Admin.local(tmp_path, realm=REALM).add_admin("jindrich")
+    store = FileStore(koren(tmp_path), realm=REALM)
+    for i in range(5):
+        prvni, druhy = ("ěščřžý", "000000") if i % 2 else ("000000", "ěščřžý")
+        store.authenticate_admin("jindrich", prvni, druhy)
+    verdikt = store.authenticate_admin("jindrich", "000000", "111111")
+    assert verdikt.outcome == "throttled"
+
+
 def test_the_admin_login_is_throttled_too(tmp_path):
     from access_manager.files import FileStore
     Admin.local(tmp_path, realm=REALM).add_admin("jindrich")

@@ -50,6 +50,35 @@ def test_replaying_the_pair_is_a_replay(tmp_path):
     assert s.authenticate_admin("jindrich", prvni, druhy).reason == "replay"
 
 
+def test_a_non_ascii_first_code_is_a_plain_bad_code(tmp_path):
+    s = store(tmp_path)
+    _, druhy = dva_kody(tmp_path)
+    assert s.authenticate_admin("jindrich", "ěščřžý", druhy).reason == "bad_code"
+
+
+def test_a_non_ascii_second_code_is_a_plain_bad_code(tmp_path):
+    s = store(tmp_path)
+    prvni, _ = dva_kody(tmp_path)
+    assert s.authenticate_admin("jindrich", prvni, "ěščřžý").reason == "bad_code"
+
+
+def test_a_non_digit_code_is_a_plain_bad_code(tmp_path):
+    s = store(tmp_path)
+    prvni, druhy = dva_kody(tmp_path)
+    assert s.authenticate_admin("jindrich", "abcdef", druhy).reason == "bad_code"
+    assert s.authenticate_admin("jindrich", prvni, "abcdef").reason == "bad_code"
+
+
+def test_a_non_ascii_admin_code_lands_in_the_audit_as_bad_code(tmp_path):
+    from access_manager.audit import read_events
+
+    s = store(tmp_path)
+    prvni, _ = dva_kody(tmp_path)
+    s.authenticate_admin("jindrich", prvni, "ěščřžý")
+    udalosti = read_events(koren(tmp_path), kind="authenticate")
+    assert [(u["outcome"], u["reason"]) for u in udalosti] == [("denied", "bad_code")]
+
+
 def test_an_unknown_admin_is_refused_by_name(tmp_path):
     s = store(tmp_path)
     assert s.authenticate_admin("nikdo", "000000", "111111").reason == "unknown_user"

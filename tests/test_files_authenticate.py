@@ -34,6 +34,43 @@ def test_a_wrong_code_is_refused(tmp_path):
     assert verdikt.reason == "bad_code"
 
 
+# Ceske rozlozeni bez Shiftu dava misto "123456" tohle. `hmac.compare_digest`
+# na ne-ASCII str hazel TypeError: sluzba vratila 500, pokus nesel do auditu
+# ani do pocitadla pokusu. Zbytek jsou dalsi tvary, ktere kodem nejsou.
+NE_KODY = ("ěščřžý", "abcdef", "²³⁴⁵⁶⁷", "١٢٣٤٥٦", "12345é")
+
+
+@pytest.mark.parametrize("ne_kod", NE_KODY)
+def test_a_code_that_is_not_ascii_digits_is_a_plain_bad_code(tmp_path, ne_kod):
+    zaloz(tmp_path, "hana", TAJEMSTVI)
+    access = Access.local(tmp_path, realm=REALM)
+    verdikt = access.authenticate("hana", {"totp": ne_kod}, purpose="login")
+    assert not verdikt
+    assert verdikt.reason == "bad_code"
+
+
+def test_a_non_ascii_code_lands_in_the_audit_as_bad_code(tmp_path):
+    from access_manager.audit import read_events
+
+    zaloz(tmp_path, "hana", TAJEMSTVI)
+    Access.local(tmp_path, realm=REALM).authenticate(
+        "hana", {"totp": "ěščřžý"}, purpose="login"
+    )
+    udalosti = read_events(koren(tmp_path), kind="authenticate")
+    assert len(udalosti) == 1
+    assert udalosti[0]["outcome"] == "denied"
+    assert udalosti[0]["reason"] == "bad_code"
+    for soubor in (koren(tmp_path) / "audit").glob("*.jsonl"):
+        assert "ěščřžý" not in soubor.read_text(encoding="utf-8")
+
+
+def test_a_non_ascii_code_does_not_break_the_right_one(tmp_path):
+    zaloz(tmp_path, "hana", TAJEMSTVI)
+    access = Access.local(tmp_path, realm=REALM)
+    access.authenticate("hana", {"totp": "ěščřžý"}, purpose="login")
+    assert access.authenticate("hana", {"totp": kod()}, purpose="login")
+
+
 def test_a_passing_verdict_carries_the_principals(tmp_path):
     # Kdo prosel, ma rovnou i to, co potrebuje `allowed(principals, acl)` -
     # jinak by kazde prihlaseni byla dve kolecka po siti.
