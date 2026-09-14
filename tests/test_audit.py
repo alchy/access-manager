@@ -201,3 +201,103 @@ def test_recent_by_survives_a_broken_line(tmp_path):
 
     nalezene = recent_by(koren(tmp_path), "subject", ["user:hana"])
     assert len(nalezene["user:hana"]) == 1
+
+
+# == zapis: odkud a s jakym vysledkem ======================================
+
+
+def test_a_write_carries_its_outcome(tmp_path):
+    Admin.local(tmp_path, realm=REALM).add_group("ucetni")
+    zapis = read_events(koren(tmp_path), kind="write")[0]
+    assert (zapis["op"], zapis["outcome"]) == ("add_group", "ok")
+
+
+def test_a_store_with_an_origin_stamps_it_on_its_writes(tmp_path):
+    store = FileStore(koren(tmp_path), realm=REALM, actor="admin:marie",
+                      origin="193.0.231.250")
+    store.add_group("ucetni")
+    store.audit_event(kind="session", op="logout", actor="admin:marie")
+    zapis, relace = read_events(koren(tmp_path))
+    assert zapis["origin"] == "193.0.231.250"
+    assert relace["origin"] == "193.0.231.250"
+
+
+def test_an_event_with_its_own_origin_keeps_it(tmp_path):
+    # Adresa aktora nesmi prepsat adresu, kterou udalost nese sama.
+    store = FileStore(koren(tmp_path), realm=REALM, origin="10.0.0.1")
+    store.audit_event(kind="origin_denied", component="app:x", origin="203.0.113.9")
+    assert read_events(koren(tmp_path))[0]["origin"] == "203.0.113.9"
+
+
+def test_a_store_without_an_origin_writes_no_origin(tmp_path):
+    # Knihovna na serveru (ssh) adresu nema - prazdna by predstirala mereni.
+    Admin.local(tmp_path, realm=REALM).add_group("ucetni")
+    assert "origin" not in read_events(koren(tmp_path), kind="write")[0]
+
+
+def test_a_denied_write_is_in_the_audit_with_its_arguments(tmp_path):
+    import pytest
+
+    admin = Admin.local(tmp_path, realm=REALM)
+    admin.add_user("hana")
+    with pytest.raises(ValueError):
+        admin.add_member("neexistuje", "hana")
+    zamitnute = [
+        u for u in read_events(koren(tmp_path), kind="write")
+        if u["outcome"] == "denied"
+    ]
+    assert len(zamitnute) == 1
+    u = zamitnute[0]
+    assert (u["op"], u["group"], u["name"], u["actor"]) == (
+        "add_member", "neexistuje", "hana", "operator",
+    )
+    assert u["error"]
+
+
+def test_the_last_admin_refusal_is_audited(tmp_path):
+    import pytest
+
+    admin = Admin.local(tmp_path, realm=REALM)
+    admin.add_admin("jindrich")
+    with pytest.raises(ValueError):
+        admin.remove_admin("jindrich")
+    posledni = read_events(koren(tmp_path), kind="write")[-1]
+    assert (posledni["op"], posledni["outcome"], posledni["name"]) == (
+        "remove_admin", "denied", "jindrich",
+    )
+
+
+# == client_origin: odkud se hlasil clovek ================================
+
+
+def test_client_origin_lands_next_to_origin(tmp_path):
+    zaloz(tmp_path, "hana")
+    Access.local(tmp_path, realm=REALM).authenticate(
+        "hana", {"totp": kod()}, purpose="login",
+        origin="2001:db8::1", client_origin="193.0.231.250",
+    )
+    u = read_events(koren(tmp_path), kind="authenticate")[0]
+    assert u["origin"] == "2001:db8::1"
+    assert u["client_origin"] == "193.0.231.250"
+
+
+def test_client_origin_is_normalised(tmp_path):
+    zaloz(tmp_path, "hana")
+    Access.local(tmp_path, realm=REALM).authenticate(
+        "hana", {"totp": "000000"}, purpose="login",
+        client_origin=" 2001:DB8:0:0::1 ",
+    )
+    assert read_events(koren(tmp_path))[0]["client_origin"] == "2001:db8::1"
+
+
+def test_a_malformed_client_origin_is_the_callers_error(tmp_path):
+    import pytest
+
+    zaloz(tmp_path, "hana")
+    access = Access.local(tmp_path, realm=REALM)
+    for spatne in ("nic", "10.0.0.0/8", 42, "1.2.3.4; rm -rf"):
+        with pytest.raises(ValueError):
+            access.authenticate("hana", {"totp": kod()}, purpose="login",
+                                client_origin=spatne)
+    # Chyba volajiciho neni udalost uzivatele - zadny radek, zadny pokus.
+    assert read_events(koren(tmp_path), kind="authenticate") == []

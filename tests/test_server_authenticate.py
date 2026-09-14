@@ -212,3 +212,27 @@ def test_a_bad_request_without_a_verdict_is_still_audited(prostredi):
         "access", "app:quiet", "/v1/authenticate",
     )
     assert (u["method"], u["status"], u["outcome"]) == ("POST", 400, "error")
+
+
+def test_client_origin_is_accepted_and_audited(prostredi):
+    client, tichy, _, data = prostredi
+    odpoved = client.post(
+        "/v1/authenticate", headers=hlavicky(tichy),
+        json={"username": "hana", "credentials": {"totp": kod()},
+              "purpose": "login", "client_origin": "193.0.231.250"},
+    )
+    assert odpoved.status_code == 200
+    u = read_events(koren(data), kind="authenticate")[0]
+    assert u["client_origin"] == "193.0.231.250"
+    assert u["origin"] == "127.0.0.1"          # ACL dal meri odesilatele
+
+
+def test_a_malformed_client_origin_is_400(prostredi):
+    client, tichy, _, _ = prostredi
+    odpoved = client.post(
+        "/v1/authenticate", headers=hlavicky(tichy),
+        json={"username": "hana", "credentials": {"totp": kod()},
+              "purpose": "login", "client_origin": "neni-adresa"},
+    )
+    assert odpoved.status_code == 400
+    assert odpoved.get_json() == {"error": "bad_request"}

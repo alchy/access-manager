@@ -162,6 +162,7 @@ class RemoteStore:
         *,
         purpose: str,
         component: str | None = None,
+        client_origin: str | None = None,
     ) -> Verdict:
         """Overeni totoznosti - vzdy z dratu, NIKDY z cache.
 
@@ -170,13 +171,15 @@ class RemoteStore:
         podpisu jako `Access.authenticate`/`FileStore.authenticate`.
         400 od sluzby je chyba VOLAJICIHO (spatny tvar ucelu/pole), ne
         verdikt - takova odpoved se hlasi jako `RuntimeError`.
+
+        `client_origin` je adresa CLOVEKA, ktereho aplikace overuje (typicky
+        z vlastni proxy). Sluzba ji jen zapise do auditu; origin ACL dal meri
+        adresu, ze ktere prisel tenhle pozadavek.
         """
-        odpoved = self._request(
-            "POST", "/v1/authenticate",
-            json={
-                "username": username, "credentials": credentials, "purpose": purpose,
-            },
-        )
+        telo = {"username": username, "credentials": credentials, "purpose": purpose}
+        if client_origin is not None:
+            telo["client_origin"] = client_origin
+        odpoved = self._request("POST", "/v1/authenticate", json=telo)
         if odpoved.status_code == 400:
             raise RuntimeError(
                 "authenticate: sluzba odmitla pozadavek jako spatny "

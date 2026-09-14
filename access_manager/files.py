@@ -20,8 +20,10 @@ Format navazuje na to, co uz zaklada `python -m viewbase.admin adduser`:
 from __future__ import annotations
 
 import fcntl
+import functools
 import hashlib
 import hmac
+import inspect
 import ipaddress
 import json
 import os
@@ -87,6 +89,46 @@ USER_PREFIX = "user-"
 ADMIN_PREFIX = "admin-"
 
 
+def _zapis(metoda):
+    """Zapisova metoda uloziste: ODMITNUTY zapis je v auditu taky.
+
+    Uspesny zapis si audituje metoda sama (s `outcome="ok"` z `_audit`).
+    Kdyz ale skonci `ValueError` - neexistujici jmeno, posledni spravce,
+    rozsah, ktery aplikace nema - driv se nezapsalo nic a ze stopy neslo
+    poznat, ze se o zmenu nekdo pokusil. Plati pro konzoli i pro knihovnu
+    na serveru, proto je to tady a ne v konzoli.
+
+    Argumenty se zapisuji pod jmeny parametru, protoze jen tak jde odmitnuty
+    zapis precist stejne jako uspesny. Jedina vyjimka je `origin`
+    u `add_origin`/`remove_origin`: to je rozsah aplikace a pole `origin`
+    patri adrese aktora, takze jde pod `range`. Hodnoty jsou jmena a rozsahy,
+    zadna tajemstvi; delka je omezena, protoze vstup muze byt cokoli.
+    """
+    podpis = inspect.signature(metoda)
+
+    @functools.wraps(metoda)
+    def obal(self, *args, **kwargs):
+        try:
+            return metoda(self, *args, **kwargs)
+        except ValueError as chyba:
+            try:
+                svazane = podpis.bind(self, *args, **kwargs).arguments
+            except TypeError:
+                svazane = {}
+            pole = {
+                ("range" if klic == "origin" else klic): str(hodnota)[:200]
+                for klic, hodnota in svazane.items()
+                if klic != "self" and isinstance(hodnota, (str, bool, int))
+            }
+            self._audit(
+                kind="write", actor=self.actor, op=metoda.__name__, **pole,
+                outcome="denied", error=str(chyba)[:500],
+            )
+            raise
+
+    return obal
+
+
 class FileStore:
     """Identita a politika ze souboru pod jednim adresarem."""
 
@@ -98,6 +140,7 @@ class FileStore:
         qr_ttl_days: int = 14,
         audit_retention_days: int = 90,
         actor: str = "operator",
+        origin: str | None = None,
         throttle_attempts: int = 5,
         throttle_window_s: int = 60,
     ) -> None:
@@ -106,6 +149,9 @@ class FileStore:
         self.qr_ttl_days = qr_ttl_days
         self.audit_retention_days = audit_retention_days
         self.actor = actor
+        # Odkud aktor jedna - konzole sem dava adresu prihlaseneho spravce.
+        # Knihovna na serveru (ssh, reconcile) zadnou nema a pole se nepise.
+        self.origin = origin
         self.throttle_attempts = throttle_attempts
         self.throttle_window_s = throttle_window_s
 
@@ -130,6 +176,16 @@ class FileStore:
         """
         _ensure_root(self.home)
         self.home.mkdir(parents=True, mode=DIR_MODE, exist_ok=True)
+        # Adresa aktora patri ke kazde udalosti, kterou tohle uloziste zapise
+        # jeho jmenem - zapis spravce bez "odkud" se v auditu neda precist.
+        # Udalost, ktera adresu nese sama (overeni, pozadavek aplikace), ma
+        # prednost.
+        if self.origin and "origin" not in pole:
+            pole["origin"] = self.origin
+        # Zapis, ktery do auditu dosel normalni cestou, probehl. Odmitnuty
+        # zapis sem posila `_zapis` s `outcome="denied"`.
+        if pole.get("kind") == "write":
+            pole.setdefault("outcome", "ok")
         udalost = {"t": datetime.now(UTC).isoformat(timespec="seconds"), **pole}
         append_event(self.home, udalost, self.audit_retention_days)
 
@@ -364,6 +420,7 @@ class FileStore:
         component: str | None = None,
         key_id: str | None = None,
         origin: str | None = None,
+        client_origin: str | None = None,
     ) -> Verdict:
         """Overeni TOTOZNOSTI - nikdy opravneni (spec §1, §5).
 
@@ -379,6 +436,8 @@ class FileStore:
         """
         purpose = check_purpose(purpose)
         name = check_identity(username)
+        if client_origin is not None:
+            client_origin = _check_client_origin(client_origin)
         verdikt = self._authenticate_verdict(name, credentials, purpose)
         self._audit(
             kind="authenticate",
@@ -390,6 +449,10 @@ class FileStore:
             # a prazdna hodnota by predstirala, ze se meril a nic nevysel.
             **({"key_id": key_id} if key_id else {}),
             **({"origin": origin} if origin else {}),
+            # Adresa CLOVEKA, jak ji hlasi aplikace. Jen pro informaci:
+            # o nicem nerozhoduje a origin ACL dal meri `origin`, tedy to,
+            # odkud pozadavek skutecne prisel.
+            **({"client_origin": client_origin} if client_origin else {}),
             outcome=verdikt.outcome,
             **({"reason": verdikt.reason} if verdikt.reason else {}),
             gen=verdikt.gen,
@@ -517,6 +580,7 @@ class FileStore:
         # Volat JEN pod _locked - jinak se dva zapisy sejdou na temz cisle.
         _replace(self.home / GEN, str(self.generation() + 1))
 
+    @_zapis
     def add_user(self, name: str) -> Enrolment:
         name = check_identity(name)
         _require_pairing()
@@ -534,6 +598,7 @@ class FileStore:
             self._audit(kind="write", actor=self.actor, op="add_user", name=name)
         return enrolment
 
+    @_zapis
     def pair_missing(self) -> list[Enrolment]:
         """Doplni parovaci kod tem, kdo zadny nemaji. Ostatnich se nedotykej.
 
@@ -583,6 +648,7 @@ class FileStore:
 
     # == zapis: skupiny ====================================================
 
+    @_zapis
     def add_group(self, name: str) -> None:
         name = check_name(name)
         if name in RESERVED_GROUPS:
@@ -599,6 +665,7 @@ class FileStore:
             self._bump_gen()
             self._audit(kind="write", actor=self.actor, op="add_group", name=name)
 
+    @_zapis
     def add_member(self, group: str, name: str) -> None:
         group, name = check_name(group), check_identity(name)
         with _locked(self.home):
@@ -619,6 +686,7 @@ class FileStore:
                 group=group, member=name,
             )
 
+    @_zapis
     def include(self, parent: str, child: str) -> None:
         """`parent` OBSAHUJE `child`: kdo je v child, je i v parent."""
         parent, child = check_name(parent), check_name(child)
@@ -648,6 +716,7 @@ class FileStore:
 
     # == zapis: komponenty ================================================
 
+    @_zapis
     def register_component(self, name: str, origins=(), detail=False) -> str:
         """Registrace aplikace = udeleni pristupu k verejnemu API realmu.
 
@@ -680,6 +749,7 @@ class FileStore:
             )
         return klic
 
+    @_zapis
     def revoke_component(self, name: str) -> None:
         """Odvolani komponenty. Nasledne registrace ma novy klic."""
         name = _check_component_name(name)
@@ -694,6 +764,7 @@ class FileStore:
                 kind="write", actor=self.actor, op="revoke_component", name=name,
             )
 
+    @_zapis
     def add_origin(self, name: str, origin: str) -> None:
         """Prida komponente povoleny rozsah, aniz by se sahlo na klic.
 
@@ -719,9 +790,10 @@ class FileStore:
             self._bump_gen()
             self._audit(
                 kind="write", actor=self.actor, op="add_origin",
-                name=name, origin=origin,
+                name=name, range=origin,
             )
 
+    @_zapis
     def set_detail(self, name: str, detail: bool) -> None:
         """Prepne, jestli komponenta smi videt DUVOD zamitnuti - bez vymeny
         klice.
@@ -754,6 +826,7 @@ class FileStore:
                 name=name, detail=detail,
             )
 
+    @_zapis
     def remove_origin(self, name: str, origin: str) -> None:
         """Odebere komponente povoleny rozsah.
 
@@ -781,11 +854,12 @@ class FileStore:
             self._bump_gen()
             self._audit(
                 kind="write", actor=self.actor, op="remove_origin",
-                name=name, origin=sedici,
+                name=name, range=sedici,
             )
 
     # == zapis: zivotni cyklus =============================================
 
+    @_zapis
     def disable_user(self, name: str) -> None:
         """Docasne vypnuti. Clenstvi i auditni stopa zustavaji."""
         name = check_identity(name)
@@ -799,6 +873,7 @@ class FileStore:
             self._bump_gen()
             self._audit(kind="write", actor=self.actor, op="disable_user", name=name)
 
+    @_zapis
     def enable_user(self, name: str) -> None:
         name = check_identity(name)
         with _locked(self.home):
@@ -811,6 +886,7 @@ class FileStore:
             self._bump_gen()
             self._audit(kind="write", actor=self.actor, op="enable_user", name=name)
 
+    @_zapis
     def remove_group(self, name: str) -> None:
         """Smaz skupinu VCETNE odkazu v cizim zretezeni.
 
@@ -841,6 +917,7 @@ class FileStore:
             self._bump_gen()
             self._audit(kind="write", actor=self.actor, op="remove_group", name=name)
 
+    @_zapis
     def remove_member(self, group: str, name: str) -> None:
         group, name = check_name(group), check_identity(name)
         with _locked(self.home):
@@ -860,6 +937,7 @@ class FileStore:
                 group=group, member=name,
             )
 
+    @_zapis
     def remove_user(self, name: str) -> None:
         """Smaz cloveka VCETNE jmena v seznamech clenu.
 
@@ -881,6 +959,7 @@ class FileStore:
             self._bump_gen()
             self._audit(kind="write", actor=self.actor, op="remove_user", name=name)
 
+    @_zapis
     def revoke_credential(self, name: str, mechanism: str = "totp") -> None:
         """Odvolani povereni - reseni ztraceneho telefonu.
 
@@ -908,6 +987,7 @@ class FileStore:
                 name=name, mechanism=mechanism,
             )
 
+    @_zapis
     def pair(self, name: str) -> Enrolment:
         """Nove parovani JEDNOHO cloveka. Existujici tajemstvi neprepise."""
         name = check_identity(name)
@@ -935,6 +1015,7 @@ class FileStore:
 
     # == zapis: spravci ====================================================
 
+    @_zapis
     def add_admin(self, name: str) -> Enrolment:
         name = check_identity(name)
         _require_pairing()
@@ -967,6 +1048,7 @@ class FileStore:
                 f"odvolat token nejde"
             )
 
+    @_zapis
     def remove_admin(self, name: str) -> None:
         """Smaz spravce. Spravci nejsou v skupinach, takze zadny scrub."""
         name = check_identity(name)
@@ -979,6 +1061,7 @@ class FileStore:
             self._bump_gen()
             self._audit(kind="write", actor=self.actor, op="remove_admin", name=name)
 
+    @_zapis
     def revoke_admin_credential(self, name: str, mechanism: str = "totp") -> None:
         """Odvolani povereni spravce - reseni ztraceneho telefonu."""
         if mechanism != "totp":
@@ -1023,6 +1106,7 @@ class FileStore:
                 name=name,
             )
 
+    @_zapis
     def pair_admin(self, name: str) -> Enrolment:
         """Nove parovani spravce. Existujici tajemstvi neprepise."""
         name = check_identity(name)
@@ -1300,6 +1384,21 @@ def _code_at_step(secret: str, step: int, code) -> bool:
     pyotp = _require_totp()
     totp = pyotp.TOTP(secret)
     return hmac.compare_digest(totp.at(step * totp.interval), str(code))
+
+
+def _check_client_origin(client_origin) -> str:
+    """Adresa klienta od aplikace: jedna IP adresa, nic jineho.
+
+    Do auditu jde retezec od volajiciho, takze se overuje tvar - jinak by si
+    aplikace do stopy zapsala cokoli. Rozsah (CIDR) tu smysl nema.
+    """
+    if not isinstance(client_origin, str):
+        raise ValueError("client_origin musi byt IP adresa")
+    try:
+        return str(ipaddress.ip_address(client_origin.strip()))
+    except ValueError:
+        zkracene = client_origin[:60]
+        raise ValueError(f"client_origin {zkracene!r} neni IP adresa") from None
 
 
 def _check_origin(origin: str) -> str:

@@ -270,3 +270,22 @@ def test_remote_authenticate_raises_on_a_bad_request(sluzba_s_daty):
     remote = _remote(app, tichy)
     with pytest.raises(RuntimeError):
         remote.authenticate("hana", {"totp": kod()}, purpose="cokoli")
+
+
+def test_remote_passes_client_origin_to_the_audit(sluzba_s_daty):
+    from access_manager.audit import read_events
+
+    app, tichy, _, _, data = sluzba_s_daty
+    remote = _remote(app, tichy)
+    remote.authenticate("hana", {"totp": kod()}, purpose="login",
+                        client_origin="193.0.231.250")
+    u = read_events(koren(data), kind="authenticate")[0]
+    assert u["client_origin"] == "193.0.231.250"
+
+
+def test_remote_without_client_origin_sends_none(sluzba_s_daty):
+    from access_manager.audit import read_events
+
+    app, tichy, _, _, data = sluzba_s_daty
+    _remote(app, tichy).authenticate("hana", {"totp": kod()}, purpose="login")
+    assert "client_origin" not in read_events(koren(data), kind="authenticate")[0]

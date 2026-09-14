@@ -206,10 +206,32 @@ Záznam ověření nese kromě `subject` (koho se ptalo) i to, **kdo se ptal**:
 | `key_id` | kterým klíčem; po výměně klíče je z něj poznat který |
 | `origin` | z jaké adresy — měřeno `resolve_origin`, stejně jako origin ACL |
 
+| `client_origin` | odkud se hlásil člověk — jak ho aplikace poslala; jen pro informaci |
+
 Nepředané pole se **nepíše**. Lokální volání přes `Access.local` žádnou
 adresu ani klíč nemá; prázdná hodnota by předstírala, že se měřily a nic
 nevyšly. Přihlášení správce do konzole nemá `component` (je to konzole, ne
 aplikace), ale `origin` ano.
+
+### Zápisy: kdo, odkud a s jakým výsledkem
+
+Každý zápis nese `actor`, `op`, argumenty operace (`name`, `group`,
+`member`, `range`, …), `outcome` a — pokud aktér nějakou adresu má —
+`origin`. Konzole adresu přihlášeného správce předává úložišti, takže ji
+nese každý zápis i každá událost relace. Knihovna na serveru (ssh,
+reconcile) adresu nemá a pole se nepíše.
+
+```json
+{ "kind": "write", "actor": "admin:jindrich", "origin": "193.0.231.250",
+  "op": "add_origin", "name": "soc", "range": "193.0.231.0/24",
+  "outcome": "ok", "t": "…" }
+```
+
+**Odmítnutý zápis je v auditu taky** — `outcome: "denied"` a `error` s textem
+chyby: pokus o odebrání posledního správce, člen do neexistující skupiny,
+nesmyslný rozsah. Platí pro konzoli i knihovnu. Rozsah aplikace je u
+`add_origin`/`remove_origin` v poli `range`; starší záznamy ho mají
+v `origin` a konzole je čte obojím způsobem.
 
 Zbylé druhy událostí: `write` (zápis s aktérem a operací), `origin_denied`
 (požadavek odmítnutý origin ACL, s `component`, `key_id`, `origin`, `path`

@@ -375,6 +375,9 @@ def create_app(cfg: ServiceConfig):
                 component=flask.g.component.name,
                 key_id=flask.g.component.key_id,
                 origin=flask.g.origin,
+                # Volitelne: adresa cloveka, jak ji hlasi aplikace. Spatny
+                # tvar je ValueError -> 400, stejne jako spatny ucel.
+                client_origin=telo.get("client_origin"),
             )
         except ValueError:
             return _bad_request()

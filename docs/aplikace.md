@@ -45,6 +45,19 @@ verdikt.principals             # frozenset: {"user:hana", "group:ucetni",
 verdikt.gen                    # cislo generace pro invalidaci cache
 ```
 
+**Odkud se člověk hlásil.** Aplikace vidí adresu svého uživatele (typicky
+z hlavičky vlastní proxy), access-manager ne — k němu přichází požadavek
+od aplikace. Předejte ji, ať ji správce vidí v auditu:
+
+```python
+verdikt = access.authenticate("hana", {"totp": kod}, purpose="login",
+                              client_origin=request_ip)   # "193.0.231.250"
+```
+
+Je to jen informace do auditu (pole `client_origin`, v konzoli „Odkud
+(klient)“). Povolené rozsahy klíče dál měří adresu, ze které přišel požadavek
+aplikace — hlavička od klienta je podvrhnutelná a o přístupu rozhodovat nesmí.
+
 Čtyři veřejné tvary: `ok`, `denied`, `need_factor`, `throttled` — nic pátého.
 Podrobný důvod odmítnutí (`verdikt.reason`: `bad_code`, `replay`,
 `unknown_user`…) vidí lokální zapojení vždy a vzdálené jen tehdy, když má

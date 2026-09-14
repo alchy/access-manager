@@ -68,10 +68,11 @@ class Access:
         component: str | None = None,
         key_id: str | None = None,
         origin: str | None = None,
+        client_origin: str | None = None,
     ) -> Verdict:
         return self._store.authenticate(
             username, credentials, purpose=purpose, component=component,
-            key_id=key_id, origin=origin,
+            key_id=key_id, origin=origin, client_origin=client_origin,
         )
 
     def user(self, name: str) -> User | None:

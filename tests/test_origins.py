@@ -145,15 +145,26 @@ def test_range_changes_are_audited_with_actor_and_value(tmp_path):
     a.remove_origin("app:report", "10.0.0.0/8")
 
     zapisy = read_events(koren(tmp_path), kind="write")
-    operace = [(u["op"], u.get("origin"), u.get("actor")) for u in zapisy]
+    # Rozsah je `range`: `origin` u zapisu patri adrese AKTORA (odkud spravce
+    # jednal) a jedno pole nemuze znamenat obojí.
+    operace = [(u["op"], u.get("range"), u.get("actor")) for u in zapisy]
     assert ("add_origin", "10.0.0.0/8", "operator:test") in operace
     assert ("remove_origin", "10.0.0.0/8", "operator:test") in operace
 
 
-def test_a_failed_range_change_writes_nothing_to_the_audit(tmp_path):
+def test_a_failed_range_change_is_audited_as_denied_never_as_done(tmp_path):
+    # Driv se neuspech nezapsal vubec a pokus o zmenu nebyl ve stope videt.
+    # Ted je tam - ale jako `denied`, nikdy jako provedena zmena.
     a = admin(tmp_path)
     a.register_component("app:report")
     with pytest.raises(ValueError):
         a.add_origin("app:report", "not-a-cidr")
-    zapisy = read_events(koren(tmp_path), kind="write")
-    assert not [u for u in zapisy if u["op"] == "add_origin"]
+    zapisy = [
+        u for u in read_events(koren(tmp_path), kind="write")
+        if u["op"] == "add_origin"
+    ]
+    assert len(zapisy) == 1
+    assert zapisy[0]["outcome"] == "denied"
+    assert zapisy[0]["range"] == "not-a-cidr"
+    assert zapisy[0]["name"] == "app:report"
+    assert zapisy[0]["error"]

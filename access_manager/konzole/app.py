@@ -159,9 +159,15 @@ def create_console_app(cfg: ServiceConfig):
     realmy = _realm_store_kwargs(cfg)
 
     def _store_pro(jmeno_realmu: str, actor: str) -> FileStore:
+        # Adresa spravce jde s aktorem do kazde udalosti, kterou uloziste
+        # jeho jmenem zapise - zapisy, relace. Meri se stejne jako u API
+        # a prihlaseni (resolve_origin), ne z holeho remote_addr.
         parametry = dict(realmy[jmeno_realmu])
         root = parametry.pop("root")
-        return FileStore(root, actor=actor, **parametry)
+        return FileStore(
+            root, actor=actor,
+            origin=resolve_origin(flask.request.environ, cfg), **parametry,
+        )
 
     app = flask.Flask(__name__, template_folder=str(_TEMPLATES))
     # Restart = odhlaseni vsech spravcu - zamer, ne nedopatreni. Zadne

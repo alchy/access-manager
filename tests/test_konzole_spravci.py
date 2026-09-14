@@ -271,3 +271,43 @@ def test_the_admin_dropdown_does_not_borrow_a_members_trail(
 
     assert "10.9.9.9" not in klient.get("/admins").get_data(as_text=True)
     assert "10.9.9.9" in klient.get("/users").get_data(as_text=True)
+
+
+# == zapis z konzole nese adresu spravce ===================================
+
+
+def test_a_console_write_carries_the_admins_address(prihlaseny_klient, tmp_path):
+    from access_manager.audit import read_events
+
+    klient, csrf = prihlaseny_klient
+    klient.post("/admins/add", data={"csrf": csrf, "jmeno": "marie"},
+                environ_overrides={"REMOTE_ADDR": "192.0.2.44"})
+    zapis = [u for u in read_events(koren(tmp_path / "data"), kind="write")
+             if u["op"] == "add_admin" and u["name"] == "marie"][0]
+    assert zapis["actor"] == "admin:jindrich"
+    assert zapis["origin"] == "192.0.2.44"
+    assert zapis["outcome"] == "ok"
+
+
+def test_a_refused_console_write_is_audited_with_the_address(
+    prihlaseny_klient, tmp_path,
+):
+    from access_manager.audit import read_events
+
+    klient, csrf = prihlaseny_klient
+    klient.post("/admins/jindrich/remove", data={"csrf": csrf},
+                environ_overrides={"REMOTE_ADDR": "192.0.2.44"})
+    posledni = read_events(koren(tmp_path / "data"), kind="write")[-1]
+    assert (posledni["op"], posledni["outcome"], posledni["origin"]) == (
+        "remove_admin", "denied", "192.0.2.44",
+    )
+
+
+def test_logout_carries_the_admins_address(prihlaseny_klient, tmp_path):
+    from access_manager.audit import read_events
+
+    klient, csrf = prihlaseny_klient
+    klient.post("/logout", data={"csrf": csrf},
+                environ_overrides={"REMOTE_ADDR": "192.0.2.44"})
+    odhlaseni = read_events(koren(tmp_path / "data"), kind="session")[-1]
+    assert (odhlaseni["op"], odhlaseni["origin"]) == ("logout", "192.0.2.44")

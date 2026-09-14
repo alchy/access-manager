@@ -75,6 +75,12 @@ bez důvodu, protože kdo rozliší `unknown_user` od `bad_code`, umí si vypsat
 uživatele. Pověření je mapa `mechanismus → hodnota` (dnes jediný
 mechanismus: `totp`); `purpose` má tvar `login` nebo `unlock:<cíl>`.
 
+Volitelné pole `"client_origin": "193.0.231.250"` je adresa **člověka**, kterého
+aplikace ověřuje — typicky z hlavičky vlastní proxy. Služba ji jen zapíše do
+auditu vedle `origin` (adresa, ze které přišel tento požadavek) a konzole ji
+ukazuje jako „Odkud (klient)“. O ničem nerozhoduje: origin ACL měří dál
+`origin`. Musí to být jedna IP adresa, jinak `400`.
+
 ## Model důvěry
 
 | směr | mechanismus |
