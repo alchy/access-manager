@@ -162,6 +162,44 @@ def test_consecutive_identical_requests_are_merged_into_one_row():
     assert radky[2]["subjekt"] == "user:hana"
 
 
+def test_identical_requests_minutes_apart_stay_separate_rows():
+    # Sedm `whoami` aplikace soc s rozestupem minut se schovalo do jednoho
+    # radku "7x od 12:13:38" - kazde nove overeni jen posunulo cas a pocet.
+    udalosti = [
+        _pozadavek("2026-09-14T10:13:38+00:00", cesta="/v1/whoami"),
+        _pozadavek("2026-09-14T10:46:44+00:00", cesta="/v1/whoami"),
+        _pozadavek("2026-09-14T11:08:10+00:00", cesta="/v1/whoami"),
+        _pozadavek("2026-09-14T11:09:23+00:00", cesta="/v1/whoami"),
+    ]
+    radky = pohledy.radky_aplikaci(udalosti, {}, _t)
+    assert [r["pocet"] for r in radky] == [1, 1, 1, 1]
+
+
+def test_a_gap_in_polling_splits_the_merged_row():
+    udalosti = [
+        _pozadavek("2026-09-13T12:00:01+00:00"),
+        _pozadavek("2026-09-13T12:01:01+00:00"),
+        _pozadavek("2026-09-13T12:02:01+00:00"),
+        _pozadavek("2026-09-13T12:30:01+00:00"),   # aplikace stala pul hodiny
+        _pozadavek("2026-09-13T12:31:01+00:00"),
+        _pozadavek("2026-09-13T12:32:01+00:00"),
+    ]
+    radky = pohledy.radky_aplikaci(udalosti, {}, _t)
+    assert [r["pocet"] for r in radky] == [3, 3]
+
+
+def test_two_verifications_a_minute_apart_are_two_rows():
+    # 13:08:10 a 13:09:23 - dve rucni overeni, ne dotazovani.
+    udalosti = [
+        _pozadavek("2026-09-14T11:08:10+00:00", cesta="/v1/whoami"),
+        _pozadavek("2026-09-14T11:09:23+00:00", cesta="/v1/whoami"),
+    ]
+    radky = pohledy.radky_aplikaci(udalosti, {}, _t)
+    assert [(r["cas"], r["pocet"]) for r in radky] == [
+        (pohledy.hodiny(udalosti[1]), 1), (pohledy.hodiny(udalosti[0]), 1),
+    ]
+
+
 def test_authentications_and_denied_ranges_are_never_merged():
     denied = {"t": "2026-09-13T12:00:00+00:00", "kind": "origin_denied",
               "component": "wb", "key_id": "k4", "origin": "8.8.8.8"}

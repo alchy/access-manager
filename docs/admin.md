@@ -274,8 +274,10 @@ Stránka Audit čte tutéž stopu ve čtyřech pohledech podle toho, **kdo jedna
   s adresou a počtem změn. Neúspěšné pokusy o přihlášení mají vlastní
   skupinu, zásah přes ssh skupinu „Mimo konzoli“. Zápis bez přihlášení
   v zobrazeném období je relace bez začátku.
-- V pohledu Aplikace se **po sobě jdoucí stejné požadavky slučují** do jednoho
-  řádku s počtem (`/v1/generation` každou minutu); ve stopě zůstává každý.
+- V pohledu Aplikace se **dotazování slučuje** do jednoho řádku s počtem
+  (`/v1/generation` každou minutu): řada aspoň tří stejných požadavků, mezi
+  sousedy nejvýš 90 s. Samostatná ověření klíče (`whoami` při startu, ručně
+  minutu po sobě) zůstávají každé na svém řádku. Ve stopě je vždy každý zvlášť.
 - Ověření uživatele přes API je v pohledu Uživatelé i Aplikace — na disku je
   jednou. Čísla na záložkách se proto nesčítají do „Vše“.
 - Čas je místní (časové pásmo služby, `--tz` u kontejneru) a řádky jsou

@@ -38,6 +38,16 @@ _OPERACE_S_ROZSAHEM = ("add_origin", "remove_origin")
 
 POMLCKA = "—"
 
+#: Slucovani je pro DOTAZOVANI (`/v1/generation` kazdou minutu), ne pro
+#: samostatne udalosti. Samostatna overeni klice sloucit nesmi - kazde nove
+#: by jen posunulo cas a pocet v jednom radku a vypadalo by to, ze nepribylo
+#: nic (presne tak se schovalo sedm `whoami` aplikace soc za "7x od
+#: 12:13:38"). Proto dve podminky: mezera mezi sousedy nejvys
+#: `MEZERA_SLOUCENI_S` a rada aspon `NEJMENSI_RADA` pozadavku. Dve rucni
+#: overeni minutu po sobe jsou dva radky; rada deseti dotazu je jeden.
+MEZERA_SLOUCENI_S = 90
+NEJMENSI_RADA = 3
+
 
 # == trideni do pohledu =====================================================
 
@@ -410,8 +420,20 @@ def _klic_slouceni(u: dict):
                  ("component", "key_id", "origin", "method", "path", "status"))
 
 
+def _tesne_po_sobe(starsi: dict, novejsi: dict) -> bool:
+    """Jsou dva pozadavky od sebe nejvys `MEZERA_SLOUCENI_S`?
+
+    Bez citelneho casu se neslucuje - radeji dva radky nez jeden, ktery
+    schova udalost.
+    """
+    a, b = mistni_cas(starsi.get("t")), mistni_cas(novejsi.get("t"))
+    if a is None or b is None:
+        return False
+    return 0 <= (b - a).total_seconds() <= MEZERA_SLOUCENI_S
+
+
 def radky_aplikaci(udalosti, filtry: dict, t) -> list[dict]:
-    """Nejnovejsi prvni; po sobe jdouci stejne pozadavky jako jeden radek.
+    """Nejnovejsi prvni; stejne pozadavky tesne po sobe jako jeden radek.
 
     Slucuje se AZ PO filtru: sloucit se smi jen to, co clovek po filtru
     skutecne vidi vedle sebe.
@@ -436,9 +458,8 @@ def radky_aplikaci(udalosti, filtry: dict, t) -> list[dict]:
         predchozi = radky[-1] if radky else None
         if (klic is not None and predchozi is not None
                 and predchozi["klic_slouceni"] == klic
-                and predchozi["den"] == den(u)):
-            predchozi["pocet"] += 1
-            predchozi["od"] = hodiny(u)
+                and _tesne_po_sobe(u, predchozi["clenove"][-1])):
+            predchozi["clenove"].append(u)
             continue
         radky.append({
             "id": id_udalosti(u), "udalost": u, "cas": hodiny(u), "den": den(u),
@@ -447,9 +468,25 @@ def radky_aplikaci(udalosti, filtry: dict, t) -> list[dict]:
             "odkud": str(u.get("origin") or POMLCKA),
             **p,
             "vysledek_trida": trida, "vysledek_text": text, "reason": duvod,
-            "klic_slouceni": klic, "pocet": 1, "od": "",
+            "klic_slouceni": klic, "clenove": [u],
         })
-    return radky
+    return [radek for rada in radky for radek in _rozbal_radu(rada, t)]
+
+
+def _rozbal_radu(rada: dict, t) -> list[dict]:
+    """Rada dost dlouha na dotazovani je jeden radek, kratsi zase jednotlive."""
+    clenove = rada.pop("clenove")
+    if len(clenove) >= NEJMENSI_RADA:
+        return [{**rada, "pocet": len(clenove), "od": hodiny(clenove[-1])}]
+    vystup = []
+    for u in clenove:
+        trida, text, duvod = vysledek(u, t)
+        vystup.append({
+            **rada, "id": id_udalosti(u), "udalost": u, "cas": hodiny(u),
+            "den": den(u), "vysledek_trida": trida, "vysledek_text": text,
+            "reason": duvod, "pocet": 1, "od": "",
+        })
+    return vystup
 
 
 # == dny a detail ===========================================================
