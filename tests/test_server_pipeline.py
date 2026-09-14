@@ -181,3 +181,73 @@ def test_a_mixed_case_realm_name_is_normalized(tmp_path):
         "/v1/whoami", headers={"Authorization": f"Bearer {klic}"}
     ).get_json()
     assert telo["realm"] == "example.com"
+
+
+# == kazdy pozadavek s platnym klicem = prave jeden radek auditu ============
+#
+# Aplikace ma v auditu tutez vahu jako clovek: "kdy a odkud se ten klic
+# naposledy pouzil" musi jit precist stejne jako posledni prihlaseni.
+
+
+def _doma(client, klic, cesta, **kw):
+    return client.get(
+        cesta, headers={"Authorization": f"Bearer {klic}"},
+        environ_overrides={"REMOTE_ADDR": "10.42.3.7"}, **kw,
+    )
+
+
+def test_a_successful_request_leaves_one_access_row(prostredi, tmp_path):
+    client, klic, _ = prostredi
+    assert _doma(client, klic, "/v1/whoami").status_code == 200
+    udalosti = read_events(koren(tmp_path / "data"))
+    zapisy = [u for u in udalosti if u["kind"] != "write"]
+    assert len(zapisy) == 1
+    u = zapisy[0]
+    assert u["kind"] == "access"
+    assert u["component"] == "app:test"
+    assert u["key_id"].startswith("k")
+    assert u["origin"] == "10.42.3.7"
+    assert (u["method"], u["path"], u["status"]) == ("GET", "/v1/whoami", 200)
+    assert u["outcome"] == "ok"
+
+
+def test_every_request_is_its_own_row(prostredi, tmp_path):
+    client, klic, _ = prostredi
+    for cesta in ("/v1/whoami", "/v1/generation", "/v1/users", "/v1/generation"):
+        _doma(client, klic, cesta)
+    cesty = [u["path"] for u in read_events(koren(tmp_path / "data"), kind="access")]
+    assert cesty == ["/v1/whoami", "/v1/generation", "/v1/users", "/v1/generation"]
+
+
+def test_a_valid_key_on_an_unknown_path_is_audited_as_an_error(prostredi, tmp_path):
+    client, klic, _ = prostredi
+    assert _doma(client, klic, "/v1/neexistuje").status_code == 404
+    u = read_events(koren(tmp_path / "data"), kind="access")[0]
+    assert (u["status"], u["outcome"]) == (404, "error")
+
+
+def test_a_denied_origin_is_one_row_with_outcome_and_path(prostredi, tmp_path):
+    client, klic, _ = prostredi
+    client.get(
+        "/v1/users", headers={"Authorization": f"Bearer {klic}"},
+        environ_overrides={"REMOTE_ADDR": "203.0.113.9"},
+    )
+    udalosti = [
+        u for u in read_events(koren(tmp_path / "data")) if u["kind"] != "write"
+    ]
+    assert [u["kind"] for u in udalosti] == ["origin_denied"]
+    assert udalosti[0]["outcome"] == "denied"
+    assert udalosti[0]["path"] == "/v1/users"
+
+
+def test_no_key_and_operational_paths_leave_nothing_in_the_audit(
+    prostredi, tmp_path,
+):
+    # Bez platneho klice neni znam realm - 401 patri do provozniho logu.
+    client, _, _ = prostredi
+    client.get("/v1/users")
+    client.get("/v1/users", headers={"Authorization": "Bearer am_k1_" + "0" * 64})
+    client.get("/healthz")
+    client.get("/v1/version")
+    kinds = {u["kind"] for u in read_events(koren(tmp_path / "data"))}
+    assert kinds <= {"write"}

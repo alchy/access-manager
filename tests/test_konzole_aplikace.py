@@ -336,3 +336,95 @@ def test_the_range_form_lives_in_the_row_of_its_application(prihlaseny_klient):
     assert 'action="/applications/druha/ranges/add"' in vypis
     # Zadny vyber cile ze seznamu uz na strance neni.
     assert "<select" not in vypis
+
+
+# == roletka s poslednim pouzitim - tataz jako u lidi a spravcu ============
+
+
+def _udalost(tmp_path, **pole):
+    from access_manager.audit import append_event
+
+    append_event(koren(tmp_path / "data"), pole, retention_days=90)
+
+
+def test_the_listing_shows_the_last_use_of_each_application(
+    prihlaseny_klient, tmp_path,
+):
+    _zaregistruj(prihlaseny_klient, "core")
+    _udalost(tmp_path, t="2026-09-14T07:40:00+00:00", kind="access",
+             component="core", key_id="k7", origin="193.0.231.250",
+             method="GET", path="/v1/whoami", status=200, outcome="ok")
+    _udalost(tmp_path, t="2026-09-14T07:41:00+00:00", kind="authenticate",
+             component="core", key_id="k7", origin="193.0.231.251",
+             subject="user:hana", purpose="login", outcome="denied",
+             reason="bad_code")
+    _udalost(tmp_path, t="2026-09-14T07:42:00+00:00", kind="origin_denied",
+             component="core", key_id="k7", origin="8.8.8.8",
+             path="/v1/users", outcome="denied")
+    _udalost(tmp_path, t="2026-09-14T07:43:00+00:00", kind="access",
+             component="core", key_id="k7", origin="193.0.231.250",
+             method="GET", path="/v1/nic", status=404, outcome="error")
+
+    klient, _ = prihlaseny_klient
+    telo = klient.get("/applications").get_data(as_text=True)
+    assert "Poslední použití" in telo
+    assert "Požadavek" in telo
+    assert "k7 · GET /v1/whoami" in telo
+    assert "k7 · authenticate user:hana" in telo
+    assert "k7 · /v1/users" in telo
+    for adresa in ("193.0.231.250", "193.0.231.251", "8.8.8.8"):
+        assert adresa in telo
+    assert "bad_code" in telo
+    assert "404" in telo
+    # Nejnovejsi prvni, stejne jako u lidi.
+    assert telo.index("/v1/nic") < telo.index("/v1/whoami")
+    # Aplikace nema parovani - roletka s datem sparovani u ni neni.
+    assert "Datum spárování" not in telo
+
+
+def test_only_the_last_five_uses_are_shown(prihlaseny_klient, tmp_path):
+    _zaregistruj(prihlaseny_klient, "core")
+    for i in range(8):
+        _udalost(tmp_path, t=f"2026-09-14T10:0{i}:00+00:00", kind="access",
+                 component="core", key_id="k1", origin=f"10.0.0.{i}",
+                 method="GET", path="/v1/generation", status=200, outcome="ok")
+    klient, _ = prihlaseny_klient
+    telo = klient.get("/applications").get_data(as_text=True)
+    for i in (3, 4, 5, 6, 7):
+        assert f"10.0.0.{i}" in telo
+    for i in (0, 1, 2):
+        assert f"10.0.0.{i}" not in telo
+
+
+def test_uses_of_one_application_do_not_show_under_another(
+    prihlaseny_klient, tmp_path,
+):
+    _zaregistruj(prihlaseny_klient, "core")
+    _zaregistruj(prihlaseny_klient, "mzdy")
+    _udalost(tmp_path, t="2026-09-14T10:00:00+00:00", kind="access",
+             component="mzdy", key_id="k2", origin="10.9.9.9",
+             method="GET", path="/v1/whoami", status=200, outcome="ok")
+    klient, _ = prihlaseny_klient
+    telo = klient.get("/applications").get_data(as_text=True)
+    # Radek `core` je prvni a jeho roletka je prazdna; `mzdy` ma 10.9.9.9.
+    radek_core = telo.index('<td class="mono">core</td>')
+    radek_mzdy = telo.index('<td class="mono">mzdy</td>')
+    assert "Zatím žádný požadavek" in telo[radek_core:radek_mzdy]
+    assert "10.9.9.9" in telo[radek_mzdy:]
+    assert "10.9.9.9" not in telo[radek_core:radek_mzdy]
+
+
+def test_a_real_api_request_shows_up_on_the_page(prihlaseny_klient, tmp_path):
+    """Cela cesta: klic -> sluzba -> audit -> konzole."""
+    from access_manager.config import load_config
+    from access_manager.server import create_app
+
+    klic = _klic_z_odpovedi(_zaregistruj(prihlaseny_klient, "core"))
+    api = create_app(load_config(tmp_path / "conf.d")).test_client()
+    odpoved = api.get("/v1/whoami", headers={"Authorization": f"Bearer {klic}"})
+    assert odpoved.status_code == 200
+
+    klient, _ = prihlaseny_klient
+    telo = klient.get("/applications").get_data(as_text=True)
+    assert "GET /v1/whoami" in telo
+    assert "127.0.0.1" in telo

@@ -24,16 +24,19 @@
 {%- endif -%}
 {%- endmacro %}
 
-{# Roletky pod radkem vypisu: posledni prihlaseni a datum sparovani.
-   Sdilene mezi lidmi a spravci - je to tyz obsah nad tymz auditem, jen
-   s jinym prefixem subjektu, presne jako `qr.html`. `<details>` funguje
-   bez JS, stejne jako zbytek konzole. #}
-{% macro log_roletky(radek, sloupcu) %}
+{# Roletky pod radkem vypisu: posledni udalosti z auditu a (u identit)
+   datum sparovani. Sdilene mezi lidmi, spravci a aplikacemi - je to tyz
+   obsah nad tymz auditem, lisi se jen podle ceho se hleda a co je "druha
+   strana" udalosti (u cloveka aplikace, u aplikace pozadavek).
+   `<details>` funguje bez JS, stejne jako zbytek konzole. #}
+{% macro log_roletky(radek, sloupcu, nadpis='uzivatele.logins',
+                     sloupec='audit.component', prazdno='uzivatele.no_logins',
+                     parovani=True) %}
 <tr class="rozbaleni">
   <td colspan="{{ sloupcu }}">
     <div class="roletky">
       <details>
-        <summary>{{ t('uzivatele.logins') }}</summary>
+        <summary>{{ t(nadpis) }}</summary>
         {% if radek.prihlaseni %}
         <div class="log-posuv">
         <table class="tabulka log vnorena">
@@ -41,7 +44,7 @@
             <tr>
               <th>{{ t('audit.time') }}</th>
               <th>{{ t('audit.origin') }}</th>
-              <th>{{ t('audit.component') }}</th>
+              <th>{{ t(sloupec) }}</th>
               <th>{{ t('audit.result') }}</th>
             </tr>
           </thead>
@@ -50,7 +53,7 @@
             <tr>
               <td class="mono">{{ p.cas }}</td>
               <td class="mono">{{ p.odkud }}</td>
-              <td class="mono">{{ p.kdo_pozadal }}</td>
+              <td class="mono">{{ p.protistrana }}</td>
               <td>
                 {{ stavovy_stitek(p.vysledek_trida, p.vysledek_text) }}
                 {% if p.reason %}<span class="poznamka">({{ p.reason }})</span>{% endif %}
@@ -61,10 +64,11 @@
         </table>
         </div>
         {% else %}
-        <p class="poznamka">{{ t('uzivatele.no_logins') }}</p>
+        <p class="poznamka">{{ t(prazdno) }}</p>
         {% endif %}
       </details>
 
+      {% if parovani %}
       <details>
         <summary>{{ t('uzivatele.paired_at') }}</summary>
         <div class="log-posuv">
@@ -85,6 +89,7 @@
         <p class="poznamka">{{ t('uzivatele.not_paired_yet') }}</p>
         {% endif %}
       </details>
+      {% endif %}
     </div>
   </td>
 </tr>

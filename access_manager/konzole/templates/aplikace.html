@@ -80,6 +80,8 @@
         </form>
       </td>
     </tr>
+    {{ log_roletky(radek, 5, nadpis='aplikace.usage', sloupec='aplikace.request',
+                   prazdno='aplikace.no_usage', parovani=False) }}
     {% endfor %}
     {% if not aplikace %}
     <tr><td colspan="5" class="poznamka">{{ t('spolecne.nothing_found') }}</td></tr>

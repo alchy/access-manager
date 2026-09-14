@@ -29,6 +29,11 @@ Kontroly běží v neporušitelném pořadí:
    Prázdné `origins` = jen smyčka.
 4. Omezování pokusů, parsování, úložiště.
 
+Každý požadavek, který projde bodem 3, zanechá v auditu realmu **právě jeden
+řádek**: ověření s verdiktem jako `authenticate`, všechno ostatní (včetně
+`400` a `404`) jako `access` s metodou, cestou a stavem. Podrobnosti
+v [admin.md](admin.md#každý-požadavek-aplikace-je-v-auditu).
+
 ## Endpointy
 
 | metoda a cesta | co vrací |

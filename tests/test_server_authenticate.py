@@ -184,3 +184,31 @@ def test_audit_carries_the_component_name(prostredi):
     udalosti = read_events(koren(data), kind="authenticate")
     assert len(udalosti) == 1
     assert udalosti[0]["component"] == "app:quiet"
+
+
+def test_a_verdict_is_one_audit_row_not_two(prostredi):
+    # `store.authenticate` zapise radek s `component`, `key_id` a `origin`;
+    # sluzba k nemu nepridava jeste `access` - jeden pozadavek, jeden radek.
+    client, tichy, _, data = prostredi
+    client.post(
+        "/v1/authenticate", headers=hlavicky(tichy),
+        json={"username": "hana", "credentials": {"totp": kod()}, "purpose": "login"},
+    )
+    udalosti = [u for u in read_events(koren(data)) if u["kind"] != "write"]
+    assert [u["kind"] for u in udalosti] == ["authenticate"]
+
+
+def test_a_bad_request_without_a_verdict_is_still_audited(prostredi):
+    client, tichy, _, data = prostredi
+    odpoved = client.post(
+        "/v1/authenticate", headers=hlavicky(tichy),
+        json={"username": "hana", "credentials": {"totp": kod()}},
+    )
+    assert odpoved.status_code == 400
+    udalosti = [u for u in read_events(koren(data)) if u["kind"] != "write"]
+    assert len(udalosti) == 1
+    u = udalosti[0]
+    assert (u["kind"], u["component"], u["path"]) == (
+        "access", "app:quiet", "/v1/authenticate",
+    )
+    assert (u["method"], u["status"], u["outcome"]) == ("POST", 400, "error")

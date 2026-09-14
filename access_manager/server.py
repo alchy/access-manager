@@ -247,9 +247,13 @@ def create_app(cfg: ServiceConfig):
 
         if not _origin_allowed(component, origin):
             # 403 a NIC dal: zadny throttle, zadne parsovani tela.
+            # `outcome` a `path` nesou vsechny tri druhy radku pozadavku
+            # (viz `_audit_pozadavku`) - aplikace se v konzoli cte stejne
+            # jako clovek a zamitnuty pokus se nema cist jinak nez ostatni.
             stores[realm].audit_event(
                 kind="origin_denied", component=component.name,
                 key_id=component.key_id, origin=origin,
+                path=flask.request.path, outcome="denied",
             )
             return flask.jsonify({"error": "forbidden"}), 403
 
@@ -260,6 +264,31 @@ def create_app(cfg: ServiceConfig):
         # ji potrebuje do auditu, at je z nej poznat i "odkud", ne jen "kdo".
         flask.g.origin = origin
         return None
+
+    @app.after_request
+    def _audit_pozadavku(odpoved):
+        # Kazdy pozadavek s platnym klicem z povolene adresy = PRAVE JEDEN
+        # radek v auditu realmu. Aplikace tim ma v auditu tutez vahu jako
+        # clovek: "kdy a odkud se ten klic naposledy pouzil" se cte stejne
+        # jako "kdy se naposledy prihlasila hana", i za cenu radku navic.
+        #
+        # Dva pripady radek uz maji a druhy by byl duplicita:
+        # - `origin_denied` - zapsal ho `_security_pipeline` a `g.component`
+        #   se pak vubec nenastavi,
+        # - verdikt `/v1/authenticate` - zapsal ho `store.authenticate`
+        #   (vcetne `component`, `key_id`, `origin`) a oznacil `g.auditovano`.
+        # Chyba volajiciho na `/v1/authenticate` (400) verdikt nema, takze
+        # jde sem jako kazdy jiny pozadavek.
+        component = flask.g.get("component")
+        if component is None or flask.g.get("auditovano"):
+            return odpoved
+        flask.g.store.audit_event(
+            kind="access", component=component.name, key_id=component.key_id,
+            origin=flask.g.origin, method=flask.request.method,
+            path=flask.request.path, status=odpoved.status_code,
+            outcome="ok" if odpoved.status_code < 400 else "error",
+        )
+        return odpoved
 
     @app.get("/healthz")
     def _healthz():
@@ -349,6 +378,7 @@ def create_app(cfg: ServiceConfig):
             )
         except ValueError:
             return _bad_request()
+        flask.g.auditovano = True
         return flask.jsonify(
             verdict_to_wire(verdikt, detail=flask.g.component.detail)
         )

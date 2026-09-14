@@ -385,7 +385,7 @@ změněné, že se má zahodit.
 Služba vede **dvě** stopy a každá odpovídá na jinou otázku:
 
 - **auditní stopa** — co se stalo *uvnitř realmu*: kdo co zapsal, jak dopadlo
-  ověření. Leží v `realm-<x>/audit/`, má retenci, čte ji konzole.
+  ověření a každý požadavek aplikace s platným klíčem. Leží v `realm-<x>/audit/`, má retenci, čte ji konzole.
 - **provozní log** — jak se vede *procesu*: co odmítl dřív, než vůbec věděl,
   o který realm jde. Jde na `stdout`/`stderr`, čte ho provozovatel.
 

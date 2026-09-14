@@ -212,9 +212,30 @@ nevyšly. Přihlášení správce do konzole nemá `component` (je to konzole, n
 aplikace), ale `origin` ano.
 
 Zbylé druhy událostí: `write` (zápis s aktérem a operací), `origin_denied`
-(požadavek odmítnutý origin ACL, s `component`, `key_id` a `origin`)
-a `session` (odhlášení, zamítnutý CSRF token, relace zabitá po odebrání
-správce).
+(požadavek odmítnutý origin ACL, s `component`, `key_id`, `origin`, `path`
+a `outcome`), `access` (viz níže) a `session` (odhlášení, zamítnutý CSRF
+token, relace zabitá po odebrání správce).
+
+### Každý požadavek aplikace je v auditu
+
+Aplikace má v auditu tutéž váhu jako člověk: **každý požadavek s platným
+klíčem zanechá právě jeden řádek**. Ověření uživatele (`/v1/authenticate`
+s verdiktem) je řádek `authenticate`, požadavek z nepovolené adresy
+`origin_denied` a všechno ostatní — `whoami`, `users`, `generation`, chybný
+požadavek, neznámá cesta — řádek `access`:
+
+```json
+{ "kind": "access", "component": "workbench", "key_id": "k4",
+  "origin": "2001:db8::1", "method": "GET", "path": "/v1/generation",
+  "status": 200, "outcome": "ok", "t": "…" }
+```
+
+`outcome` je `ok` pro stav pod 400, jinak `error`. Aplikace, která se ptá
+každou minutu, tak zapíše 1 440 řádků denně — je to vědomá cena za to, že
+„kdy a odkud se ten klíč naposledy použil“ jde přečíst stejně jako poslední
+přihlášení uživatele. Stránka Aplikace v konzoli ukazuje posledních pět
+požadavků každé aplikace. Požadavky bez platného klíče realm neurčí a zůstávají
+v provozním logu.
 
 Co se do auditu **nedostane**, protože v jeho okamžiku ještě není znám realm
 — neplatný klíč, neexistující realm při přihlášení — najdete v provozním logu

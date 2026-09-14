@@ -17,7 +17,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .. import log
-from ..audit import read_events, recent_by_subject
+from ..audit import read_events, recent_by
 from ..config import ServiceConfig
 from ..files import FileStore
 from ..origin import resolve_origin
@@ -33,8 +33,8 @@ _TEMPLATES = Path(__file__).parent / "templates"
 #: historie (retence je typicky 90 dni, cely vypis by byl neprehledny).
 _AUDIT_VYCHOZI_DNI = 7
 
-#: Kolik prihlaseni ukaze roletka u cloveka ve vypisu. Je to "co se delo
-#: naposled", ne historie - na tu je stranka auditu s filtrem.
+#: Kolik udalosti ukaze roletka u cloveka, spravce i aplikace ve vypisu. Je
+#: to "co se delo naposled", ne historie - na tu je stranka auditu s filtrem.
 _POSLEDNICH_PRIHLASENI = 5
 
 
@@ -475,9 +475,43 @@ def create_console_app(cfg: ServiceConfig):
             return None
         return datetime.fromtimestamp(razitko, UTC).isoformat(timespec="seconds")
 
-    def _radek_prihlaseni(udalost: dict) -> dict:
+    def _duvod(udalost: dict) -> str:
+        """Co stoji vedle vysledku: `reason`, u pozadavku aplikace HTTP stav.
+
+        Radek `access` zadny `reason` nema - neuspech je tam 400/404 a to je
+        ta informace, kterou clovek hleda. U uspechu se stav nepise, "200"
+        vedle "ok" nerika nic.
+        """
+        if udalost.get("reason"):
+            return str(udalost["reason"])
+        if udalost.get("outcome") != "ok" and "status" in udalost:
+            return str(udalost["status"])
+        return ""
+
+    def _pozadavek(udalost: dict) -> str:
+        """Co aplikace chtela - sloupec roletky u aplikace.
+
+        U overeni je to koho overovala, u ostatnich metoda a cesta. Klic je
+        vpredu, protoze po vymene klice zustava jmeno aplikace stejne a bez
+        nej by stary a novy klic v roletce splynuly.
+        """
+        if udalost.get("kind") == "authenticate":
+            co = f"authenticate {udalost.get('subject') or ''}".strip()
+        elif udalost.get("path"):
+            co = " ".join(
+                kus for kus in (udalost.get("method"), udalost["path"]) if kus
+            )
+        else:
+            co = udalost.get("kind", "")
+        return " · ".join(kus for kus in (udalost.get("key_id"), co) if kus)
+
+    def _radek_prihlaseni(udalost: dict, protistrana: str) -> dict:
         """Jeden radek roletky. Stejna ctverice a stejne tridy jako stranka
-        auditu (`_radek_udalosti`) - je to tyz zaznam, jen uzsi vyber."""
+        auditu (`_radek_udalosti`) - je to tyz zaznam, jen uzsi vyber.
+
+        Treti sloupec je "druha strana" udalosti: u cloveka aplikace, ktera
+        se ptala, u aplikace to, na co se ptala.
+        """
         outcome = udalost.get("outcome")
         if outcome == "ok":
             trida = "vysledek-ok"
@@ -491,10 +525,10 @@ def create_console_app(cfg: ServiceConfig):
             # nema (viz `FileStore.authenticate`) a prazdna bunka by vypadala
             # jako rozbite vykresleni.
             "odkud": udalost.get("origin") or "—",
-            "kdo_pozadal": udalost.get("component") or "—",
+            "protistrana": protistrana or "—",
             "vysledek_text": outcome or "",
             "vysledek_trida": trida,
-            "reason": udalost.get("reason", ""),
+            "reason": _duvod(udalost),
         }
 
     def _vyfiltruj(jmena, dotaz):
@@ -520,17 +554,17 @@ def create_console_app(cfg: ServiceConfig):
         vybrani = _vyfiltruj(vsichni, dotaz)
         uzivatele = [_radek_cloveka(store, jmeno) for jmeno in vybrani]
         # JEDEN pruchod auditem pro celou stranku, ne jeden na kazdeho -
-        # `recent_by_subject` cte od nejnovejsiho dne a konci, jakmile ma
+        # `recent_by` cte od nejnovejsiho dne a konci, jakmile ma
         # kazdy dost. Az PO filtru, ze stejneho duvodu jako radky vyse.
-        prihlaseni = recent_by_subject(
-            store.home,
+        prihlaseni = recent_by(
+            store.home, "subject",
             [f"user:{jmeno}" for jmeno in vybrani],
             kind="authenticate",
             limit=_POSLEDNICH_PRIHLASENI,
         )
         for radek in uzivatele:
             radek["prihlaseni"] = [
-                _radek_prihlaseni(u)
+                _radek_prihlaseni(u, u.get("component"))
                 for u in prihlaseni.get(f"user:{radek['jmeno']}", ())
             ]
         return flask.render_template(
@@ -769,7 +803,22 @@ def create_console_app(cfg: ServiceConfig):
     @app.get("/applications")
     @prihlasen
     def _aplikace_seznam():
-        aplikace = [_radek_aplikace(k) for k in flask.g.store.components()]
+        store = flask.g.store
+        aplikace = [_radek_aplikace(k) for k in store.components()]
+        # Tataz roletka jako u lidi a spravcu, nad tymz auditem a stejnym
+        # jednim pruchodem - jen se hleda podle `component` misto `subject`
+        # a bez filtru na `kind`: aplikaci patri kazdy jeji pozadavek
+        # (`authenticate`, `access`, `origin_denied`).
+        pouziti = recent_by(
+            store.home, "component",
+            [radek["jmeno"] for radek in aplikace],
+            limit=_POSLEDNICH_PRIHLASENI,
+        )
+        for radek in aplikace:
+            radek["prihlaseni"] = [
+                _radek_prihlaseni(u, _pozadavek(u))
+                for u in pouziti.get(radek["jmeno"], ())
+            ]
         return flask.render_template("aplikace.html", aplikace=aplikace)
 
     @app.post("/applications/add")
@@ -910,15 +959,15 @@ def create_console_app(cfg: ServiceConfig):
         # Jeden pruchod auditem pro celou stranku - viz `_uzivatele_seznam`.
         # Lisi se jen prefix subjektu: spravce a clen stejneho jmena jsou
         # dve ruzne identity (viz `Enrolment.principal`).
-        prihlaseni = recent_by_subject(
-            store.home,
+        prihlaseni = recent_by(
+            store.home, "subject",
             [f"admin:{jmeno}" for jmeno in jmena],
             kind="authenticate",
             limit=_POSLEDNICH_PRIHLASENI,
         )
         for radek in spravci:
             radek["prihlaseni"] = [
-                _radek_prihlaseni(u)
+                _radek_prihlaseni(u, u.get("component"))
                 for u in prihlaseni.get(f"admin:{radek['jmeno']}", ())
             ]
         return flask.render_template("spravci.html", spravci=spravci)
@@ -1044,7 +1093,10 @@ def create_console_app(cfg: ServiceConfig):
         else:
             trida, text = "vysledek-jiny", ""
         udalost_text = " ".join(
-            kus for kus in (kind, udalost.get("op") or udalost.get("purpose")) if kus
+            kus for kus in (
+                kind,
+                udalost.get("op") or udalost.get("purpose") or udalost.get("path"),
+            ) if kus
         )
         # `component` uz do "kdo" NEPATRI - ma vlastni sloupec. Zustava
         # subjekt (koho se ptalo) nebo akter (kdo zapsal); pozadavek odmitnuty
@@ -1062,7 +1114,7 @@ def create_console_app(cfg: ServiceConfig):
             "key_id": udalost.get("key_id", ""),
             "vysledek_text": text,
             "vysledek_trida": trida,
-            "reason": udalost.get("reason", ""),
+            "reason": _duvod(udalost),
         }
 
     @app.get("/audit")

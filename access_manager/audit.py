@@ -50,8 +50,13 @@ def _prune(adresar: Path, retention_days: int) -> None:
             soubor.unlink(missing_ok=True)
 
 
-def recent_by_subject(root, subjects, *, kind=None, limit=5) -> dict[str, list]:
-    """Poslednich `limit` udalosti pro kazdy subjekt, NEJNOVEJSI PRVNI.
+def recent_by(root, field, values, *, kind=None, limit=5) -> dict[str, list]:
+    """Poslednich `limit` udalosti pro kazdou hodnotu pole `field`,
+    NEJNOVEJSI PRVNI.
+
+    Lide a spravci se hledaji podle `subject`, aplikace podle `component` -
+    je to tataz otazka ("co se s nim naposledy delo") nad tymz auditem,
+    tak je to i tataz funkce.
 
     Nestavi se to na `read_events` schvalne. Ten precte cely rozsah dni,
     rozparsuje kazdy radek a teprve pak filtruje - pro vypis o stovkach
@@ -63,7 +68,7 @@ def recent_by_subject(root, subjects, *, kind=None, limit=5) -> dict[str, list]:
     Subjekty se predavaji uz hotove (`user:hana`), at tahle funkce nemusi
     vedet nic o tom, jak se skladaji principaly.
     """
-    hledane = set(subjects)
+    hledane = set(values)
     nalezene: dict[str, list] = {subjekt: [] for subjekt in hledane}
     adresar = Path(root) / ADRESAR
     if not hledane or not adresar.is_dir():
@@ -79,7 +84,7 @@ def recent_by_subject(root, subjects, *, kind=None, limit=5) -> dict[str, list]:
             except json.JSONDecodeError:
                 continue                 # viz `read_events` - jeden spatny
                                          # radek nesmi shodit vypis
-            subjekt = udalost.get("subject")
+            subjekt = udalost.get(field)
             if subjekt not in zbyva:
                 continue
             if kind and udalost.get("kind") != kind:

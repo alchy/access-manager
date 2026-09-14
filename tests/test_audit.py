@@ -145,8 +145,8 @@ def test_an_admin_login_records_the_address(tmp_path):
     assert udalost["origin"] == "10.89.0.2"
 
 
-def test_recent_by_subject_returns_newest_first_and_stops_at_the_limit(tmp_path):
-    from access_manager.audit import append_event, recent_by_subject
+def test_recent_by_returns_newest_first_and_stops_at_the_limit(tmp_path):
+    from access_manager.audit import append_event, recent_by
 
     koren(tmp_path).mkdir(parents=True, exist_ok=True)
     for i in range(7):
@@ -159,8 +159,8 @@ def test_recent_by_subject_returns_newest_first_and_stops_at_the_limit(tmp_path)
         "subject": "user:hana", "op": "add_user",
     }, retention_days=90)
 
-    nalezene = recent_by_subject(
-        koren(tmp_path), ["user:hana"], kind="authenticate", limit=5,
+    nalezene = recent_by(
+        koren(tmp_path), "subject", ["user:hana"], kind="authenticate", limit=5,
     )
     casy = [u["t"] for u in nalezene["user:hana"]]
     assert len(casy) == 5
@@ -168,8 +168,8 @@ def test_recent_by_subject_returns_newest_first_and_stops_at_the_limit(tmp_path)
     assert casy[0] == "2026-08-26T10:06:00+00:00"  # `write` se nepocita
 
 
-def test_recent_by_subject_keeps_subjects_apart(tmp_path):
-    from access_manager.audit import append_event, recent_by_subject
+def test_recent_by_keeps_subjects_apart(tmp_path):
+    from access_manager.audit import append_event, recent_by
 
     koren(tmp_path).mkdir(parents=True, exist_ok=True)
     for jmeno in ("hana", "petr"):
@@ -178,8 +178,8 @@ def test_recent_by_subject_keeps_subjects_apart(tmp_path):
             "subject": f"user:{jmeno}", "outcome": "ok",
         }, retention_days=90)
 
-    nalezene = recent_by_subject(
-        koren(tmp_path), ["user:hana", "user:petr", "user:nikdo"],
+    nalezene = recent_by(
+        koren(tmp_path), "subject", ["user:hana", "user:petr", "user:nikdo"],
         kind="authenticate",
     )
     assert len(nalezene["user:hana"]) == 1
@@ -187,8 +187,8 @@ def test_recent_by_subject_keeps_subjects_apart(tmp_path):
     assert nalezene["user:nikdo"] == []            # klic je tam i prazdny
 
 
-def test_recent_by_subject_survives_a_broken_line(tmp_path):
-    from access_manager.audit import ADRESAR, append_event, recent_by_subject
+def test_recent_by_survives_a_broken_line(tmp_path):
+    from access_manager.audit import ADRESAR, append_event, recent_by
 
     koren(tmp_path).mkdir(parents=True, exist_ok=True)
     append_event(koren(tmp_path), {
@@ -199,5 +199,5 @@ def test_recent_by_subject_survives_a_broken_line(tmp_path):
     with soubor.open("a", encoding="utf-8") as f:
         f.write("tohle neni JSON\n")
 
-    nalezene = recent_by_subject(koren(tmp_path), ["user:hana"])
+    nalezene = recent_by(koren(tmp_path), "subject", ["user:hana"])
     assert len(nalezene["user:hana"]) == 1
