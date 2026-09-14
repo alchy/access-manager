@@ -1,0 +1,58 @@
+{% extends "audit_kostra.html" %}
+{% import "_audit_makra.html" as am with context %}
+{% block tabulka %}
+<table class="tabulka audit">
+  <thead>
+    <tr>
+      <th>{{ t('audit.time') }}</th>
+      <th>{{ t('audit.col.user') }}</th>
+      <th>{{ t('audit.col.client') }}</th>
+      <th>{{ t('audit.col.via') }}</th>
+      <th>{{ t('audit.col.purpose') }}</th>
+      <th>{{ t('audit.result') }}</th>
+    </tr>
+    <tr class="filtr-radek">
+      {{ am.filtr_obdobi() }}
+      {{ am.filtr_pole('uzivatel', filtry.uzivatel) }}
+      {{ am.filtr_pole('klient', filtry.klient) }}
+      {{ am.filtr_pole('aplikace', filtry.aplikace) }}
+      {{ am.filtr_pole('ucel', filtry.ucel) }}
+      {{ am.filtr_pole('vysledek', filtry.vysledek) }}
+    </tr>
+  </thead>
+  <tbody>
+    {% for polozka in polozky %}
+      {% if polozka.den %}
+        {{ am.den_radek(polozka.den, 6) }}
+      {% else %}
+        {% set radek = polozka.radek %}
+        <tr class="{{ 'vybrany' if radek.id == detail_id else '' }}">
+          {{ am.cas_odkaz(radek) }}
+          <td class="mono">{{ radek.uzivatel }}</td>
+          <td class="mono">{{ radek.klient }}</td>
+          <td>
+            <span class="mono">{{ radek.aplikace }}</span>
+            {% if radek.key_id %}<span class="vedlejsi">{{ radek.key_id }}</span>{% endif %}
+            {% if radek.server %}<span class="vysvetlivka mono">{{ radek.server }}</span>{% endif %}
+          </td>
+          <td>{{ radek.ucel }}{% if radek.ucel_doplnek %} <span class="vedlejsi mono">{{ radek.ucel_doplnek }}</span>{% endif %}</td>
+          {{ am.vysledek(radek) }}
+        </tr>
+        {% if radek.id == detail_id and detail %}
+          {% set odkazy = [(t('audit.detail.user_all').format(jmeno=radek.uzivatel),
+                            url_for('_audit_uzivatele', uzivatel=radek.uzivatel, od=od, do=do))] %}
+          {% if radek.aplikace != '—' and radek.den %}
+            {% set odkazy = odkazy + [(t('audit.detail.app_day').format(jmeno=radek.aplikace),
+                                      url_for('_audit_aplikace', aplikace=radek.aplikace,
+                                              od=radek.den.isoformat(), do=radek.den.isoformat()))] %}
+          {% endif %}
+          {{ am.detail_radek(detail, 6, odkazy) }}
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+    {% if not polozky %}
+    <tr><td colspan="6" class="poznamka">{{ t('spolecne.nothing_found') }}</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+{% endblock %}

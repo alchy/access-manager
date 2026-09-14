@@ -1,0 +1,49 @@
+{% extends "audit_kostra.html" %}
+{% import "_audit_makra.html" as am with context %}
+{% block tabulka %}
+<table class="tabulka audit">
+  <thead>
+    <tr>
+      <th>{{ t('audit.time') }}</th>
+      <th>{{ t('audit.col.admin') }}</th>
+      <th>{{ t('audit.origin') }}</th>
+      <th>{{ t('audit.col.changed') }}</th>
+      <th>{{ t('audit.result') }}</th>
+    </tr>
+    <tr class="filtr-radek">
+      {{ am.filtr_obdobi() }}
+      {{ am.filtr_pole('spravce', filtry.spravce) }}
+      {{ am.filtr_pole('odkud', filtry.odkud) }}
+      {{ am.filtr_pole('co', filtry.co, t('audit.ph.change')) }}
+      {{ am.filtr_pole('vysledek', filtry.vysledek) }}
+    </tr>
+  </thead>
+  <tbody>
+    {% for polozka in polozky %}
+      {% if polozka.den %}
+        {{ am.den_radek(polozka.den, 5) }}
+      {% else %}
+        <tr class="skupina skupina-{{ polozka.skupina.druh }}"><td colspan="5">{{ polozka.hlavicka }}</td></tr>
+        {% for radek in polozka.radky %}
+        <tr class="odsazeno{{ ' vybrany' if radek.id == detail_id else '' }}">
+          {{ am.cas_odkaz(radek) }}
+          <td class="mono">{{ radek.spravce }}</td>
+          <td class="mono">{{ radek.odkud }}</td>
+          <td>{{ radek.co }}{% if radek.cil %} <span class="cil">{{ radek.cil }}</span>{% endif %}</td>
+          {{ am.vysledek(radek) }}
+        </tr>
+        {% if radek.id == detail_id and detail %}
+          {{ am.detail_radek(detail, 5, [
+            (t('audit.detail.admin_all').format(jmeno=radek.spravce),
+             url_for('_audit_spravci', spravce=radek.spravce, od=od, do=do)),
+          ]) }}
+        {% endif %}
+        {% endfor %}
+      {% endif %}
+    {% endfor %}
+    {% if not polozky %}
+    <tr><td colspan="5" class="poznamka">{{ t('spolecne.nothing_found') }}</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+{% endblock %}

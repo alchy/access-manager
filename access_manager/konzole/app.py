@@ -12,18 +12,18 @@ from __future__ import annotations
 
 import functools
 import secrets
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .. import log
-from ..audit import read_events, recent_by
+from ..audit import odpovida, read_events, recent_by
 from ..config import ServiceConfig
 from ..files import FileStore
 from ..origin import resolve_origin
 from ..principals import PUBLIC, USERS, check_identity, check_name, check_realm
 from ..realms import realm_root
-from . import preklady
+from . import pohledy, preklady
 
 #: Sablony jsou soucasti balicku - Flask by je jinak hledal relativne k cwd,
 #: ktery se pri spusteni sluzby muze lisit od umisteni modulu.
@@ -1123,38 +1123,196 @@ def create_console_app(cfg: ServiceConfig):
             "reason": _duvod(udalost),
         }
 
+    # -- spolecne vsem auditnim pohledum -------------------------------------
+
+    #: Rychle volby obdobi -> kolik dni zpet (vcetne dneska).
+    _OBDOBI = {"dnes": 1, "7": 7, "30": 30, "90": 90}
+
+    def _obdobi() -> tuple[str, str, str]:
+        """(od, do, rychla volba) - dny jsou MISTNI, jak je vidi clovek.
+
+        Explicitni `od`/`do` z formulare maji prednost pred rychlou volbou.
+        Volba, ktera obdobi presne odpovida, se oznaci i tehdy, kdyz prislo
+        jako dvojice dat.
+        """
+        dnes = datetime.now().astimezone().date()
+        volba = flask.request.args.get("obdobi", "")
+        dni = _OBDOBI.get(volba, _AUDIT_VYCHOZI_DNI)
+        vychozi_od = (dnes - timedelta(days=dni - 1)).isoformat()
+        # Jmena MUSI sedet s `name=` ve formulari. Drive tu stalo
+        # "from"/"to"/"subject", zatimco formular posilal "od"/"do"/"subjekt"
+        # - tri z peti filtru proto tise nedelaly nic.
+        od = _validni_den(flask.request.args.get("od", "")) or vychozi_od
+        do = _validni_den(flask.request.args.get("do", "")) or dnes.isoformat()
+        oznacena = ""
+        if do == dnes.isoformat():
+            for klic, pocet in _OBDOBI.items():
+                if od == (dnes - timedelta(days=pocet - 1)).isoformat():
+                    oznacena = klic
+        return od, do, oznacena
+
+    def _udalosti_obdobi(store, od: str, do: str) -> list[dict]:
+        """Vsechny udalosti obdobi, chronologicky, podle MISTNIHO dne.
+
+        Soubory auditu jsou po dnech v UTC, clovek ale vybira mistni dny.
+        Cte se proto o den vic z kazde strany a orizne se az podle mistniho
+        casu udalosti - jinak by "Dnes" v CEST prislo o prvni dve hodiny.
+        """
+        prvni = (date.fromisoformat(od) - timedelta(days=1)).isoformat()
+        posledni = (date.fromisoformat(do) + timedelta(days=1)).isoformat()
+        vysledek = []
+        for u in read_events(store.home, day_from=prvni, day_to=posledni):
+            d = pohledy.den(u)
+            if d is None or od <= d.isoformat() <= do:
+                vysledek.append(u)
+        return vysledek
+
+    def _odkaz(**zmeny) -> str:
+        """Tataz stranka se stejnymi filtry, jen se `zmeny` (None = pryc)."""
+        argumenty = flask.request.args.to_dict()
+        for klic, hodnota in zmeny.items():
+            if hodnota in (None, ""):
+                argumenty.pop(klic, None)
+            else:
+                argumenty[klic] = hodnota
+        return flask.url_for(flask.request.endpoint, **argumenty)
+
+    def _filtry(jmena) -> dict[str, str]:
+        return {
+            jmeno: flask.request.args.get(jmeno, "").strip().lower()
+            for jmeno in jmena
+        }
+
+    def _kostra(pohled: str, udalosti, od: str, do: str, obdobi: str) -> dict:
+        """Kontext hlavicky, ktery maji vsechny pohledy stejny."""
+        return {
+            "pohled": pohled, "pocty": pohledy.pocty(udalosti),
+            "od": od, "do": do, "obdobi": obdobi,
+            "rychla_obdobi": list(_OBDOBI),
+            "aktualizovano": datetime.now().astimezone().strftime("%H:%M:%S"),
+            "odkaz": _odkaz,
+            "detail_id": flask.request.args.get("detail", ""),
+            "limit": pohledy.LIMIT_RADKU,
+        }
+
+    def _detail(radek) -> dict | None:
+        if radek is None:
+            return None
+        u = radek["udalost"]
+        return {
+            "id": radek["id"],
+            "pole": pohledy.pole_detailu(u, _prelozit),
+            "surovy": pohledy.surovy_radek(u),
+            "pocet": radek.get("pocet", 1),
+            "od": radek.get("od", ""),
+        }
+
+    # -- Spravci --------------------------------------------------------------
+
+    @app.get("/audit/admins")
+    @prihlasen
+    def _audit_spravci():
+        store = flask.g.store
+        od, do, obdobi = _obdobi()
+        udalosti = _udalosti_obdobi(store, od, do)
+        filtry = _filtry(("spravce", "odkud", "co", "vysledek"))
+        skupiny = pohledy.skupiny_spravcu(udalosti, filtry, _prelozit)
+        dnes = datetime.now().astimezone().date()
+        celkem = sum(len(sk["radky"]) for sk in skupiny)
+        polozky, vykresleno, posledni_den = [], 0, None
+        for skupina in skupiny:
+            if vykresleno >= pohledy.LIMIT_RADKU:
+                break
+            den_skupiny = pohledy.den(skupina["posledni"])
+            if den_skupiny != posledni_den:
+                polozky.append({"den": pohledy.popis_dne(den_skupiny, dnes, _prelozit)})
+                posledni_den = den_skupiny
+            radky = skupina["radky"][: pohledy.LIMIT_RADKU - vykresleno]
+            vykresleno += len(radky)
+            polozky.append({
+                "skupina": skupina,
+                "hlavicka": pohledy.hlavicka_skupiny(skupina, _prelozit),
+                "radky": radky,
+            })
+        vsechny_radky = [r for sk in skupiny for r in sk["radky"]]
+        return flask.render_template(
+            "audit_spravci.html", polozky=polozky, filtry=filtry,
+            celkem=celkem, vykresleno=vykresleno,
+            detail=_detail(
+                pohledy.najdi(vsechny_radky, flask.request.args.get("detail"))
+            ),
+            **_kostra("spravci", udalosti, od, do, obdobi),
+        )
+
+    # -- Uzivatele ------------------------------------------------------------
+
+    @app.get("/audit/users")
+    @prihlasen
+    def _audit_uzivatele():
+        store = flask.g.store
+        od, do, obdobi = _obdobi()
+        udalosti = _udalosti_obdobi(store, od, do)
+        filtry = _filtry(("uzivatel", "klient", "aplikace", "ucel", "vysledek"))
+        radky = pohledy.radky_uzivatelu(udalosti, filtry, _prelozit)
+        dnes = datetime.now().astimezone().date()
+        return flask.render_template(
+            "audit_uzivatele.html",
+            polozky=pohledy.se_dny(radky[: pohledy.LIMIT_RADKU], dnes, _prelozit),
+            filtry=filtry, celkem=len(radky),
+            vykresleno=min(len(radky), pohledy.LIMIT_RADKU),
+            detail=_detail(pohledy.najdi(radky, flask.request.args.get("detail"))),
+            **_kostra("uzivatele", udalosti, od, do, obdobi),
+        )
+
+    # -- Aplikace -------------------------------------------------------------
+
+    @app.get("/audit/apps")
+    @prihlasen
+    def _audit_aplikace():
+        store = flask.g.store
+        od, do, obdobi = _obdobi()
+        udalosti = _udalosti_obdobi(store, od, do)
+        filtry = _filtry(("aplikace", "klic", "odkud", "pozadavek", "vysledek"))
+        radky = pohledy.radky_aplikaci(udalosti, filtry, _prelozit)
+        dnes = datetime.now().astimezone().date()
+        return flask.render_template(
+            "audit_aplikace.html",
+            polozky=pohledy.se_dny(radky[: pohledy.LIMIT_RADKU], dnes, _prelozit),
+            filtry=filtry, celkem=len(radky),
+            vykresleno=min(len(radky), pohledy.LIMIT_RADKU),
+            detail=_detail(pohledy.najdi(radky, flask.request.args.get("detail"))),
+            **_kostra("aplikace", udalosti, od, do, obdobi),
+        )
+
+    # -- Vse: puvodni tabulka pro vysetrovani napric -------------------------
+
     @app.get("/audit")
     @prihlasen
     def _audit_seznam():
         store = flask.g.store
-        dnes = datetime.now(UTC).date()
-        vychozi_od = (dnes - timedelta(days=_AUDIT_VYCHOZI_DNI)).isoformat()
-        vychozi_do = dnes.isoformat()
-        # Jmena MUSI sedet s `name=` ve formulari (audit.html). Drive tu
-        # stalo "from"/"to"/"subject", zatimco formular posilal
-        # "od"/"do"/"subjekt" - tri z peti filtru proto tise nedelaly nic
-        # a datova pole se po odeslani vracela na vychozi rozsah.
-        od = _validni_den(flask.request.args.get("od", "")) or vychozi_od
-        do = _validni_den(flask.request.args.get("do", "")) or vychozi_do
-        # `.lower()` jako u filtru nad vypisem lidi - `read_events` porovnava
+        od, do, obdobi = _obdobi()
+        udalosti = _udalosti_obdobi(store, od, do)
+        # `.lower()` jako u filtru nad vypisem lidi - `odpovida` porovnava
         # podretezec proti male variante, takze dotaz musi prijit stejne.
         kdo = flask.request.args.get("kdo", "").strip().lower() or None
         kind = flask.request.args.get("kind", "").strip() or None
         odkud = flask.request.args.get("odkud", "").strip() or None
         aplikace = flask.request.args.get("aplikace", "").strip() or None
         outcome = flask.request.args.get("outcome", "").strip() or None
-        udalosti = read_events(
-            store.home, day_from=od, day_to=do,
-            who=kdo, outcome=outcome, kind=kind,
-            origin=odkud, component=aplikace,
-        )
-        # Nejnovejsi nahoru - `read_events` vraci chronologicky (soubor po
-        # souboru, radek po radku), coz je pro cteni logu pozpatku.
-        radky = [_radek_udalosti(u) for u in reversed(udalosti)]
+        vybrane = [
+            u for u in udalosti
+            if odpovida(u, who=kdo, outcome=outcome, kind=kind,
+                        origin=odkud, component=aplikace)
+        ]
+        # Nejnovejsi nahoru - audit je chronologicky, coz je pro cteni logu
+        # pozpatku.
+        radky = [_radek_udalosti(u) for u in reversed(vybrane)]
         return flask.render_template(
-            "audit.html", udalosti=radky, od=od, do=do,
+            "audit.html", udalosti=radky[: pohledy.LIMIT_RADKU],
+            celkem=len(radky), vykresleno=min(len(radky), pohledy.LIMIT_RADKU),
             kdo=kdo or "", kind=kind or "", outcome=outcome or "",
             odkud=odkud or "", aplikace=aplikace or "",
+            **_kostra("vse", udalosti, od, do, obdobi),
         )
 
     return app

@@ -131,20 +131,29 @@ def read_events(root, day_from=None, day_to=None, *, subject=None,
                 # ctenare) - jeden spatny radek se jen preskoci, zbytek dne
                 # se precte dal.
                 continue
-            if subject and udalost.get("subject") != subject:
-                continue
-            if who and not any(
-                who in (udalost.get(klic) or "").lower()
-                for klic in ("subject", "actor")
-            ):
-                continue
-            if outcome and udalost.get("outcome") != outcome:
-                continue
-            if kind and udalost.get("kind") != kind:
-                continue
-            if origin and udalost.get("origin") != origin:
-                continue
-            if component and udalost.get("component") != component:
-                continue
-            vysledek.append(udalost)
+            if odpovida(udalost, subject=subject, outcome=outcome, kind=kind,
+                        who=who, origin=origin, component=component):
+                vysledek.append(udalost)
     return vysledek
+
+
+def odpovida(udalost: dict, *, subject=None, outcome=None, kind=None, who=None,
+             origin=None, component=None) -> bool:
+    """Sedi udalost na filtr `read_events`? Viz jeho docstring.
+
+    Samostatne proto, aby konzole mohla precist obdobi JEDNOU (potrebuje
+    ho i na pocty v zalozkach) a filtrovat az nad nim - stejnymi pravidly.
+    """
+    if subject and udalost.get("subject") != subject:
+        return False
+    if who and not any(
+        who in (udalost.get(klic) or "").lower() for klic in ("subject", "actor")
+    ):
+        return False
+    if outcome and udalost.get("outcome") != outcome:
+        return False
+    if kind and udalost.get("kind") != kind:
+        return False
+    if origin and udalost.get("origin") != origin:
+        return False
+    return not (component and udalost.get("component") != component)

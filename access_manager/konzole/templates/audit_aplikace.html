@@ -1,0 +1,58 @@
+{% extends "audit_kostra.html" %}
+{% import "_audit_makra.html" as am with context %}
+{% block tabulka %}
+<table class="tabulka audit">
+  <thead>
+    <tr>
+      <th>{{ t('audit.time') }}</th>
+      <th>{{ t('audit.col.app') }}</th>
+      <th>{{ t('audit.col.key') }}</th>
+      <th>{{ t('audit.col.server') }}</th>
+      <th>{{ t('audit.col.request') }}</th>
+      <th>{{ t('audit.result') }}</th>
+    </tr>
+    <tr class="filtr-radek">
+      {{ am.filtr_obdobi() }}
+      {{ am.filtr_pole('aplikace', filtry.aplikace) }}
+      {{ am.filtr_pole('klic', filtry.klic) }}
+      {{ am.filtr_pole('odkud', filtry.odkud) }}
+      {{ am.filtr_pole('pozadavek', filtry.pozadavek, t('audit.ph.request')) }}
+      {{ am.filtr_pole('vysledek', filtry.vysledek) }}
+    </tr>
+  </thead>
+  <tbody>
+    {% for polozka in polozky %}
+      {% if polozka.den %}
+        {{ am.den_radek(polozka.den, 6) }}
+      {% else %}
+        {% set radek = polozka.radek %}
+        <tr class="{{ 'vybrany' if radek.id == detail_id else '' }}">
+          {{ am.cas_odkaz(radek) }}
+          <td class="mono">{{ radek.aplikace }}</td>
+          <td class="mono">{{ radek.key_id }}</td>
+          <td class="mono">{{ radek.odkud }}</td>
+          <td>
+            {% if radek.metoda %}<span class="metoda mono">{{ radek.metoda }}</span>{% endif %}<span class="cil">{{ radek.cesta or '—' }}</span>
+            {% if radek.subjekt %}<span class="vedlejsi">·</span> <span class="cil">{{ radek.subjekt }}</span> <span class="vedlejsi">{{ radek.ucel }}</span>{% endif %}
+            {% if radek.pocet > 1 %}<span class="nasobek">{{ radek.pocet }}×</span><span class="vedlejsi">{{ t('audit.merged').format(od=radek.od) }}</span>{% endif %}
+          </td>
+          {{ am.vysledek(radek) }}
+        </tr>
+        {% if radek.id == detail_id and detail %}
+          {% set odkazy = [(t('audit.detail.app_all').format(jmeno=radek.aplikace),
+                            url_for('_audit_aplikace', aplikace=radek.aplikace, od=od, do=do))] %}
+          {% if radek.subjekt.startswith('user:') %}
+            {% set jmeno = radek.subjekt[5:] %}
+            {% set odkazy = odkazy + [(t('audit.detail.user_all').format(jmeno=jmeno),
+                                      url_for('_audit_uzivatele', uzivatel=jmeno, od=od, do=do))] %}
+          {% endif %}
+          {{ am.detail_radek(detail, 6, odkazy) }}
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+    {% if not polozky %}
+    <tr><td colspan="6" class="poznamka">{{ t('spolecne.nothing_found') }}</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+{% endblock %}

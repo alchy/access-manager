@@ -1,24 +1,8 @@
-{% extends "layout.html" %}
-{% block title %}{{ t('audit.title') }}{% endblock %}
-{% block content %}
-<h1>{{ t('audit.title') }}</h1>
-{{ napoveda('audit') }}
-
-{# Formular je PRAZDNY a stoji mimo tabulku; pole se na nej odkazuji pres
-   `form="filtr"`. Jinak to nejde: `<form>` nesmi obalit `<tr>`, a bez poli
-   primo v bunkach by filtr nesel zarovnat pod sloupec, ktery filtruje -
-   sirky sloupcu urcuje az prohlizec podle obsahu, takze nastavit je zvenci
-   znamena hadat. Takhle zarovnani drzi layout tabulky sam. #}
-<form id="filtr" method="get" action="{{ url_for('_audit_seznam') }}"></form>
-
-<div class="filtr-akce">
-  <button type="submit" form="filtr" class="odeslat">{{ t('audit.apply') }}</button>
-  {# Reset je ODKAZ na holou stranku, ne tlacitko: vyprazdnit pole by
-     znamenalo JS, kdezto tohle je prosty GET bez parametru. #}
-  <a href="{{ url_for('_audit_seznam') }}">{{ t('audit.reset') }}</a>
-</div>
-
-<div class="log-posuv">
+{% extends "audit_kostra.html" %}
+{# Vse: puvodni tabulka pro vysetrovani napric pohledy. Kostra (zalozky,
+   obnoveni, obdobi, formular filtru) je spolecna se Spravci, Uzivateli
+   a Aplikacemi. #}
+{% block tabulka %}
 <table class="tabulka log">
   <thead>
     <tr>
@@ -70,5 +54,4 @@
     {% endif %}
   </tbody>
 </table>
-</div>
 {% endblock %}

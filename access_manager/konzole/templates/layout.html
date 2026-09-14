@@ -764,6 +764,94 @@
   .roletky > details { flex: 1 1 100%; }
   .roletky > details:not([open]) { flex: 0 0 auto; }
 
+  /* -- auditni pohledy: zalozky, obnoveni, obdobi, relace, detail ------- */
+  .audit-hlava { display: flex; align-items: baseline; gap: 0.9rem; margin: 0 0 1.25rem; }
+  .audit-hlava h1 { margin: 0; }
+  .audit-hlava .mono { font-size: 0.85rem; opacity: 0.6; }
+  .audit-lista {
+    display: flex; align-items: flex-end; justify-content: space-between;
+    flex-wrap: wrap; gap: 0.5rem 1rem;
+    border-bottom: 1px solid var(--hranice); margin: 0 0 0.9rem;
+  }
+  .zalozky { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+  .zalozka {
+    padding: 0.55rem 0.9rem 0.6rem; font-size: 0.92rem; color: var(--text);
+    text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px;
+    display: inline-flex; align-items: center; gap: 0.45rem;
+  }
+  .zalozka:hover { color: var(--accent); }
+  .zalozka.aktivni { border-bottom-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .zalozka .pocet {
+    font-size: 0.72rem; font-variant-numeric: tabular-nums; padding: 0.05rem 0.45rem;
+    border-radius: 999px; background: rgba(36, 26, 17, 0.07); color: var(--text); font-weight: 600;
+  }
+  .zalozka.aktivni .pocet { background: rgba(156, 77, 26, 0.12); color: var(--accent); }
+  .obnova { display: flex; align-items: center; gap: 0.6rem; padding-bottom: 0.45rem; font-size: 0.82rem; }
+  .obnova .kdy { opacity: 0.7; font-variant-numeric: tabular-nums; }
+  .tlacitko {
+    display: inline-flex; align-items: center; gap: 0.4rem; white-space: nowrap;
+    border: 1px solid var(--hranice); border-radius: 6px; padding: 0.3rem 0.65rem;
+    font-size: 0.82rem; color: var(--text); text-decoration: none; background: none;
+  }
+  .tlacitko:hover { border-color: var(--accent); color: var(--accent); }
+  /* Prepinac je checkbox - bez JS je skryty (atribut hidden) a obnovuje se
+     tlacitkem; audit.js ho odkryje a pamatuje si volbu pro kazdy pohled. */
+  .prepinac { display: inline-flex; flex-direction: row; align-items: center; gap: 0.45rem; cursor: pointer; font-size: 0.82rem; }
+  .prepinac .kolej {
+    width: 30px; height: 18px; border-radius: 999px; background: rgba(36, 26, 17, 0.18);
+    position: relative; flex: none; transition: background 0.15s;
+  }
+  .prepinac .kolej::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
+    border-radius: 999px; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: left 0.15s;
+  }
+  .prepinac input:checked + .kolej { background: var(--accent); }
+  .prepinac input:checked + .kolej::after { left: 14px; }
+  .prepinac input:focus-visible + .kolej { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .odpocet { font-size: 0.75rem; opacity: 0.65; font-variant-numeric: tabular-nums; }
+  .filtr-akce .obdobi { display: inline-flex; margin-left: auto; border: 1px solid var(--hranice); border-radius: 6px; overflow: hidden; }
+  .filtr-akce .obdobi a { border: none; border-radius: 0; border-left: 1px solid var(--hranice); background: #fff; font-size: 0.78rem; padding: 0.3rem 0.7rem; }
+  .filtr-akce .obdobi a:first-child { border-left: none; }
+  .filtr-akce .obdobi a.aktivni { background: rgba(156, 77, 26, 0.1); color: var(--accent); font-weight: 600; }
+  .tabulka.audit td { font-variant-numeric: tabular-nums; }
+  .tabulka.audit td, .tabulka.audit th { padding: 0.5rem 0.8rem; }
+  tr.den td {
+    background: #FBF9F5; font-size: 0.74rem; font-weight: 600; letter-spacing: 0.02em;
+    color: rgba(36, 26, 17, 0.7); padding: 0.35rem 0.85rem;
+  }
+  tr.skupina td { background: rgba(156, 77, 26, 0.05); font-size: 0.8rem; padding: 0.4rem 0.85rem; }
+  tr.skupina-mimo td, tr.skupina-neuspech td { background: rgba(36, 26, 17, 0.03); }
+  tr.odsazeno td:first-child { padding-left: 1.6rem; }
+  td.cas { font-family: var(--mono); font-size: 0.8rem; white-space: nowrap; }
+  .radek-odkaz { color: var(--text); text-decoration: none; border-bottom: 1px dotted rgba(36, 26, 17, 0.35); }
+  .radek-odkaz:hover, .radek-odkaz.otevreny { color: var(--accent); border-bottom-color: var(--accent); }
+  tr.vybrany td { background: rgba(156, 77, 26, 0.045); }
+  .vedlejsi { font-size: 0.76rem; opacity: 0.62; }
+  .vysvetlivka { display: block; font-size: 0.72rem; opacity: 0.6; margin-top: 0.1rem; }
+  .cil { font-family: var(--mono); font-size: 0.8rem; }
+  .metoda { font-size: 0.72rem; opacity: 0.7; margin-right: 0.45rem; }
+  .nasobek {
+    display: inline-block; padding: 0.02rem 0.4rem; border-radius: 4px; margin: 0 0.4rem;
+    background: rgba(36, 26, 17, 0.07); font-size: 0.74rem; font-weight: 600;
+  }
+  .duvod { font-size: 0.78rem; opacity: 0.75; margin-left: 0.3rem; font-family: var(--mono); }
+  tr.detail > td { background: #FCFBF8; padding: 0; }
+  .detail-telo {
+    padding: 1rem 1.2rem 1.1rem 1.6rem; border-left: 3px solid var(--accent);
+    display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 1.5rem;
+  }
+  @media (max-width: 900px) { .detail-telo { grid-template-columns: minmax(0, 1fr); } }
+  .detail-telo h3 { margin: 0 0 0.6rem; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; opacity: 0.6; }
+  .pole-detailu { display: grid; grid-template-columns: 11rem minmax(0, 1fr); gap: 0.35rem 0.8rem; margin: 0; font-size: 0.82rem; }
+  .pole-detailu dt { opacity: 0.62; }
+  .pole-detailu dd { margin: 0; word-break: break-all; font-size: 0.8rem; }
+  pre.surovy {
+    margin: 0 0 0.8rem; padding: 0.7rem 0.8rem; background: #fff; border: 1px solid var(--hranice);
+    border-radius: 8px; font-family: var(--mono); font-size: 0.72rem; line-height: 1.55;
+    white-space: pre-wrap; word-break: break-all;
+  }
+  .odkazy { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+
   /* -- klic aplikace: zobrazen prave jednou po registraci --------------- */
   .klic-hodnota {
     background: #fff;
@@ -789,7 +877,7 @@
       <a href="{{ url_for('_skupiny_seznam') }}">{{ t('nav.groups') }}</a>
       <a href="{{ url_for('_aplikace_seznam') }}">{{ t('nav.apps') }}</a>
       <a href="{{ url_for('_spravci_seznam') }}">{{ t('nav.admins') }}</a>
-      <a href="{{ url_for('_audit_seznam') }}">{{ t('nav.audit') }}</a>
+      <a href="{{ url_for('_audit_spravci') }}">{{ t('nav.audit') }}</a>
     </nav>
   </aside>
   {% endif %}

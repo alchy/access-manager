@@ -259,6 +259,34 @@ přihlášení uživatele. Stránka Aplikace v konzoli ukazuje posledních pět
 požadavků každé aplikace. Požadavky bez platného klíče realm neurčí a zůstávají
 v provozním logu.
 
+### Pohledy v konzoli
+
+Stránka Audit čte tutéž stopu ve čtyřech pohledech podle toho, **kdo jednal**:
+
+| pohled | řádek | sloupce |
+|---|---|---|
+| **Správci** (`/audit/admins`) | přihlášení do konzole, zápis, událost relace | čas · správce · odkud · co změnil · výsledek (i odmítnutá změna) |
+| **Uživatelé** (`/audit/users`) | pokus o ověření | čas · uživatel · odkud (klient) · přes aplikaci (+ adresa serveru) · účel · výsledek |
+| **Aplikace** (`/audit/apps`) | požadavek s platným klíčem | čas · aplikace · klíč · odkud (server) · čeho se týkal · výsledek (HTTP stav nebo verdikt) |
+| **Vše** (`/audit`) | cokoli | původní tabulka pro vyšetřování napříč |
+
+- Změny správce jsou seskupené do **relace**: od přihlášení do odhlášení,
+  s adresou a počtem změn. Neúspěšné pokusy o přihlášení mají vlastní
+  skupinu, zásah přes ssh skupinu „Mimo konzoli“. Zápis bez přihlášení
+  v zobrazeném období je relace bez začátku.
+- V pohledu Aplikace se **po sobě jdoucí stejné požadavky slučují** do jednoho
+  řádku s počtem (`/v1/generation` každou minutu); ve stopě zůstává každý.
+- Ověření uživatele přes API je v pohledu Uživatelé i Aplikace — na disku je
+  jednou. Čísla na záložkách se proto nesčítají do „Vše“.
+- Čas je místní (časové pásmo služby, `--tz` u kontejneru) a řádky jsou
+  rozdělené po dnech; přesné UTC je v detailu. Klik na čas otevře **detail
+  záznamu**: všechna pole, surový řádek JSONL a odkazy do souvisejících
+  pohledů.
+- **Obnovit** načte stránku znovu se stejnými filtry; přepínač **Automaticky po
+  minutě** (pamatuje se v prohlížeči pro každý pohled zvlášť) ji obnovuje sám
+  a pozastaví se, dokud je otevřený detail.
+- Pohled vykreslí nejvýš 500 řádků; víc je za filtrem nebo kratším obdobím.
+
 Co se do auditu **nedostane**, protože v jeho okamžiku ještě není znám realm
 — neplatný klíč, neexistující realm při přihlášení — najdete v provozním logu
 služby, viz [instalace.md](instalace.md).
