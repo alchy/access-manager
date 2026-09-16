@@ -295,7 +295,11 @@ server {
 
     proxy_http_version 1.1;
     proxy_set_header Host              $host;
-    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    # Hlavička s adresou klienta se PŘEPISUJE, ne dopisuje: kdyby tu stálo
+    # `$proxy_add_x_forwarded_for`, prošla by dovnitř i část, kterou poslal
+    # klient, a při `hops` > 1 by si origin ACL přepsal sám. Jeden hop =
+    # jedna hodnota = `hops: 1`.
+    proxy_set_header X-Forwarded-For   $remote_addr;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_connect_timeout  5s;
     proxy_read_timeout    30s;
@@ -441,8 +445,8 @@ zůstává podporovanou variantou.
 Zkrácene:
 
 ```bash
-deploy/container-build.sh          # postavi obraz
-sudo deploy/install-container.sh   # uzivatel, subuid/subgid, linger, unit
+deploy/container-build-access-manager.sh          # postavi obraz
+sudo deploy/install-container-access-manager.sh   # uzivatel, subuid/subgid, linger, unit
 sudo systemctl enable --now access-manager-container
 ```
 

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Postavi obraz sluzby z korene repozitare.
 #
-#     deploy/container-build.sh [tag]
+#     deploy/container-build-access-manager.sh [tag]
 #
 # Spousti se JAKO UZIVATEL, pod kterym pak kontejner pobezi (rootless podman
 # ma uloziste obrazu v jeho domovskem adresari - obraz postaveny rootem by

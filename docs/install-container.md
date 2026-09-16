@@ -15,7 +15,7 @@ s parametry.
 | kód a závislosti | **v obrazu** | — | `/app` |
 | konfigurace (`conf.d/`) | **mimo**, jen pro čtení | `~/conf.d` | `/etc/access-manager/conf.d` |
 | data (identity, skupiny, klíče, audit) | **mimo** | `~/.access-manager` | `/var/lib/access-manager` |
-| log služby | **mimo** | `~/logs/service.log` | — (píše ho podman, ne služba) |
+| log služby | **mimo** | `~/logs/access-manager.log` | — (píše ho podman, ne služba) |
 | TLS a certifikáty | **mimo** | reverzní proxy | — |
 
 `~` je domovský adresář uživatele, pod kterým kontejner běží — u zdejšího
@@ -71,7 +71,7 @@ Kontejner **neběží jako root** — ani na hostiteli, ani (po namapování) uv
 ```bash
 git clone https://github.com/alchy/access-manager
 cd access-manager
-deploy/container-build.sh
+deploy/container-build-access-manager.sh
 podman run --rm -p 127.0.0.1:22000:22000 -p 127.0.0.1:22001:22001 \
            localhost/access-manager:latest
 ```
@@ -88,7 +88,7 @@ Obraz stavějte **jako uživatel, pod kterým pak poběží**: rootless podman d
 ## Instalace jako služba
 
 ```bash
-sudo deploy/install-container.sh
+sudo deploy/install-container-access-manager.sh
 ```
 
 Skript je idempotentní a udělá čtyři věci:
@@ -106,7 +106,7 @@ Pak konfigurace, obraz a start:
 ```bash
 # konfigurace do ~access-manager/conf.d (viz nize)
 sudo -u access-manager -H XDG_RUNTIME_DIR=/run/user/$(id -u access-manager) \
-     deploy/container-build.sh
+     deploy/container-build-access-manager.sh
 sudo systemctl enable --now access-manager-container
 ```
 
@@ -173,7 +173,7 @@ služba zaznamenala:
 
 ```bash
 curl -s -o /dev/null https://auth.example.com/v1/whoami
-grep unauthorized ~/logs/service.log | tail -1
+grep unauthorized ~/logs/access-manager.log | tail -1
 ```
 
 ```
@@ -267,7 +267,7 @@ tam, kde byla: `data/realm-<název>/audit/RRRR-MM-DD.jsonl`.
 **Log služby** píše podman do souboru na hostiteli:
 
 ```
-~/logs/service.log
+~/logs/access-manager.log
 ```
 
 Rotuje se po 10 MB (`--log-opt max-size`). Na začátku řádku je razítko
@@ -283,7 +283,7 @@ odmítnutý požadavek není chyba procesu, služba se právě zachovala správn
 Takže:
 
 ```bash
-grep ' stderr F ' ~/logs/service.log     # jen to, co chce pozornost
+grep ' stderr F ' ~/logs/access-manager.log     # jen to, co chce pozornost
 ```
 
 Formát a úroveň se nastavují v `service.json`, viz [instalace.md](instalace.md):
@@ -342,7 +342,7 @@ práva na svazku přestanou sedět.
 ```bash
 git -C /www/access-manager/repo pull
 sudo -u access-manager -H XDG_RUNTIME_DIR=/run/user/$(id -u access-manager) \
-     /www/access-manager/repo/deploy/container-build.sh
+     /www/access-manager/repo/deploy/container-build-access-manager.sh
 sudo systemctl restart access-manager-container
 ```
 

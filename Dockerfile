@@ -1,6 +1,6 @@
 # Obraz sluzby. Staví se z korene repozitare:
 #
-#     deploy/container-build.sh          (nebo: podman build -t access-manager .)
+#     deploy/container-build-access-manager.sh          (nebo: podman build -t access-manager .)
 #
 # V obrazu NENI konfigurace - ta se montuje zvenci do /etc/access-manager/conf.d.
 # Bez ni kontejner nastartuje na dummy defaults, viz deploy/entrypoint.sh.
@@ -15,6 +15,15 @@ WORKDIR /app
 COPY pyproject.toml README.md LICENSE ./
 COPY access_manager ./access_manager
 RUN pip install --no-cache-dir '.[server,totp]'
+
+# Obrazu setrit netreba: nic z toho sluzba nepotrebuje a kazdy suid/sgid nastroj
+# je zbran navic pro toho, kdo by uvnitr dostal shell. `--security-opt
+# no-new-privileges` ve wrapperu uz zvednout opravneni nenecha, ale tohle je
+# druha vrstva - kdyby prvni nekdo pri uprave wrapperu vypnul.
+#
+#   /usr/bin/su, mount, umount, passwd, newgrp, chsh, chfn, gpasswd,
+#   chage, expiry, /usr/sbin/unix_chkpwd
+RUN find / -xdev -perm /6000 -type f -exec chmod -s {} + 2>/dev/null || true
 
 COPY deploy/entrypoint.sh /usr/local/bin/entrypoint.sh
 

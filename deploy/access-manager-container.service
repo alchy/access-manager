@@ -2,13 +2,13 @@
 #
 # Kontejner bezi jako uzivatel `access-manager` - ne jako root. Aby to slo
 # bez prihlaseni, musi mit uzivatel zapnuty linger a delegovane subuid/subgid;
-# oboji zaridi deploy/install-container.sh.
+# oboji zaridi deploy/install-container-access-manager.sh.
 #
 # Porty se publikuji na 127.0.0.1 - sluzba NENI dostupna zvenci. Pred ni
 # patri reverzni proxy s TLS na hostiteli. Viz docs/install-container.md.
 #
 # Instalace:
-#     sudo deploy/install-container.sh
+#     sudo deploy/install-container-access-manager.sh
 #     systemctl enable --now access-manager-container
 
 [Unit]
@@ -54,6 +54,16 @@ ExecStopPost=-/usr/bin/podman rm -f access-manager
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
+
+# NoNewPrivileges=yes tady BYT NESMI: rootless podman zaklada user namespace
+# pres newuidmap (cap_setuid=ep), ktery NoNewPrivileges rusi - po rebootu by
+# start skoncil na `newuidmap: write to uid_map failed`. Pri rucnim startu
+# z prihlasene relace to falesne projde, takze se to poznamena az po rebootu.
+#
+# Ochrana je misto toho UVNITR kontejneru (--cap-drop ALL, no-new-privileges,
+# --read-only, nosuid,nodev,noexec na mountech - viz wrapper) a tady
+# RestrictSUIDSGID: ucet sluzby neni v sudoers a suid/sgid uz nezalozi.
+RestrictSUIDSGID=yes
 
 # Rootless podman si sam zaklada cgroupy pro kontejner - bez delegace mu to
 # systemd nedovoli a start skonci na chybe cgroup manageru.

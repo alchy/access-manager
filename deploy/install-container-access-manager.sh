@@ -2,7 +2,7 @@
 # Pripravi stroj na provoz access-manageru v kontejneru. Spousti se JAKO ROOT,
 # ale vysledkem je sluzba, ktera rootem nebezi.
 #
-#     sudo deploy/install-container.sh [--user JMENO] [--home CESTA]
+#     sudo deploy/install-container-access-manager.sh [--user JMENO] [--home CESTA]
 #
 # Co udela:
 #   1. zalozi systemoveho uzivatele (nologin) a adresare conf.d/data/logs
@@ -21,7 +21,9 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --user) UZIVATEL="$2"; shift 2 ;;
         --home) DOMOV="$2"; shift 2 ;;
-        --help|-h) sed -n '2,17p' "$0"; exit 0 ;;
+        # Hlavicka konci na radku 13; vetsi rozsah by do napovedy pustil
+        # `set -eu` a prvni prirazeni.
+        --help|-h) sed -n '2,13p' "$0"; exit 0 ;;
         *) echo "neznamy prepinac: $1" >&2; exit 2 ;;
     esac
 done
@@ -95,6 +97,6 @@ systemctl daemon-reload
 echo
 echo "hotovo. Dal:"
 echo "  1) konfigurace do $DOMOV/conf.d (service.json, realms/*.json)"
-echo "  2) obraz:  sudo -u $UZIVATEL -H XDG_RUNTIME_DIR=/run/user/$UID_UZ $KOREN/deploy/container-build.sh"
+echo "  2) obraz:  sudo -u $UZIVATEL -H XDG_RUNTIME_DIR=/run/user/$UID_UZ $KOREN/deploy/container-build-access-manager.sh"
 echo "  3) start:  systemctl enable --now access-manager-container"
 echo "  4) pred sluzbu postavte reverzni proxy s TLS - porty jsou jen na 127.0.0.1"

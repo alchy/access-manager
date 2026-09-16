@@ -107,7 +107,7 @@ The REST API listens on port 22000, the management console on 22001. TLS
 is terminated by a reverse proxy in front of the service — the proxy must
 be listed in `trusted_proxies` so the origin ACL measures real client
 addresses. The intended deployment is a **rootless podman container** started by systemd
-(`deploy/install-container.sh`, see
+(`deploy/install-container-access-manager.sh`, see
 [docs/install-container.md](docs/install-container.md)); ports are published on
 `127.0.0.1` only, so a reverse proxy in front of it is mandatory, not optional.
 A native systemd unit for running without a container sits in `deploy/` as the

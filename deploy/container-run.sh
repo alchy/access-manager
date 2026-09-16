@@ -53,6 +53,10 @@ Pouziti: container-run.sh [prepinace]
 
 Porty se publikuji na 127.0.0.1, tedy JEN pro tenhle stroj. Ven z nej nevede
 nic - pred sluzbu patri reverzni proxy s TLS, viz docs/install-container.md.
+
+conf.d MUSI existovat a obsahovat aspon jeden *.json: bez nej by entrypoint
+nastartoval na dummy konfiguraci (prazdne trusted_proxies, Secure cookie
+vypnuta), coz je v provozu horsi nez nenastartovat.
 NAPOVEDA
 }
 
@@ -76,6 +80,11 @@ while [ "$#" -gt 0 ]; do
 done
 
 [ -d "$DATA" ] || { echo "datovy adresar neexistuje: $DATA" >&2; exit 1; }
+# Bez conf.d by entrypoint nastartoval na DUMMY konfiguraci: prazdne
+# trusted_proxies (origin ACL prestane rozlisovat klienty) a Secure cookie
+# vypnuta. To je pro provoz horsi nez nenastartovat vubec - proto fail-fast.
+[ -d "$CONF" ] || { echo "conf.d neexistuje: $CONF" >&2; exit 1; }
+ls "$CONF"/*.json >/dev/null 2>&1 || { echo "v $CONF neni zadny *.json (bezel by DUMMY)" >&2; exit 1; }
 mkdir -p "$LOGDIR"
 
 # Sit se zaklada idempotentne. Pevna adresa neni rozmar: sluzba uvnitr vidi
@@ -84,7 +93,7 @@ mkdir -p "$LOGDIR"
 podman --cgroup-manager "$CGROUP_MANAGER" network exists "$NETWORK" || podman network create "$NETWORK" >/dev/null
 
 # Zbytek po predchozim behu. `--rm` uklizi po sobe, ale ne po padu stroje.
-podman rm -f "$NAME" >/dev/null 2>&1 || true
+podman --cgroup-manager "$CGROUP_MANAGER" rm -f "$NAME" >/dev/null 2>&1 || true
 
 set -- \
     --rm \
@@ -95,12 +104,26 @@ set -- \
     --publish "$BIND:$API_PORT:22000" \
     --publish "$BIND:$CONSOLE_PORT:22001" \
     --userns "keep-id:uid=1000,gid=1000" \
-    --volume "$CONF:/etc/access-manager/conf.d:ro,z" \
-    --volume "$DATA:/var/lib/access-manager:Z" \
+    --volume "$CONF:/etc/access-manager/conf.d:ro,Z,nosuid,nodev,noexec" \
+    --volume "$DATA:/var/lib/access-manager:Z,nosuid,nodev,noexec" \
     --log-driver k8s-file \
-    --log-opt "path=$LOGDIR/service.log" \
+    --log-opt "path=$LOGDIR/access-manager.log" \
     --log-opt max-size=10m \
     --stop-timeout 15
+
+# Sluzba drzi parovaci tajemstvi a rozhoduje o pristupu do ostatnich sluzeb.
+# Vsechno, co k tomu nepotrebuje, jde pryc: zadne schopnosti (oba porty jsou
+# nad 1024, CAP_NET_BIND_SERVICE netreba), zadne zvyseni opravneni, koren jen
+# pro cteni. Jediny zapisovatelny adresar je datovy mount - tam a do /tmp
+# (dummy konfigurace) sluzba pise, nikam jinam.
+#
+# `nosuid,nodev,noexec` na obou mountech: v datovem adresari lezi jen JSON,
+# nic z nej se nesmi dat spustit ani pouzit ke zvyseni opravneni.
+set -- "$@" \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --read-only \
+    --tmpfs /tmp:rw,noexec,nosuid,size=32m
 
 [ -z "$TZ_ZONA" ] || set -- "$@" --env "TZ=$TZ_ZONA"
 
