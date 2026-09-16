@@ -12,7 +12,7 @@ Format navazuje na to, co uz dnes zaklada `python -m viewbase.admin adduser`:
       groups.json     {"ucetni": {"members": ["hana"], "includes": ["mzdy"]}}
 """
 import pytest
-from helpers import PUBLIC, REALM, USERS, koren, skupiny, zaloz
+from helpers import PUBLIC, REALM, RETIRED, koren, skupiny, zaloz
 
 from access_manager import Access
 
@@ -36,10 +36,15 @@ def test_a_user_carries_their_own_principal(tmp_path):
     assert "user:hana" in Access.local(tmp_path, realm=REALM).user("hana").principals
 
 
-def test_every_user_is_in_users_and_public(tmp_path):
+def test_every_user_is_in_public_and_nothing_else_automatic(tmp_path):
+    # `group:public` je jediny automaticky principal. `group:users` byval
+    # druhy; uz se nepridava, protoze clenstvi, ktere nejde videt ani
+    # spravovat, je pravo, o kterem spravce nevi.
     zaloz(tmp_path, "hana")
     access = Access.local(tmp_path, realm=REALM)
-    assert {USERS, PUBLIC} <= access.user("hana").principals
+    principals = access.user("hana").principals
+    assert principals == {"user:hana", PUBLIC}
+    assert RETIRED not in principals
 
 
 def test_a_name_cannot_climb_out_of_the_home(tmp_path):
@@ -63,8 +68,18 @@ def test_existing_principals_are_not_unknown(tmp_path):
     zaloz(tmp_path, "hana")
     skupiny(tmp_path, {"ucetni": {"members": []}})
     assert Access.local(tmp_path, realm=REALM).unknown_principals(
-        ["user:hana", "group:ucetni", USERS, PUBLIC]
+        ["user:hana", "group:ucetni", PUBLIC]
     ) == []
+
+
+def test_the_retired_group_is_reported_as_unknown(tmp_path):
+    # Nesmi mlcet: ACL, ktere `group:users` porad jmenuje, uz neplati pro
+    # nikoho, a kontrola deklarace je jedine misto, kde se to da zjistit
+    # driv, nez na to nekdo prijde tim, ze ho aplikace nepusti.
+    zaloz(tmp_path, "hana")
+    assert Access.local(tmp_path, realm=REALM).unknown_principals(
+        [RETIRED]
+    ) == [RETIRED]
 
 
 def test_a_typo_in_a_group_is_reported(tmp_path):

@@ -16,13 +16,26 @@ from pathlib import Path
 #: veci nevyvazuje.
 PUBLIC = "group:public"
 
-#: Kdo je prihlaseny - kdokoli se jmenem.
-USERS = "group:users"
+#: Skupiny, ktere clovek dostava AUTOMATICKY - hola jmena, bez prefixu.
+#: Nikde se neukladaji, pocitaji se pri cteni. Zalozit je jako obycejne
+#: skupiny by znamenalo dve pravdy o temz jmene, takze to `add_group` odmita.
+AUTOMATIC_GROUPS = frozenset({"public"})
 
-#: Vyhrazena jmena skupin - hola, bez prefixu. Kazdy je dostava automaticky
-#: (viz `USERS` a `PUBLIC`), takze zalozit je jako obycejne skupiny znamena
-#: dve pravdy o temz jmene.
-RESERVED_GROUPS = frozenset({"users", "public"})
+#: Jmena, ktera DRIV byla automaticka a uz nejsou. Nikdo je nedostava, ale
+#: zalozit je jako obycejnou skupinu porad nejde.
+#:
+#: `users` znamenalo "kdokoli prihlaseny". Prestalo se pridavat, protoze
+#: clenstvi, ktere nejde spravovat ani videt, je pravo, o kterem spravce
+#: nevi - a v ACL se od skutecne skupiny `user` lisilo jednim pismenem.
+#:
+#: Proc jmeno nepustit pro bezne zalozeni: ACL napsane driv a mysleny jako
+#: "kdokoli prihlaseny" by tise zacalo znamenat "tihle tri lide". Takhle
+#: zustava `group:users` NEZNAME (viz `_principal_exists`) a kontrola
+#: deklarace ho nahlas vypise, misto aby mlcky nesedelo na nikom.
+RETIRED_GROUPS = frozenset({"users"})
+
+#: Co `add_group` odmita zalozit.
+RESERVED_GROUPS = AUTOMATIC_GROUPS | RETIRED_GROUPS
 
 #: Vydavatel ve stitku autentikatoru. Stejna syntaxe jako principal, takze se
 #: clovek v telefonu jmenuje stejne jako v pravech.

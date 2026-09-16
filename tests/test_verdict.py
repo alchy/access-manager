@@ -60,7 +60,7 @@ def test_a_reason_cannot_ride_on_an_ok_verdict():
 def test_an_ok_verdict_without_an_identity_is_refused():
     # "Prosel, ale nevim kdo" neni odpoved, se kterou jde neco delat.
     with pytest.raises(ValueError):
-        Verdict.ok(subject_id=None, principals=["group:users"])
+        Verdict.ok(subject_id=None, principals=["group:ucetni"])
 
 
 def test_retry_after_rides_only_on_throttled():

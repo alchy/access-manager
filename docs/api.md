@@ -59,7 +59,7 @@ POST /v1/authenticate
 { "username": "hana", "credentials": { "totp": "123456" }, "purpose": "login" }
 
 200 { "outcome": "ok", "subject_id": "user:hana",
-      "principals": ["group:public", "group:ucetni", "group:users", "user:hana"],
+      "principals": ["group:public", "group:ucetni", "user:hana"],
       "gen": 41 }
 200 { "outcome": "denied", "gen": 41 }
 200 { "outcome": "need_factor", "required": ["totp"], "gen": 41 }

@@ -612,6 +612,25 @@
     font-size: 0.78rem;
   }
 
+  /* -- vychozi (automaticka) skupina: ukazuje se, ale neni to rozhodnuti --
+     Prerusovany ramecek a tlumena barva rikaji "tohle ti nikdo nedal a nikdo
+     to nevezme". Bez odliseni by vypadala jako prirazene clenstvi, ktere jde
+     odebrat - a spravce by ho marne hledal ve skupinach. */
+  .chip-vychozi {
+    border-style: dashed;
+    opacity: 0.75;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.35rem;
+  }
+  .chip-vychozi .chip-znacka {
+    font-family: var(--sans);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.8;
+  }
+
   /* -- povolene IP rozsahy: chip, ze ktereho jde rovnou odebrat ---------- */
   .rozsahy { display: flex; flex-wrap: wrap; gap: 0.3rem; }
   .chip-x { display: inline-flex; align-items: center; gap: 0.3rem; padding-right: 0.25rem; }

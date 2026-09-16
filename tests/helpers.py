@@ -1,12 +1,14 @@
 """Spolecne ruce testu. Nejsou to testy - jen zakladani stavu.
 
-Konstanty PUBLIC/USERS jsou tu ZNOVU, ne importem z balicku: balicek je
+Konstanty PUBLIC/RETIRED jsou tu ZNOVU, ne importem z balicku: balicek je
 schvalne neexportuje a testy maji drzet jmena PROTOKOLU nezavisle na kodu.
 """
 import json
 
 PUBLIC = "group:public"
-USERS = "group:users"
+#: Driv automaticke, dnes uz se nepridava. Testy ho drzi proto, aby se
+#: overilo, ze se NEobjevuje - ne proto, ze by ho nekdo dostaval.
+RETIRED = "group:users"
 TAJEMSTVI = "JBSWY3DPEHPK3PXP"
 REALM = "example.com"
 

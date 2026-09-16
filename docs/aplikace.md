@@ -41,7 +41,7 @@ if not verdikt:                # pravdivy je JEN outcome "ok"
 
 verdikt.subject_id             # "user:hana"
 verdikt.principals             # frozenset: {"user:hana", "group:ucetni",
-                               #  "group:users", "group:public", ...}
+                               #  "group:public", ...}
 verdikt.gen                    # cislo generace pro invalidaci cache
 ```
 
@@ -76,8 +76,16 @@ Dvě věci, které je třeba vědět předem:
 
 1. **Nedostanete relaci, dostanete verdikt.** Držet člověka přihlášeného je
    práce volající aplikace — restart access-manageru pak nikoho neodhlásí.
-2. **`group:users` a `group:public` jsou vyhrazené** — „kdokoli ověřený“
-   a „kdokoli“; člověk je má vždy a nejdou mu odebrat.
+2. **`group:public` je vyhrazená** — „kdokoli“; člověk ji má vždy a nejde mu
+   odebrat. Je to jediný automatický principál kromě `user:<jméno>`.
+
+   `group:users` („kdokoli ověřený“) bývalo druhé takové jméno. **Už se
+   nepřidává**: členství, které nejde v konzoli vidět ani spravovat, je právo,
+   o kterém správce neví — a v ACL se od skutečné skupiny `user` lišilo jedním
+   písmenem. ACL, které ho pořád jmenuje, neplatí pro nikoho a
+   `POST /v1/principals/check` ho vypíše jako neznámý. Založit ho jako běžnou
+   skupinu nejde: starší ACL psané ve významu „kdokoli ověřený“ by tiše začalo
+   platit jen pro její členy.
 
 ## Adresář („kam patříš?“)
 

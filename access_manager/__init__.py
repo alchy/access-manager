@@ -6,9 +6,10 @@ Ven vedou tri dvirka a kazda jsou pro nekoho jineho:
     from access_manager import Admin        # spravce: zaklada a meni
     from access_manager import reconcile    # provozovatel: sjednocuje podle deklaraci
 
-Uloziste ani jmena vyhrazenych principalu se neexportuji. `group:users`
-a `group:public` uz jsou definovane ve viewBase; dve definice tehoz jmena
-na drate by se jednou rozesly a byla by to ticha chyba v pravech, ne pad.
+Uloziste ani jmena vyhrazenych principalu se neexportuji. `group:public`
+uz je definovane ve viewBase; dve definice tehoz jmena na drate by se jednou
+rozesly a byla by to ticha chyba v pravech, ne pad. (`group:users` bylo do
+teto verze druhe automaticke jmeno; uz se nepridava.)
 """
 from .access import Access
 from .admin import Admin

@@ -206,7 +206,7 @@ POST /v1/authenticate
   "purpose": "login" }
 
 200 { "outcome": "ok", "subject_id": "user:hana",
-      "principals": ["group:public", "group:ucetni", "group:users",
+      "principals": ["group:public", "group:ucetni",
                      "group:zamestnanci", "user:hana"],
       "gen": 41 }
 200 { "outcome": "denied", "gen": 41 }
@@ -296,7 +296,7 @@ mechanismu se chová, jako by nepřišlo.
 ```http
 GET /v1/users/hana
 200 { "exists": true, "subject_id": "user:hana", "enabled": true,
-      "principals": ["group:public", "group:ucetni", "group:users",
+      "principals": ["group:public", "group:ucetni",
                      "group:zamestnanci", "user:hana"] }
 200 { "exists": false }
 ```
@@ -351,7 +351,14 @@ je to ta hranice.
 POST /v1/principals/check
 { "principals": ["group:users", "group:ucetni", "user:hana"] }
 
-200 { "unknown": ["group:ucetni"] }
+200 { "unknown": ["group:ucetni", "group:users"] }
+```
+
+`group:users` je mezi neznámými záměrně: bývalo automatické, dnes se
+nepřidává, a deklarace, která ho pořád jmenuje, neplatí pro nikoho. Vypsat ho
+je jediný způsob, jak se to dozvědět dřív, než někoho aplikace nepustí.
+
+```http
 ```
 
 Dva použití, obě dnes existují a nemají zdroj:

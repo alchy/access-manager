@@ -19,8 +19,15 @@
       <td class="mono">{{ radek.jmeno }}</td>
       <td>{{ stavovy_stitek('stav-' ~ radek.stav, radek.stav_text) }}</td>
       <td>
+        {# Vychozi skupina se ukazuje, ale je odlisena: spravce ji neprideluje
+           a odebrat ji nemuze. Skryt ji znamenalo, ze pravo, ktere clovek ma,
+           nebylo z konzole videt vubec. #}
         {% for skupina in radek.skupiny %}
-        <span class="chip">{{ skupina }}</span>
+        {% if skupina.vychozi %}
+        <span class="chip chip-vychozi" title="{{ t('uzivatele.default_group_hint') }}">{{ skupina.nazev }}<span class="chip-znacka">{{ t('uzivatele.default_group') }}</span></span>
+        {% else %}
+        <span class="chip">{{ skupina.nazev }}</span>
+        {% endif %}
         {% endfor %}
       </td>
       {# Poradi neni libovolne: nejdriv POVERENI (ukaz, vydej, zneplatni),

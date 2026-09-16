@@ -26,6 +26,26 @@ def test_the_listing_shows_a_created_user_and_their_group(prihlaseny_klient, tmp
     assert "ucetni" in telo
 
 
+def test_the_listing_shows_the_default_group_marked_as_default(prihlaseny_klient):
+    # `group:public` ma kazdy, nikdo ho neprideluje a odebrat nejde. Driv se
+    # z vypisu vyhazoval, takze u cloveka bez skupin stala prazdna bunka -
+    # pravo, o kterem se spravce z konzole nedozvedel. Ukazuje se tedy, ale
+    # odlisene, aby ho nikdo nehledal mezi prirazenymi.
+    _pridej(prihlaseny_klient, "tereza")
+    klient, _ = prihlaseny_klient
+    telo = klient.get("/users").get_data(as_text=True)
+    assert "chip-vychozi" in telo
+    assert "public" in telo
+
+
+def test_the_listing_never_shows_the_retired_group(prihlaseny_klient):
+    # `group:users` se nepridava, takze se nema kde vzit ani ve vypisu.
+    _pridej(prihlaseny_klient, "tereza")
+    klient, _ = prihlaseny_klient
+    telo = klient.get("/users").get_data(as_text=True)
+    assert ">users<" not in telo
+
+
 def test_adding_a_user_redirects_to_a_qr_page_with_an_ascii_code(
     prihlaseny_klient, tmp_path,
 ):

@@ -109,12 +109,19 @@ def test_an_existing_group_is_refused(tmp_path):
         admin.add_group("ucetni")
 
 
-@pytest.mark.parametrize("jmeno", ["users", "public"])
-def test_a_reserved_group_cannot_be_created(tmp_path, jmeno):
-    # `group:users` a `group:public` dostava kazdy automaticky. Zalozit je
-    # jako obycejne skupiny znamena dve pravdy o temz jmene.
+def test_an_automatic_group_cannot_be_created(tmp_path):
+    # `group:public` dostava kazdy automaticky. Zalozit ho jako obycejnou
+    # skupinu znamena dve pravdy o temz jmene.
     with pytest.raises(ValueError):
-        Admin.local(tmp_path, realm=REALM).add_group(jmeno)
+        Admin.local(tmp_path, realm=REALM).add_group("public")
+
+
+def test_a_retired_group_cannot_be_created(tmp_path):
+    # `users` uz nikdo nedostava, ale zalozit ho porad nejde: ACL napsane
+    # driv ve vyznamu "kdokoli prihlaseny" by tise zacalo platit jen pro
+    # cleny nove skupiny - zuzeni prav, ktere nikde nezazni.
+    with pytest.raises(ValueError):
+        Admin.local(tmp_path, realm=REALM).add_group("users")
 
 
 # ===========================================================================

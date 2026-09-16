@@ -36,10 +36,11 @@ from pathlib import Path
 
 from .audit import append_event
 from .principals import (
+    AUTOMATIC_GROUPS,
     ISSUER,
     PUBLIC,
     RESERVED_GROUPS,
-    USERS,
+    RETIRED_GROUPS,
     Component,
     Enrolment,
     Group,
@@ -201,7 +202,9 @@ class FileStore:
             name=name,
             subject_id=f"user:{name}",
             enabled=not (directory / "disabled").exists(),
-            principals=frozenset({f"user:{name}", USERS, PUBLIC, *groups}),
+            # `group:public` je jediny automaticky principal. `group:users`
+            # ("kdokoli prihlaseny") se pridavat prestalo - viz RETIRED_GROUPS.
+            principals=frozenset({f"user:{name}", PUBLIC, *groups}),
         )
 
     def users(self) -> list[str]:
@@ -275,7 +278,10 @@ class FileStore:
         return sorted({str(p) for p in names if not self._principal_exists(str(p))})
 
     def _principal_exists(self, principal: str) -> bool:
-        if principal in (USERS, PUBLIC):
+        # Automaticky principal existuje vzdycky, i kdyz ho zadna tabulka nenese.
+        # Vyslouzily (`group:users`) UZ NE: ACL, ktere ho porad jmenuje, ma byt
+        # vypsane jako neznamy principal, ne tise sedet na nikom.
+        if principal in {f"group:{g}" for g in AUTOMATIC_GROUPS}:
             return True
         kind, _, name = principal.partition(":")
         try:
@@ -651,10 +657,17 @@ class FileStore:
     @_zapis
     def add_group(self, name: str) -> None:
         name = check_name(name)
-        if name in RESERVED_GROUPS:
+        if name in AUTOMATIC_GROUPS:
             raise ValueError(
                 f"skupina {name!r} je vyhrazena: clenstvi v ni je automaticke "
                 f"a nejde spravovat"
+            )
+        if name in RETIRED_GROUPS:
+            raise ValueError(
+                f"jmeno {name!r} je vyslouzile: bylo automaticke a uz se "
+                f"nepridava. Zalozit ho jako beznou skupinu nejde - starsi ACL "
+                f"psane ve vyznamu 'kdokoli prihlaseny' by tise zacalo platit "
+                f"jen pro jeji cleny"
             )
         with _locked(self.home):
             table = self._table()

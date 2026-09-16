@@ -47,7 +47,7 @@ def test_ok_returns_sorted_principals_and_gen(prostredi):
     telo = odpoved.get_json()
     assert telo["outcome"] == "ok"
     assert telo["principals"] == [
-        "group:public", "group:ucetni", "group:users", "user:hana",
+        "group:public", "group:ucetni", "user:hana",
     ]
     assert "gen" in telo
 

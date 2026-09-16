@@ -21,7 +21,7 @@ from ..audit import odpovida, read_events, recent_by
 from ..config import ServiceConfig
 from ..files import FileStore
 from ..origin import resolve_origin
-from ..principals import PUBLIC, USERS, check_identity, check_name, check_realm
+from ..principals import AUTOMATIC_GROUPS, check_identity, check_name, check_realm
 from ..realms import realm_root
 from . import pohledy, preklady
 
@@ -413,6 +413,13 @@ def create_console_app(cfg: ServiceConfig):
         """Jeden radek vypisu: stav (aktivni/zakazany/cekajici na parovani/
         bez povereni) a skupinove chipy z plocheho uzaveru principalu.
 
+        Chipy nesou VSECHNY skupiny, ktere clovek ma - vcetne automatickych.
+        Driv se `group:public` (a `group:users`) z vypisu vyhazovaly, takze
+        spravce videl prazdno u cloveka, ktery tri principaly mel: pravo,
+        o kterem se z konzole nedalo dozvedet. Automaticke se proto ukazuji,
+        jen jsou odlisene `vychozi` - aby bylo poznat, ze se neprideluji
+        a odebrat nejdou.
+
         Cteni `totp.secret`/`totp.issued`/`totp.paired` je primo pres
         soubory - jen ke zjisteni stavu parovani, bez zamku (cteni, ne
         zapis; zapis dela vyhradne FileStore).
@@ -426,10 +433,16 @@ def create_console_app(cfg: ServiceConfig):
         - aktivni: zbytek (typicky `totp.paired`).
         """
         clovek = store.user(jmeno)
+        # Vychozi napred, pak zbytek abecedne: automaticke skupiny jsou
+        # kontext ("tohle ma kazdy"), prirazene jsou rozhodnuti spravce.
         skupiny = sorted(
-            principal[len("group:"):]
-            for principal in clovek.principals
-            if principal.startswith("group:") and principal not in (PUBLIC, USERS)
+            (
+                {"nazev": nazev, "vychozi": nazev in AUTOMATIC_GROUPS}
+                for principal in clovek.principals
+                if principal.startswith("group:")
+                for nazev in (principal[len("group:"):],)
+            ),
+            key=lambda s: (not s["vychozi"], s["nazev"]),
         )
         adresar = store.home / f"user-{jmeno}"
         if not clovek.enabled:
