@@ -48,8 +48,7 @@ stroje). Starší verze čte nový `throttle.json` jako prázdný, zámky tím z
     podman tag localhost/access-manager:rollback-20261001 localhost/access-manager:latest
     systemctl restart access-manager-container.service        # jako root
 
-Na `origin` je jen `main`. Sloučené větve jsou tam smazané; jejich lokální kopie v tomto
-repozitáři zůstaly a smějí se smazat také.
+Na `origin` i v tomto repozitáři je jen `main`; sloučené větve jsou smazané.
 
 Git proti `origin` jde jen přes klíč uživatele `tech` spuštěný jako root, potom
 `chown -R access-manager: .git`.
