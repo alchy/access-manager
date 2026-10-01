@@ -98,9 +98,11 @@ Nic z toho není opravené. Řazeno podle závažnosti.
    a neúspěchy se nezapomínají po minutě. U uživatele je nad adresami pomalé počítadlo na
    jméno (20 neúspěchů, zámek nejvýš hodinu). Konzole dává při zámku stejnou hlášku jako při
    špatném kódu. Pravidla jsou v `docs/admin.md`. **Co zbývá:**
-   - **Workbench neposílá `client_origin`** (SOC portál ano). Jeho uživatelé proto zůstávají
-     na pevném okně na jméno: jdou zamknout odkudkoli na minutu a hádání má dál pět pokusů
-     za minutu. Dokud Workbench adresu klienta nepošle, větev pro ně nic nemění.
+   - **Workbench `client_origin` posílá od 1. 10. 2026, 19:42 UTC** (jeho commit `5cd75b6`),
+     SOC portál už dřív. Brána Workbenche bere poslední prvek `X-Forwarded-For`, tedy ten od
+     nginx. Ověřeno v auditu: přihlášení na neexistující jméno nese adresu, ze které
+     požadavek opravdu přišel, a podvržená hlavička se neuplatnila. Bez adresy klienta tak
+     zůstávají jen lokální volání.
    - **Hádání z mnoha adres** brzdí u uživatele jen pomalé počítadlo na jméno, zhruba 500
      pokusů denně (0,15 %). Stejným počítadlem jde uživatele z několika adres zamknout až
      na hodinu. Vyřeší to až další krok: po opakovaných chybách chtít dva kódy po sobě místo
