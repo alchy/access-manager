@@ -1,0 +1,58 @@
+{% extends "audit_base.html" %}
+{% import "_audit_macros.html" as am with context %}
+{% block table %}
+<table class="tabulka audit">
+  <thead>
+    <tr>
+      <th>{{ t('audit.time') }}</th>
+      <th>{{ t('audit.col.app') }}</th>
+      <th>{{ t('audit.col.key') }}</th>
+      <th>{{ t('audit.col.server') }}</th>
+      <th>{{ t('audit.col.request') }}</th>
+      <th>{{ t('audit.result') }}</th>
+    </tr>
+    <tr class="filtr-radek">
+      {{ am.period_filter() }}
+      {{ am.filter_field('aplikace', filters.aplikace) }}
+      {{ am.filter_field('klic', filters.klic) }}
+      {{ am.filter_field('odkud', filters.odkud) }}
+      {{ am.filter_field('pozadavek', filters.pozadavek, t('audit.ph.request')) }}
+      {{ am.filter_field('vysledek', filters.vysledek) }}
+    </tr>
+  </thead>
+  <tbody>
+    {% for entry in entries %}
+      {% if entry.day %}
+        {{ am.day_row(entry.day, 6) }}
+      {% else %}
+        {% set row = entry.row %}
+        <tr class="{{ 'vybrany' if row.id == detail_id else '' }}">
+          {{ am.time_link(row) }}
+          <td class="mono">{{ row.app }}</td>
+          <td class="mono">{{ row.key_id }}</td>
+          <td class="mono">{{ row.origin }}</td>
+          <td>
+            {% if row.method %}<span class="metoda mono">{{ row.method }}</span>{% endif %}<span class="cil">{{ row.path or '—' }}</span>
+            {% if row.subject %}<span class="vedlejsi">·</span> <span class="cil">{{ row.subject }}</span> <span class="vedlejsi">{{ row.purpose }}</span>{% endif %}
+            {% if row.count > 1 %}<span class="nasobek">{{ row.count }}×</span><span class="vedlejsi">{{ t('audit.merged').format(od=row.since) }}</span>{% endif %}
+          </td>
+          {{ am.result(row) }}
+        </tr>
+        {% if row.id == detail_id and detail %}
+          {% set links = [(t('audit.detail.app_all').format(jmeno=row.app),
+                            url_for('_audit_apps', aplikace=row.app, od=date_from, do=date_to))] %}
+          {% if row.subject.startswith('user:') %}
+            {% set name = row.subject[5:] %}
+            {% set links = links + [(t('audit.detail.user_all').format(jmeno=name),
+                                      url_for('_audit_users', uzivatel=name, od=date_from, do=date_to))] %}
+          {% endif %}
+          {{ am.detail_row(detail, 6, links) }}
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+    {% if not entries %}
+    <tr><td colspan="6" class="poznamka">{{ t('spolecne.nothing_found') }}</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,98 @@
+{% extends "layout.html" %}
+{% block content %}
+<h1>{{ t('uzivatele.title') }}</h1>
+{{ help_box('users') }}
+{{ search_bar(url_for('_users_list'), query, shown, total) }}
+
+<table class="tabulka">
+  <thead>
+    <tr>
+      <th>{{ t('uzivatele.subject') }}</th>
+      <th>{{ t('uzivatele.status') }}</th>
+      <th>{{ t('uzivatele.groups') }}</th>
+      <th>{{ t('actions.token') }}</th>
+      <th>{{ t('actions.account') }}</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in users %}
+    <tr>
+      <td class="mono">{{ row.name }}</td>
+      <td>{{ status_badge('stav-' ~ row.state, row.state_text) }}</td>
+      <td>
+        {# Vychozi skupina se ukazuje, ale je odlisena: spravce ji neprideluje
+           a odebrat ji nemuze. Skryt ji znamenalo, ze pravo, ktere clovek ma,
+           nebylo z konzole videt vubec. #}
+        {% for group in row.groups %}
+        {% if group.default %}
+        <span class="chip chip-vychozi" title="{{ t('uzivatele.default_group_hint') }}">{{ group.name }}<span class="chip-znacka">{{ t('uzivatele.default_group') }}</span></span>
+        {% else %}
+        <span class="chip">{{ group.name }}</span>
+        {% endif %}
+        {% endfor %}
+      </td>
+      {# Dva sloupce, ne jedna bunka s rozsypanymi tlacitky: nejdriv POVERENI
+         (ukaz, vydej, zneplatni), pak UCET (zamkni, smaz). Ty dve skupiny
+         delaji ruzne veci - jedna resi, cim se clovek prokazuje, druha
+         jestli tu vubec je - a smi se plest tim min, cim jsou ucinnejsi.
+         Kazda akce ma v mrizce pevne misto a kratky popisek, takze tlacitka
+         stoji ve vsech radcich pod sebou, at je ucet v jakemkoli stavu.
+         Plne zneni (co presne se zneplatni) nese `title` a `aria-label`. #}
+      <td class="actions-cell">
+        <div class="action-grid" data-actions="token">
+          <a href="{{ url_for('_users_qr', name=row.name) }}"
+             title="{{ t('uzivatele.show_token') }}" aria-label="{{ t('uzivatele.show_token') }}">{{ t('actions.show') }}</a>
+          {% if row.state == 'no_credential' %}
+          <form method="post" action="{{ url_for('_users_pair', name=row.name) }}">
+            {{ csrf_field() }}
+            <button type="submit" title="{{ t('uzivatele.issue') }}" aria-label="{{ t('uzivatele.issue') }}">{{ t('actions.issue') }}</button>
+          </form>
+          {% else %}
+          {% set revoke_label = t('uzivatele.revoke_paired') if row.state == 'active' else t('uzivatele.revoke_token') %}
+          <form method="post" action="{{ url_for('_users_revoke', name=row.name) }}">
+            {{ csrf_field() }}
+            <button type="submit" title="{{ revoke_label }}" aria-label="{{ revoke_label }}">{{ t('actions.revoke') }}</button>
+          </form>
+          {% endif %}
+        </div>
+      </td>
+      <td class="actions-cell">
+        <div class="action-grid" data-actions="account">
+          {% if row.state == 'disabled' %}
+          <form method="post" action="{{ url_for('_users_enable', name=row.name) }}">
+            {{ csrf_field() }}
+            <button type="submit" title="{{ t('uzivatele.enable') }}" aria-label="{{ t('uzivatele.enable') }}">{{ t('actions.unlock') }}</button>
+          </form>
+          {% else %}
+          <form method="post" action="{{ url_for('_users_disable', name=row.name) }}">
+            {{ csrf_field() }}
+            <button type="submit" title="{{ t('uzivatele.disable') }}" aria-label="{{ t('uzivatele.disable') }}">{{ t('actions.lock') }}</button>
+          </form>
+          {% endif %}
+          <form method="post" action="{{ url_for('_users_delete', name=row.name) }}">
+            {{ csrf_field() }}
+            <button type="submit" title="{{ t('uzivatele.delete') }}" aria-label="{{ t('uzivatele.delete') }}">{{ t('actions.delete') }}</button>
+          </form>
+        </div>
+      </td>
+    </tr>
+    {{ log_dropdowns(row, 5) }}
+    {% endfor %}
+    {% if not users %}
+    <tr><td colspan="5" class="poznamka">{{ t('spolecne.nothing_found') }}</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+
+<section class="form-panel">
+  <h2>{{ t('uzivatele.add_title') }}</h2>
+  <form method="post" action="{{ url_for('_users_add') }}" class="form-panel-body">
+    {{ csrf_field() }}
+    <label class="field">
+      <span>{{ t('uzivatele.subject') }}</span>
+      <input type="text" name="jmeno" autocomplete="off" required>
+    </label>
+    <button type="submit" class="odeslat">{{ t('uzivatele.add_title') }}</button>
+  </form>
+</section>
+{% endblock %}

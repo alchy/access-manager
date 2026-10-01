@@ -2,19 +2,19 @@
 {% block title %}{{ t('aplikace.key_once') }}{% endblock %}
 {# Stranka nese klic PRAVE JEDNOU - neni ji kam znovu vyrenderovat, takze
    tu neni ani prepinac jazyka (prepnuti by klic proste ztratilo). #}
-{% block prepinac_jazyka %}{% endblock %}
+{% block language_switch %}{% endblock %}
 {% block content %}
 <h1>{{ t('aplikace.key_once') }}</h1>
 <p class="poznamka">{{ t('aplikace.key_note') }}</p>
 
-<p>{{ t('aplikace.name') }}: <span class="mono">{{ jmeno }}</span></p>
+<p>{{ t('aplikace.name') }}: <span class="mono">{{ name }}</span></p>
 
 <p>{{ t('aplikace.key') }}</p>
-<p class="mono klic-hodnota" id="klic-hodnota">{{ klic }}</p>
+<p class="mono klic-hodnota" id="klic-hodnota">{{ key }}</p>
 <button type="button"
         onclick="navigator.clipboard.writeText(document.getElementById('klic-hodnota').textContent.trim())">
   {{ t('aplikace.copy') }}
 </button>
 
-<p><a href="{{ url_for('_aplikace_seznam') }}">{{ t('spolecne.back') }}</a></p>
+<p><a href="{{ url_for('_apps_list') }}">{{ t('spolecne.back') }}</a></p>
 {% endblock %}

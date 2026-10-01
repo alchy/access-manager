@@ -316,8 +316,9 @@ i v nativním provozu na stroji nastaveném do CEST. Přechod do kontejneru tedy
 v auditu nezpůsobí žádnou nespojitost a `audit_retention_days` se počítá
 pořád stejně.
 
-Zóna se dá přesto nastavit — ovlivní hodiny uvnitř kontejneru a cokoli, co
-by se v budoucnu dívalo na místní čas:
+Zóna se dá přesto nastavit — ovlivní jen hodiny uvnitř kontejneru (`date`
+v `podman exec`). Konzole na ni **nehledí**: každý čas ukazuje v UTC
+a s označením `UTC`, dny v přehledu auditu jsou dny v UTC:
 
 ```
 AM_TZ=Europe/Prague        # v /etc/sysconfig/access-manager-container

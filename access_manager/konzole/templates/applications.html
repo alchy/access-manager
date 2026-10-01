@@ -1,0 +1,119 @@
+{% extends "layout.html" %}
+{% block title %}{{ t('aplikace.title') }}{% endblock %}
+{% block content %}
+<h1>{{ t('aplikace.title') }}</h1>
+{{ help_box('apps') }}
+
+{# Uprava patri tam, kde ta vec je - tedy do RADKU aplikace. Drive se rozsah
+   pridaval formularem na konci stranky s vyberem cile ze seznamu, zatimco
+   odebiral se krizkem v radku: dve poloviny teze upravy na dvou mistech.
+   Registrace zustava dole, protoze zaklada neco noveho. #}
+<table class="tabulka">
+  <thead>
+    <tr>
+      <th>{{ t('aplikace.name') }}</th>
+      <th>{{ t('aplikace.key') }}</th>
+      <th>{{ t('aplikace.origins') }}</th>
+      <th>{{ t('aplikace.detail') }}</th>
+      <th>{{ t('spolecne.actions') }}</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in apps %}
+    <tr>
+      <td class="mono">{{ row.name }}</td>
+      <td class="mono">{{ row.key_id }} &middot; {{ row.fingerprint }}</td>
+
+      <td>
+        {% if row.origins %}
+        {# Odebrani jde formularem, ne odkazem: je to zapis. Rozsah cestuje ve
+           skrytem poli, protoze CIDR obsahuje lomitko a v ceste by se rozpadl. #}
+        <div class="rozsahy">
+          {% for cidr in row.origins %}
+          <span class="chip chip-x">{{ cidr }}
+            <form method="post"
+                  action="{{ url_for('_apps_range_remove', name=row.name) }}">
+              {{ csrf_field() }}
+              <input type="hidden" name="rozsah" value="{{ cidr }}">
+              <button type="submit" title="{{ t('aplikace.range_remove') }}"
+                      aria-label="{{ t('aplikace.range_remove') }}: {{ cidr }}">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+              </button>
+            </form>
+          </span>
+          {% endfor %}
+        </div>
+        {% else %}
+        {{ status_badge('stav-no_credential', t('aplikace.range_none')) }}
+        {% endif %}
+        <form method="post" class="pridat-rozsah"
+              action="{{ url_for('_apps_range_add', name=row.name) }}">
+          {{ csrf_field() }}
+          <input type="text" name="rozsah" autocomplete="off" required
+                 placeholder="10.42.0.0/16"
+                 aria-label="{{ t('aplikace.range_add') }}: {{ row.name }}">
+          <button type="submit">{{ t('aplikace.range_add') }}</button>
+        </form>
+      </td>
+
+      <td>
+        {# Cilovy stav je ve skrytem poli, ne "obrat to": dva soubezne
+           otevrene vypisy by se jinak prehazovaly navzajem. #}
+        <form method="post" action="{{ url_for('_apps_detail', name=row.name) }}">
+          {{ csrf_field() }}
+          {% if row.detail %}
+          {{ status_badge('vysledek-write', t('aplikace.detail_on')) }}
+          <input type="hidden" name="detail" value="off">
+          <button type="submit">{{ t('aplikace.detail_turn_off') }}</button>
+          {% else %}
+          <span class="chip">{{ t('aplikace.detail_off') }}</span>
+          <input type="hidden" name="detail" value="on">
+          <button type="submit">{{ t('aplikace.detail_turn_on') }}</button>
+          {% endif %}
+        </form>
+      </td>
+
+      <td>
+        <div class="akce">
+          <form method="post" action="{{ url_for('_apps_revoke', name=row.name) }}">
+            {{ csrf_field() }}
+            <button type="submit">{{ t('aplikace.revoke') }}</button>
+          </form>
+        </div>
+      </td>
+    </tr>
+    {{ log_dropdowns(row, 5, heading='aplikace.usage', column='aplikace.request',
+                   empty_text='aplikace.no_usage', pairing=False) }}
+    {% endfor %}
+    {% if not apps %}
+    <tr><td colspan="5" class="poznamka">{{ t('spolecne.nothing_found') }}</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+
+{# Jmeno, volba a tlacitko v jedne radce pres celou sirku; co je jen
+   vysvetleni (klic se ukaze jednou, tvary rozsahu), stoji v pate panelu. #}
+<section class="form-panel">
+  <h2>{{ t('aplikace.step_add') }}</h2>
+  <form method="post" action="{{ url_for('_apps_add') }}" class="form-panel-body">
+    {{ csrf_field() }}
+    <label class="field">
+      <span>{{ t('aplikace.name') }}</span>
+      <input type="text" name="jmeno" autocomplete="off" required
+             placeholder="app:mzdy">
+    </label>
+    <label class="volba">
+      <input type="checkbox" name="detail" value="on">
+      <span>
+        {{ t('aplikace.detail') }}
+        <span class="poznamka">{{ t('aplikace.detail_hint') }}</span>
+      </span>
+    </label>
+    <button type="submit" class="odeslat">{{ t('aplikace.step_add') }}</button>
+  </form>
+  <p class="form-panel-note">
+    <span>{{ t('aplikace.step_add_hint') }}</span>
+    <span>{{ t('aplikace.range_forms') }}</span>
+  </p>
+</section>
+{% endblock %}

@@ -82,7 +82,9 @@ def test_each_filter_sits_under_the_column_it_filters(prihlaseny_klient):
 
     zahlavi = re.findall(r"<th>(.*?)</th>", telo, flags=re.S)
     zahlavi = [z.strip() for z in zahlavi]
-    assert zahlavi == ["Čas", "Událost", "Kdo", "Odkud", "Aplikace", "Výsledek"]
+    assert zahlavi == [
+        "Čas (UTC)", "Událost", "Kdo", "Odkud", "Aplikace", "Výsledek",
+    ]
 
     # Sloupec "Cas" nese dve pole (od-do), ostatni po jednom.
     assert _filtracni_pole(telo) == [

@@ -30,7 +30,8 @@ def test_the_listing_shows_a_created_group_and_its_member_count(
 def test_adding_a_group_redirects_to_its_detail(prihlaseny_klient):
     odpoved = _pridej_skupinu(prihlaseny_klient, "ucetni")
     assert odpoved.status_code == 302
-    assert odpoved.headers["Location"].endswith("/groups?group=ucetni")
+    # Kotva vraci stranku k detailu skupiny, ne na jeji zacatek.
+    assert odpoved.headers["Location"].endswith("/groups?group=ucetni#group-detail")
 
 
 def test_the_detail_shows_direct_members_and_includes(prihlaseny_klient, tmp_path):
@@ -62,7 +63,7 @@ def test_a_missing_or_malformed_group_query_shows_the_listing_without_a_crash(
     # Detailova sekce (nazev skupiny, cleny, zretezeni) se vubec
     # nerenderuje - zustava jen holy vypis.
     assert "<h3" not in telo
-    assert '<h2 class="mono">' not in telo
+    assert 'id="group-detail"' not in telo
 
 
 def test_membership_added_via_the_console_shows_up_in_the_users_closure(

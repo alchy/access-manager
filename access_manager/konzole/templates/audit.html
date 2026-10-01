@@ -1,8 +1,8 @@
-{% extends "audit_kostra.html" %}
+{% extends "audit_base.html" %}
 {# Vse: puvodni tabulka pro vysetrovani napric pohledy. Kostra (zalozky,
    obnoveni, obdobi, formular filtru) je spolecna se Spravci, Uzivateli
    a Aplikacemi. #}
-{% block tabulka %}
+{% block table %}
 <table class="tabulka log">
   <thead>
     <tr>
@@ -16,40 +16,40 @@
     <tr class="filtr-radek">
       <td>
         <label><span>{{ t('audit.from') }}</span>
-          <input type="date" name="od" form="filtr" value="{{ od }}"></label>
+          <input type="date" name="od" form="filtr" value="{{ date_from }}"></label>
         <label><span>{{ t('audit.to') }}</span>
-          <input type="date" name="do" form="filtr" value="{{ do }}"></label>
+          <input type="date" name="do" form="filtr" value="{{ date_to }}"></label>
       </td>
       <td><input type="text" name="kind" form="filtr" value="{{ kind }}"
                  autocomplete="off"></td>
-      <td><input type="text" name="kdo" form="filtr" value="{{ kdo }}"
+      <td><input type="text" name="kdo" form="filtr" value="{{ who }}"
                  autocomplete="off"></td>
-      <td><input type="text" name="odkud" form="filtr" value="{{ odkud }}"
+      <td><input type="text" name="odkud" form="filtr" value="{{ origin }}"
                  autocomplete="off"></td>
-      <td><input type="text" name="aplikace" form="filtr" value="{{ aplikace }}"
+      <td><input type="text" name="aplikace" form="filtr" value="{{ component }}"
                  autocomplete="off"></td>
       <td><input type="text" name="outcome" form="filtr" value="{{ outcome }}"
                  autocomplete="off"></td>
     </tr>
   </thead>
   <tbody>
-    {% for radek in udalosti %}
+    {% for row in events %}
     <tr>
-      <td class="mono">{{ radek.cas }}</td>
-      <td>{{ radek.udalost }}</td>
-      <td class="mono">{{ radek.kdo }}</td>
-      <td class="mono">{{ radek.odkud }}</td>
+      <td class="mono">{{ row.time }}</td>
+      <td>{{ row.event }}</td>
+      <td class="mono">{{ row.who }}</td>
+      <td class="mono">{{ row.origin }}</td>
       <td class="mono">
-        {{ radek.aplikace }}
-        {% if radek.key_id %}<span class="poznamka">({{ radek.key_id }})</span>{% endif %}
+        {{ row.app }}
+        {% if row.key_id %}<span class="poznamka">({{ row.key_id }})</span>{% endif %}
       </td>
       <td>
-        {{ stavovy_stitek(radek.vysledek_trida, radek.vysledek_text) }}
-        {% if radek.reason %}<span class="poznamka">({{ radek.reason }})</span>{% endif %}
+        {{ status_badge(row.result_class, row.result_text) }}
+        {% if row.reason %}<span class="poznamka">({{ row.reason }})</span>{% endif %}
       </td>
     </tr>
     {% endfor %}
-    {% if not udalosti %}
+    {% if not events %}
     <tr><td colspan="6" class="poznamka">{{ t('spolecne.nothing_found') }}</td></tr>
     {% endif %}
   </tbody>

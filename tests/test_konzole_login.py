@@ -218,7 +218,7 @@ def test_browser_engine_detection_prefers_the_specific_marker():
     Poradi zkousenych znacek proto neni libovolne - obecnejsi znacka smi
     prijit az po specificke, jinak se Edge oznaci za Chrome.
     """
-    from access_manager.konzole.app import _prohlizec
+    from access_manager.konzole.app import _browser as _prohlizec
 
     edge = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0")

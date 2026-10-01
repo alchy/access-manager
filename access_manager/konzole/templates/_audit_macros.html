@@ -1,0 +1,66 @@
+{% from "layout.html" import status_badge with context %}
+{# Casti tabulek auditnich pohledu. Import `with context` - makra potrebuji
+   `t`, `link` a `detail_id` z kontextu stranky. #}
+
+{# Obdobi v prvnim sloupci filtru - dve data pod sebou, stejne jako Vse. #}
+{% macro period_filter() %}
+<td>
+  <label><span>{{ t('audit.from') }}</span>
+    <input type="date" name="od" form="filtr" value="{{ date_from }}"></label>
+  <label><span>{{ t('audit.to') }}</span>
+    <input type="date" name="do" form="filtr" value="{{ date_to }}"></label>
+</td>
+{% endmacro %}
+
+{% macro filter_field(name, value, hint='') %}
+<td><input type="text" name="{{ name }}" form="filtr" value="{{ value }}"
+           autocomplete="off"{% if hint %} placeholder="{{ hint }}"{% endif %}></td>
+{% endmacro %}
+
+{# Cas (v UTC, s oznacenim) je odkaz na detail radku; u otevreneho zase na
+   zavreni. GET, bez JS. #}
+{% macro time_link(row) %}
+{% set is_open = row.id == detail_id %}
+<td class="cas"><a href="{{ link(detail=None if is_open else row.id) }}"
+   class="radek-odkaz{{ ' otevreny' if is_open else '' }}"
+   aria-expanded="{{ 'true' if is_open else 'false' }}">{{ row.time }}</a></td>
+{% endmacro %}
+
+{% macro result(row) %}
+<td>
+  {{ status_badge(row.result_class, row.result_text) }}
+  {% if row.reason %}<span class="duvod">{{ row.reason }}</span>{% endif %}
+</td>
+{% endmacro %}
+
+{% macro day_row(text, columns) %}
+<tr class="den"><td colspan="{{ columns }}">{{ text }}</td></tr>
+{% endmacro %}
+
+{# Detail zaznamu: vsechna pole, presny cas v UTC, surovy radek a skoky do
+   souvisejicich pohledu. `links` je seznam (text, url). #}
+{% macro detail_row(detail, columns, links) %}
+<tr class="detail"><td colspan="{{ columns }}">
+  <div class="detail-telo">
+    <div>
+      <h3>{{ t('audit.detail.record') }}</h3>
+      {% if detail.count > 1 %}
+      <p class="poznamka">{{ t('audit.detail.merged').format(n=detail.count, od=detail.since) }}</p>
+      {% endif %}
+      <dl class="pole-detailu">
+        {% for key, caption, value in detail.fields %}
+        <dt>{{ caption }}</dt><dd class="mono">{{ value }}</dd>
+        {% endfor %}
+      </dl>
+    </div>
+    <div>
+      <h3>{{ t('audit.detail.raw') }}</h3>
+      <pre class="surovy">{{ detail.raw }}</pre>
+      <div class="odkazy">
+        {% for text, url in links %}<a class="tlacitko" href="{{ url }}">{{ text }}</a>{% endfor %}
+        <a class="tlacitko" href="{{ link(detail=None) }}">{{ t('audit.detail.close') }}</a>
+      </div>
+    </div>
+  </div>
+</td></tr>
+{% endmacro %}

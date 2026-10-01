@@ -3,18 +3,18 @@
 {% block content %}
 <h1>{{ t('uzivatele.show_token') }}</h1>
 <p>
-  <span class="mono">{{ jmeno }}</span>
+  <span class="mono">{{ name }}</span>
   &middot;
-  <span class="mono">{{ stitek }}</span>
+  <span class="mono">{{ label }}</span>
 </p>
 
 {# Poradi vetvi neni libovolne: vyprsele zavedeni ma na disku `totp.txt`
    i `totp.uri` porad, takze by jinak spadlo do prvni vetve a ukazalo QR
    i tajemstvi k necemu, co uz `authenticate` odmita. #}
-{% if vyprselo %}
+{% if expired %}
 <p>{{ t('uzivatele.qr_expired') }}</p>
-{% elif obrazec %}
-<pre class="qr">{{ obrazec }}</pre>
+{% elif qr_art %}
+<pre class="qr">{{ qr_art }}</pre>
 <p class="poznamka">{{ t('uzivatele.qr_note') }}</p>
 
 {# Tyz obsah jako QR vyse, jen k opsani. Ma i tutez zivotnost - `totp.uri`
@@ -38,11 +38,11 @@
 </button>
 {% endif %}
 
-{% elif sparovano %}
+{% elif paired %}
 <p>{{ t('spravci.paired') }}</p>
 {% else %}
 <p>{{ t('uzivatele.no_credential') }}</p>
 {% endif %}
 
-<p><a href="{{ zpet }}">{{ t('spolecne.back') }}</a></p>
+<p><a href="{{ back_url }}">{{ t('spolecne.back') }}</a></p>
 {% endblock %}

@@ -5,15 +5,15 @@
     i bez JavaScriptu (tabem mezi policky); skript jen doplni posun kurzoru,
     mazani zpet a vlozeni celeho kodu ze schranky. Server slozi cislice
     dohromady v _kod_z_formulare, ktere dal prijima i jedno cele pole. -#}
-{% macro kodova_policka(pole, popisek) %}
+{% macro code_boxes(field, caption) %}
 <fieldset class="code-fieldset">
-  <legend>{{ popisek }}</legend>
-  <div class="code-group" data-code="{{ pole }}">
-    {% for i in range(1, delka_kodu + 1) %}
-    <input type="text" name="{{ pole }}_{{ i }}" class="code-box mono"
+  <legend>{{ caption }}</legend>
+  <div class="code-group" data-code="{{ field }}">
+    {% for i in range(1, code_length + 1) %}
+    <input type="text" name="{{ field }}_{{ i }}" class="code-box mono"
            inputmode="numeric" pattern="[0-9]" maxlength="1"
-           aria-label="{{ t('login.digit_aria').format(kod=popisek, poradi=i) }}"
-           autocomplete="{{ 'one-time-code' if pole == 'kod1' and i == 1 else 'off' }}"
+           aria-label="{{ t('login.digit_aria').format(kod=caption, poradi=i) }}"
+           autocomplete="{{ 'one-time-code' if field == 'kod1' and i == 1 else 'off' }}"
            required>
     {% endfor %}
   </div>
@@ -27,10 +27,10 @@
     <span>Autumn Partials</span>
   </div>
   <h1>{{ t('login.title') }}</h1>
-  {% if chyba %}
-  <p class="chyba" role="alert">{{ chyba }}</p>
+  {% if error %}
+  <p class="chyba" role="alert">{{ error }}</p>
   {% endif %}
-  <form method="post" action="{{ url_for('_prihlasovaci_stranka') }}" class="pole">
+  <form method="post" action="{{ url_for('_login_page') }}" class="pole">
     <label>
       <span>{{ t('login.realm') }}</span>
       <input type="text" name="realm" autocomplete="off" required>
@@ -39,14 +39,14 @@
       <span>{{ t('login.name') }}</span>
       <input type="text" name="jmeno" autocomplete="off" required>
     </label>
-    {{ kodova_policka('kod1', t('login.code_first')) }}
-    {{ kodova_policka('kod2', t('login.code_second')) }}
+    {{ code_boxes('kod1', t('login.code_first')) }}
+    {{ code_boxes('kod2', t('login.code_second')) }}
     <button type="submit" class="odeslat">{{ t('login.submit') }}</button>
   </form>
-  {%- if klient_ip %}
+  {%- if client_ip %}
   <p class="pristup">
-    {{ t('login.access_from').format(ip=klient_ip) }}
-    {%- if klient_prohlizec %} &middot; {{ klient_prohlizec }}{% endif %}
+    {{ t('login.access_from').format(ip=client_ip) }}
+    {%- if client_browser %} &middot; {{ client_browser }}{% endif %}
   </p>
   {%- endif %}
 </div>

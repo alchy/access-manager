@@ -10,7 +10,7 @@ import pytest
 from helpers import koren
 
 from access_manager.audit import append_event
-from access_manager.konzole import pohledy
+from access_manager.konzole import audit_views
 
 
 def _ted(posun_s=0):
@@ -42,21 +42,21 @@ def test_each_kind_of_event_lands_in_the_view_of_who_acted():
     pozadavek = {"kind": "access", "component": "wb", "path": "/v1/whoami"}
     zamitnuty = {"kind": "origin_denied", "component": "wb"}
 
-    assert pohledy.pocty([prihlaseni_spravce, zapis, relace, overeni_pres_api,
-                          overeni_lokalne, pozadavek, zamitnuty]) == {
+    assert audit_views.counts([prihlaseni_spravce, zapis, relace, overeni_pres_api,
+                              overeni_lokalne, pozadavek, zamitnuty]) == {
         "spravci": 3, "uzivatele": 2, "aplikace": 3, "vse": 7,
     }
     # Overeni pres API je v OBOU pohledech - na disku je jednou.
-    assert pohledy.je_uzivatel(overeni_pres_api)
-    assert pohledy.je_aplikace(overeni_pres_api)
-    assert not pohledy.je_aplikace(overeni_lokalne)
+    assert audit_views.is_user(overeni_pres_api)
+    assert audit_views.is_app(overeni_pres_api)
+    assert not audit_views.is_app(overeni_lokalne)
 
 
 # == spravci: relace ======================================================
 
 
 def _spravci(udalosti, **filtry):
-    return pohledy.skupiny_spravcu(udalosti, filtry, _t)
+    return audit_views.admin_groups(udalosti, filtry, _t)
 
 
 def test_changes_are_grouped_under_the_session_they_were_made_in():
@@ -78,16 +78,16 @@ def test_changes_are_grouped_under_the_session_they_were_made_in():
          "op": "add_admin", "name": "marie", "outcome": "ok"},
     ]
     skupiny = _spravci(udalosti)
-    assert [s["druh"] for s in skupiny] == ["mimo", "relace", "neuspech"]
+    assert [s["kind"] for s in skupiny] == ["mimo", "relace", "neuspech"]
     relace = skupiny[1]
-    assert relace["zmen"] == 2
-    assert relace["konec"]["op"] == "logout"
+    assert relace["changes"] == 2
+    assert relace["end"]["op"] == "logout"
     # Nejnovejsi radek skupiny prvni. `_t` nic nepreklada, takze operace bez
     # prekladu spadne na surove jmeno - stejne jako neznama operace v konzoli.
-    assert [r["co"] for r in relace["radky"]][:2] == [
+    assert [r["action"] for r in relace["rows"]][:2] == [
         "pohled.op.session.logout", "add_origin",
     ]
-    assert relace["radky"][1]["cil"] == "soc  193.0.231.0/24"
+    assert relace["rows"][1]["target"] == "soc  193.0.231.0/24"
 
 
 def test_a_change_without_a_sign_in_in_the_period_gets_its_own_session():
@@ -95,7 +95,7 @@ def test_a_change_without_a_sign_in_in_the_period_gets_its_own_session():
         {"t": "2026-09-10T13:00:46+00:00", "kind": "write", "actor": "admin:j",
          "op": "register_component", "name": "socupload", "key_id": "k1"},
     ])
-    assert [s["druh"] for s in skupiny] == ["bez_zacatku"]
+    assert [s["kind"] for s in skupiny] == ["bez_zacatku"]
 
 
 def test_filtering_keeps_the_session_header():
@@ -109,8 +109,8 @@ def test_filtering_keeps_the_session_header():
     ]
     skupiny = _spravci(udalosti, co="add_group")
     assert len(skupiny) == 1
-    assert skupiny[0]["zacatek"]["origin"] == "193.0.231.250"   # hlavicka zustava
-    assert [r["cil"] for r in skupiny[0]["radky"]] == ["ucetni"]
+    assert skupiny[0]["start"]["origin"] == "193.0.231.250"   # hlavicka zustava
+    assert [r["target"] for r in skupiny[0]["rows"]] == ["ucetni"]
 
 
 def test_an_old_range_write_does_not_pass_the_range_off_as_the_admins_address():
@@ -118,19 +118,19 @@ def test_an_old_range_write_does_not_pass_the_range_off_as_the_admins_address():
     stary = {"kind": "write", "actor": "admin:j", "op": "add_origin",
              "name": "soc", "origin": "127.0.0.1/32"}
     novy = {**stary, "origin": "193.0.231.250", "range": "127.0.0.1/32"}
-    assert pohledy.odkud_aktora(stary) == "—"
-    assert pohledy.co_zmenil(stary, _t)[1] == "soc  127.0.0.1/32"
-    assert pohledy.odkud_aktora(novy) == "193.0.231.250"
-    assert pohledy.co_zmenil(novy, _t)[1] == "soc  127.0.0.1/32"
+    assert audit_views.actor_origin(stary) == "—"
+    assert audit_views.what_changed(stary, _t)[1] == "soc  127.0.0.1/32"
+    assert audit_views.actor_origin(novy) == "193.0.231.250"
+    assert audit_views.what_changed(novy, _t)[1] == "soc  127.0.0.1/32"
 
 
 def test_a_refused_write_reads_as_refused():
-    trida, text, _ = pohledy.vysledek(
+    trida, text, _ = audit_views.result_badge(
         {"kind": "write", "op": "remove_admin", "outcome": "denied"}, _t)
     assert (trida, text) == ("vysledek-denied", "pohled.vysledek.write_denied")
     # Starsi zapis bez `outcome` probehl.
     stary = {"kind": "write", "op": "add_user"}
-    assert pohledy.vysledek(stary, _t)[0] == "vysledek-write"
+    assert audit_views.result_badge(stary, _t)[0] == "vysledek-write"
 
 
 # == aplikace: slucovani ==================================================
@@ -153,13 +153,13 @@ def test_consecutive_identical_requests_are_merged_into_one_row():
         _pozadavek("2026-09-13T12:03:01+00:00"),
         _pozadavek("2026-09-13T12:03:05+00:00", status=404, cesta="/v1/nic"),
     ]
-    radky = pohledy.radky_aplikaci(udalosti, {}, _t)
-    assert [(r["cesta"], r["pocet"]) for r in radky] == [
+    radky = audit_views.app_rows(udalosti, {}, _t)
+    assert [(r["path"], r["count"]) for r in radky] == [
         ("/v1/nic", 1), ("/v1/generation", 1), ("/v1/authenticate", 1),
         ("/v1/generation", 3),
     ]
-    assert radky[-1]["od"] == pohledy.hodiny(udalosti[0])
-    assert radky[2]["subjekt"] == "user:hana"
+    assert radky[-1]["since"] == audit_views.utc_clock(udalosti[0])
+    assert radky[2]["subject"] == "user:hana"
 
 
 def test_identical_requests_minutes_apart_stay_separate_rows():
@@ -171,8 +171,8 @@ def test_identical_requests_minutes_apart_stay_separate_rows():
         _pozadavek("2026-09-14T11:08:10+00:00", cesta="/v1/whoami"),
         _pozadavek("2026-09-14T11:09:23+00:00", cesta="/v1/whoami"),
     ]
-    radky = pohledy.radky_aplikaci(udalosti, {}, _t)
-    assert [r["pocet"] for r in radky] == [1, 1, 1, 1]
+    radky = audit_views.app_rows(udalosti, {}, _t)
+    assert [r["count"] for r in radky] == [1, 1, 1, 1]
 
 
 def test_a_gap_in_polling_splits_the_merged_row():
@@ -184,8 +184,8 @@ def test_a_gap_in_polling_splits_the_merged_row():
         _pozadavek("2026-09-13T12:31:01+00:00"),
         _pozadavek("2026-09-13T12:32:01+00:00"),
     ]
-    radky = pohledy.radky_aplikaci(udalosti, {}, _t)
-    assert [r["pocet"] for r in radky] == [3, 3]
+    radky = audit_views.app_rows(udalosti, {}, _t)
+    assert [r["count"] for r in radky] == [3, 3]
 
 
 def test_two_verifications_a_minute_apart_are_two_rows():
@@ -194,18 +194,19 @@ def test_two_verifications_a_minute_apart_are_two_rows():
         _pozadavek("2026-09-14T11:08:10+00:00", cesta="/v1/whoami"),
         _pozadavek("2026-09-14T11:09:23+00:00", cesta="/v1/whoami"),
     ]
-    radky = pohledy.radky_aplikaci(udalosti, {}, _t)
-    assert [(r["cas"], r["pocet"]) for r in radky] == [
-        (pohledy.hodiny(udalosti[1]), 1), (pohledy.hodiny(udalosti[0]), 1),
+    radky = audit_views.app_rows(udalosti, {}, _t)
+    assert [(r["time"], r["count"]) for r in radky] == [
+        (audit_views.utc_clock(udalosti[1]), 1),
+        (audit_views.utc_clock(udalosti[0]), 1),
     ]
 
 
 def test_authentications_and_denied_ranges_are_never_merged():
     denied = {"t": "2026-09-13T12:00:00+00:00", "kind": "origin_denied",
               "component": "wb", "key_id": "k4", "origin": "8.8.8.8"}
-    radky = pohledy.radky_aplikaci([denied, dict(denied)], {}, _t)
-    assert [r["pocet"] for r in radky] == [1, 1]
-    assert radky[0]["vysledek_text"] == "403"
+    radky = audit_views.app_rows([denied, dict(denied)], {}, _t)
+    assert [r["count"] for r in radky] == [1, 1]
+    assert radky[0]["result_text"] == "403"
 
 
 def test_the_request_filter_matches_path_and_user():
@@ -213,15 +214,15 @@ def test_the_request_filter_matches_path_and_user():
         _pozadavek("2026-09-13T12:00:01+00:00", cesta="/v1/users/hana"),
         _pozadavek("2026-09-13T12:01:01+00:00", cesta="/v1/whoami"),
     ]
-    radky = pohledy.radky_aplikaci(udalosti, {"pozadavek": "hana"}, _t)
-    assert [r["cesta"] for r in radky] == ["/v1/users/hana"]
+    radky = audit_views.app_rows(udalosti, {"pozadavek": "hana"}, _t)
+    assert [r["path"] for r in radky] == ["/v1/users/hana"]
 
 
 # == uzivatele =============================================================
 
 
 def test_a_user_row_carries_client_and_server_apart():
-    radky = pohledy.radky_uzivatelu([
+    radky = audit_views.user_rows([
         {"t": "2026-09-13T12:13:28+00:00", "kind": "authenticate",
          "purpose": "unlock:bf9c11abc031",
          "subject": "user:jindrich", "component": "workbench", "key_id": "k4",
@@ -229,11 +230,11 @@ def test_a_user_row_carries_client_and_server_apart():
          "outcome": "denied", "reason": "bad_code"},
     ], {}, _t)
     r = radky[0]
-    assert (r["uzivatel"], r["klient"], r["server"]) == (
+    assert (r["user"], r["client"], r["server"]) == (
         "jindrich", "193.0.231.250", "2a01:4f8:1c1b:8c66::1",
     )
-    assert (r["ucel"], r["ucel_doplnek"]) == ("pohled.ucel.unlock", "bf9c11ab…")
-    assert (r["vysledek_text"], r["reason"]) == ("pohled.vysledek.denied", "bad_code")
+    assert (r["purpose"], r["purpose_extra"]) == ("pohled.ucel.unlock", "bf9c11ab…")
+    assert (r["result_text"], r["reason"]) == ("pohled.vysledek.denied", "bad_code")
 
 
 def test_days_are_labelled_today_and_yesterday():
@@ -244,10 +245,50 @@ def test_days_are_labelled_today_and_yesterday():
                "pohled.den.6": "neděle", "pohled.den.5": "sobota",
                "pohled.mesic.9": "září"}
     t = katalog.get
-    assert pohledy.popis_dne(dnes, dnes, t) == "Dnes · pondělí 14. září 2026"
-    vcera = pohledy.popis_dne(date(2026, 9, 13), dnes, t)
-    assert vcera == "Včera · neděle 13. září 2026"
-    assert pohledy.popis_dne(date(2026, 9, 12), dnes, t) == "Sobota 12. září 2026"
+    # Hlavicka dne rika, ze jde o den v UTC.
+    dnesni = audit_views.day_label(dnes, dnes, t)
+    assert dnesni == "Dnes · pondělí 14. září 2026 (UTC)"
+    vcera = audit_views.day_label(date(2026, 9, 13), dnes, t)
+    assert vcera == "Včera · neděle 13. září 2026 (UTC)"
+    starsi = audit_views.day_label(date(2026, 9, 12), dnes, t)
+    assert starsi == "Sobota 12. září 2026 (UTC)"
+
+
+# == cas: vzdy UTC a s oznacenim ==========================================
+
+
+@pytest.fixture
+def prague_zone(monkeypatch):
+    """Proces v pasmu Europe/Prague - tak bezi kontejner s `AM_TZ`."""
+    import time
+    monkeypatch.setenv("TZ", "Europe/Prague")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+def test_times_are_shown_in_utc_and_say_so(prague_zone):
+    # 22:30 UTC je v Praze uz pul jedne rano DALSIHO dne. Konzole ukaze cas
+    # i den v UTC - tyz den, pod kterym radek lezi v auditni stope.
+    udalost = {"t": "2026-09-30T22:30:05+00:00", "kind": "access"}
+    assert audit_views.utc_clock(udalost) == "22:30:05 UTC"
+    assert audit_views.utc_stamp(udalost) == "2026-09-30 22:30:05 UTC"
+    assert audit_views.utc_day(udalost).isoformat() == "2026-09-30"
+
+
+def test_a_stamp_in_another_zone_is_converted_to_utc(prague_zone):
+    udalost = {"t": "2026-10-01T00:30:05+02:00"}
+    assert audit_views.utc_stamp(udalost) == "2026-09-30 22:30:05 UTC"
+    # Razitko bez pasma se bere jako UTC - v auditu nic jineho byt nema.
+    assert audit_views.utc_clock({"t": "2026-09-30T22:30:05"}) == "22:30:05 UTC"
+
+
+def test_an_unreadable_stamp_is_shown_raw_and_never_crashes():
+    assert audit_views.utc_clock({"t": "vcera vecer"}) == "vcera vecer"
+    assert audit_views.utc_stamp({"t": 12345}) == "12345"
+    assert audit_views.utc_clock({}) == audit_views.DASH
+    assert audit_views.utc_day({"t": "vcera vecer"}) is None
 
 
 # == stranky ==============================================================
@@ -365,6 +406,59 @@ def test_the_english_catalogue_renders_the_views(prihlaseny_klient):
     telo = klient.get("/audit/admins?lang=en").get_data(as_text=True)
     assert "What changed" in telo and "Every minute" in telo
     assert "Co změnil" not in telo
+
+
+def test_every_view_shows_utc_times_whatever_the_process_zone(
+    prague_zone, prihlaseny_klient, tmp_path,
+):
+    import re
+    _zapis(tmp_path, kind="access", component="wb", key_id="k1", origin="10.0.0.1",
+           method="GET", path="/v1/whoami", status=200, outcome="ok")
+    klient, _ = prihlaseny_klient
+    presne = datetime.now(UTC)
+    for cesta in ("/audit/admins", "/audit/users", "/audit/apps", "/audit"):
+        telo = klient.get(cesta).get_data(as_text=True)
+        obnova = re.search(r'class="kdy">Aktualizováno (\d\d):\d\d:\d\d UTC<', telo)
+        assert obnova, cesta
+        # Hodina je z UTC, ne z pasma procesu (v Praze o hodinu ci dve vic).
+        assert abs(int(obnova.group(1)) - presne.hour) in (0, 1, 23), cesta
+        assert "<th>Čas (UTC)</th>" in telo, cesta
+        assert "dny v UTC" in telo, cesta
+    # Radek pod hlavickou dne nese hodiny, hlavicka den - oboji v UTC.
+    telo = klient.get("/audit/apps").get_data(as_text=True)
+    assert re.search(r'aria-expanded="false">\d\d:\d\d:\d\d UTC</a>', telo)
+    assert re.search(r'<tr class="den"><td colspan="\d">Dnes · [^<]* \(UTC\)<', telo)
+    # "Vse" hlavicky dne nema, proto je u casu i datum.
+    telo = klient.get("/audit").get_data(as_text=True)
+    assert re.search(
+        r'<td class="mono">\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC</td>', telo)
+    assert "+00:00</td>" not in telo
+
+
+def test_the_period_is_counted_in_utc_days(prihlaseny_klient, tmp_path):
+    # Dva radky tesne kolem pulnoci UTC, kazdy ve svem dennim souboru. V Praze
+    # by oba padly do tehoz mistniho dne; konzole je deli tak, jak lezi
+    # v souborech auditu. `append_event` pise vzdy do dneska, proto primo.
+    import json
+    dnes = datetime.now(UTC).date()
+    predevcirem, vcera = dnes - timedelta(days=2), dnes - timedelta(days=1)
+    adresar = koren(tmp_path / "data") / "audit"
+    for den, cas, cesta in ((predevcirem, "23:59:30", "/v1/pred"),
+                            (vcera, "00:00:30", "/v1/po")):
+        radek = {"t": f"{den.isoformat()}T{cas}+00:00", "kind": "access",
+                 "component": "wb", "key_id": "k1", "origin": "10.0.0.1",
+                 "method": "GET", "path": cesta, "status": 200, "outcome": "ok"}
+        (adresar / f"{den.isoformat()}.jsonl").write_text(
+            json.dumps(radek) + "\n", encoding="utf-8")
+    klient, _ = prihlaseny_klient
+    telo = klient.get(f"/audit/apps?od={vcera}&do={vcera}").get_data(as_text=True)
+    assert "/v1/po" in telo and "/v1/pred" not in telo
+    assert "00:00:30 UTC" in telo
+    assert "Včera · " in telo and " (UTC)</td>" in telo
+    telo = klient.get(
+        f"/audit/apps?od={predevcirem}&do={predevcirem}").get_data(as_text=True)
+    assert "/v1/pred" in telo and "/v1/po" not in telo
+    assert "23:59:30 UTC" in telo
 
 
 def test_a_hand_written_minimal_event_does_not_crash_any_view(

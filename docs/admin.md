@@ -280,8 +280,12 @@ Stránka Audit čte tutéž stopu ve čtyřech pohledech podle toho, **kdo jedna
   minutu po sobě) zůstávají každé na svém řádku. Ve stopě je vždy každý zvlášť.
 - Ověření uživatele přes API je v pohledu Uživatelé i Aplikace — na disku je
   jednou. Čísla na záložkách se proto nesčítají do „Vše“.
-- Čas je místní (časové pásmo služby, `--tz` u kontejneru) a řádky jsou
-  rozdělené po dnech; přesné UTC je v detailu. Klik na čas otevře **detail
+- Každý čas je v **UTC a nese to u sebe** (`16:12:05 UTC`,
+  `2026-10-01 16:12:05 UTC`), bez ohledu na časové pásmo služby (`--tz`
+  u kontejneru). Řádky jsou rozdělené po dnech v UTC a rychlé volby období
+  i filtr od–do pracují se stejnými dny, podle kterých se jmenují soubory
+  `audit/RRRR-MM-DD.jsonl`. Stejně časy ukazuje SOC portál, takže se obě
+  obrazovky dají porovnat bez přepočítávání. Klik na čas otevře **detail
   záznamu**: všechna pole, surový řádek JSONL a odkazy do souvisejících
   pohledů.
 - **Obnovit** načte stránku znovu se stejnými filtry; přepínač **Automaticky po

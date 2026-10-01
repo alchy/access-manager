@@ -28,8 +28,9 @@ API_PORT="${AM_API_PORT:-22000}"
 CONSOLE_PORT="${AM_CONSOLE_PORT:-22001}"
 BIND="${AM_BIND:-127.0.0.1}"
 # Kontejner bez teto promenne bezi v UTC. Auditni stopu to NEOVLIVNI - ta je
-# v UTC vzdycky, audit.py si razitka pocita z datetime.now(UTC) napevno. Zona
-# je tu pro hodiny uvnitr kontejneru a pro cokoli, co by cetlo mistni cas.
+# v UTC vzdycky, audit.py si razitka pocita z datetime.now(UTC) napevno.
+# Konzoli take ne - kazdy cas ukazuje v UTC a s oznacenim. Zona je tu jen
+# pro hodiny uvnitr kontejneru (`date` v `podman exec`).
 TZ_ZONA="${AM_TZ:-}"
 FOREGROUND=0
 

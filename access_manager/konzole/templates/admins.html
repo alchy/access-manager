@@ -1,0 +1,67 @@
+{% extends "layout.html" %}
+{% block title %}{{ t('spravci.title') }}{% endblock %}
+{% block content %}
+<h1>{{ t('spravci.title') }}</h1>
+{{ help_box('admins') }}
+
+<table class="tabulka">
+  <thead>
+    <tr>
+      <th>{{ t('spravci.identity') }}</th>
+      <th>{{ t('spravci.status') }}</th>
+      <th>{{ t('actions.token') }}</th>
+      <th>{{ t('actions.account') }}</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in admins %}
+    <tr>
+      <td class="mono">{{ row.label }}</td>
+      <td>{{ status_badge('stav-' ~ row.state, row.state_text) }}</td>
+      {# Stejna mrizka jako u uzivatelu: povereni a ucet ve dvou sloupcich,
+         kratke popisky, plne zneni v `title`. #}
+      <td class="actions-cell">
+        <div class="action-grid" data-actions="token">
+          <a href="{{ url_for('_admins_qr', name=row.name) }}"
+             title="{{ t('uzivatele.show_token') }}" aria-label="{{ t('uzivatele.show_token') }}">{{ t('actions.show') }}</a>
+          {% if row.state == 'no_credential' %}
+          <form method="post" action="{{ url_for('_admins_pair', name=row.name) }}">
+            {{ csrf_field() }}
+            <button type="submit" title="{{ t('spravci.issue') }}" aria-label="{{ t('spravci.issue') }}">{{ t('actions.issue') }}</button>
+          </form>
+          {% else %}
+          {% set revoke_label = t('uzivatele.revoke_paired') if row.state == 'active' else t('uzivatele.revoke_token') %}
+          <form method="post" action="{{ url_for('_admins_revoke', name=row.name) }}">
+            {{ csrf_field() }}
+            <button type="submit" title="{{ revoke_label }}" aria-label="{{ revoke_label }}">{{ t('actions.revoke') }}</button>
+          </form>
+          {% endif %}
+        </div>
+      </td>
+      <td class="actions-cell">
+        <div class="action-grid" data-actions="account">
+          <form method="post" action="{{ url_for('_admins_remove', name=row.name) }}">
+            {{ csrf_field() }}
+            <button type="submit" title="{{ t('spravci.remove') }}" aria-label="{{ t('spravci.remove') }}">{{ t('actions.delete') }}</button>
+          </form>
+        </div>
+      </td>
+    </tr>
+    {{ log_dropdowns(row, 4) }}
+    {% endfor %}
+  </tbody>
+</table>
+<p class="poznamka">{{ t('spravci.last_note') }}</p>
+
+<section class="form-panel">
+  <h2>{{ t('spravci.add_title') }}</h2>
+  <form method="post" action="{{ url_for('_admins_add') }}" class="form-panel-body">
+    {{ csrf_field() }}
+    <label class="field">
+      <span>{{ t('spravci.identity') }}</span>
+      <input type="text" name="jmeno" autocomplete="off" required>
+    </label>
+    <button type="submit" class="odeslat">{{ t('spravci.add_title') }}</button>
+  </form>
+</section>
+{% endblock %}

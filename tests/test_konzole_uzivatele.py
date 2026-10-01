@@ -418,8 +418,31 @@ def test_credential_actions_come_before_account_actions(prihlaseny_klient):
     telo = klient.get("/users").get_data(as_text=True)
 
     povereni = telo.index("Zneplatnit párovací token")
-    hranice = telo.index('class="oddelovac"')
+    # Hranici tvori sloupec: povereni a ucet maji kazde svou bunku.
+    hranice = telo.index('data-actions="account"')
     zamek = telo.index("Zamknout uživatele")
     smazat = telo.index("Smazat uživatele")
 
     assert povereni < hranice < zamek < smazat
+
+
+def test_the_dropdowns_show_times_in_utc_and_say_so(prihlaseny_klient, tmp_path):
+    """Roletky nemaji hlavicku dne, proto u casu stoji i datum - a `UTC`."""
+    from access_manager.audit import append_event
+
+    _pridej(prihlaseny_klient, "tereza")
+    klient, _ = prihlaseny_klient
+    append_event(koren(tmp_path / "data"), {
+        "t": "2026-08-26T22:07:00+00:00", "kind": "authenticate",
+        "subject": "user:tereza", "outcome": "ok", "origin": "10.0.0.1",
+        "component": "workbench",
+    }, retention_days=90)
+    adresar = koren(tmp_path / "data") / "user-tereza"
+    (adresar / "totp.issued").write_text("1790000000\n", encoding="utf-8")
+    (adresar / "totp.paired").write_text("1790000060\n", encoding="utf-8")
+
+    telo = klient.get("/users").get_data(as_text=True)
+    assert '<td class="mono">2026-08-26 22:07:00 UTC</td>' in telo
+    assert '<td class="mono">2026-09-21 14:13:20 UTC</td>' in telo   # vydano
+    assert '<td class="mono">2026-09-21 14:14:20 UTC</td>' in telo   # sparovano
+    assert "+00:00" not in telo

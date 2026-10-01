@@ -1,0 +1,130 @@
+{% extends "layout.html" %}
+{% block title %}{{ t('skupiny.title') }}{% endblock %}
+{% block content %}
+<h1>{{ t('skupiny.title') }}</h1>
+{{ help_box('groups') }}
+{{ search_bar(url_for('_groups_list'), query, shown, total) }}
+
+<table class="tabulka">
+  <thead>
+    <tr>
+      <th>{{ t('skupiny.title') }}</th>
+      <th>{{ t('skupiny.members') }}</th>
+      <th>{{ t('skupiny.includes') }}</th>
+      <th>{{ t('spolecne.actions') }}</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in groups %}
+    <tr class="{{ 'vybrany' if detail and detail.name == row.name else '' }}">
+      <td class="mono">
+        <a href="{{ url_for('_groups_list', group=row.name, _anchor='group-detail') }}">{{ row.name }}</a>
+      </td>
+      <td>{{ row.member_count }}</td>
+      <td>{{ row.include_count }}</td>
+      <td>
+        <div class="akce">
+          <form method="post" action="{{ url_for('_groups_delete', name=row.name) }}">
+            {{ csrf_field() }}
+            <button type="submit">{{ t('skupiny.remove_group') }}</button>
+          </form>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+    {% if not groups %}
+    <tr><td colspan="4" class="poznamka">{{ t('spolecne.nothing_found') }}</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+<p class="poznamka">{{ t('skupiny.reserved_note') }}</p>
+
+{# Detail stoji hned pod vypisem, ze ktereho se otevira - driv byl az pod
+   formularem na zalozeni a po kliknuti na skupinu nebyl videt. Clenove
+   a zretezeni jsou vedle sebe; pridani sedi pod seznamem, ke kteremu patri. #}
+{% if detail %}
+<section class="form-panel group-detail" id="group-detail">
+  <div class="form-panel-head">
+    <h2>{{ t('skupiny.detail') }} <span class="mono">{{ detail.name }}</span></h2>
+    <a class="tlacitko" href="{{ url_for('_groups_list') }}">{{ t('spolecne.close') }}</a>
+  </div>
+  <div class="group-columns">
+    <section>
+      <h3>{{ t('skupiny.members') }}</h3>
+      {% if detail.members %}
+      <ul class="member-list">
+        {% for member in detail.members %}
+        <li>
+          <span class="mono">{{ member }}</span>
+          <form method="post" action="{{ url_for('_groups_member_remove', name=detail.name, member=member) }}">
+            {{ csrf_field() }}
+            <button type="submit">{{ t('spolecne.remove') }}</button>
+          </form>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="poznamka">{{ t('skupiny.no_members') }}</p>
+      {% endif %}
+      {% if detail.member_candidates %}
+      <form method="post" action="{{ url_for('_groups_member_add', name=detail.name) }}" class="inline-add">
+        {{ csrf_field() }}
+        <select name="clen" required aria-label="{{ t('skupiny.add_member') }}">
+          {% for candidate in detail.member_candidates %}
+          <option value="{{ candidate }}">{{ candidate }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit">{{ t('skupiny.add_member') }}</button>
+      </form>
+      {% endif %}
+    </section>
+    <section>
+      <h3>{{ t('skupiny.includes') }}</h3>
+      {% if detail.includes %}
+      <p>
+        {% for included in detail.includes %}
+        <span class="chip">{{ included }}</span>
+        {% endfor %}
+      </p>
+      {% else %}
+      <p class="poznamka">{{ t('skupiny.no_includes') }}</p>
+      {% endif %}
+      {% if detail.other_groups %}
+      <form method="post" action="{{ url_for('_groups_chain', name=detail.name) }}" class="inline-add">
+        {{ csrf_field() }}
+        <select name="zahrnuti" required aria-label="{{ t('skupiny.add_include') }}">
+          {% for candidate in detail.other_groups %}
+          <option value="{{ candidate }}">{{ candidate }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit">{{ t('skupiny.add_include') }}</button>
+      </form>
+      {% endif %}
+
+      <h3>{{ t('skupiny.via_chain') }}</h3>
+      {% if detail.via_chain %}
+      <p>
+        {% for name in detail.via_chain %}
+        <span class="chip">{{ name }}</span>
+        {% endfor %}
+      </p>
+      {% else %}
+      <p class="poznamka">{{ t('skupiny.no_chain') }}</p>
+      {% endif %}
+    </section>
+  </div>
+</section>
+{% endif %}
+
+<section class="form-panel">
+  <h2>{{ t('skupiny.add_group') }}</h2>
+  <form method="post" action="{{ url_for('_groups_add') }}" class="form-panel-body">
+    {{ csrf_field() }}
+    <label class="field">
+      <span>{{ t('skupiny.name') }}</span>
+      <input type="text" name="nazev" autocomplete="off" required>
+    </label>
+    <button type="submit" class="odeslat">{{ t('skupiny.add_group') }}</button>
+  </form>
+</section>
+{% endblock %}

@@ -1,25 +1,25 @@
 {# Skryty CSRF vstup - kazda mutace v konzoli ho musi nest (viz over_csrf).
    Definovano tady, protoze layout.html je spolecny predek vsech sablon a
    Jinja macro z rodice je videt i uvnitr bloku potomka bez importu. #}
-{% macro csrf_pole() %}<input type="hidden" name="csrf" value="{{ session.get('csrf', '') }}">{% endmacro %}
+{% macro csrf_field() %}<input type="hidden" name="csrf" value="{{ session.get('csrf', '') }}">{% endmacro %}
 
 {# Ikona ke stavovemu stitku. Zelena a cervena maji shodnou svetlost, takze
    samotna barva rozdil neunese - tvar ano. Trida rozhoduje, ktera ikona to je;
    `aria-hidden`, protoze vyznam uz nese text vedle. #}
-{% macro ikona_stavu(trida) -%}
-{%- if trida in ('stav-active', 'vysledek-ok') -%}
+{% macro status_icon(css_class) -%}
+{%- if css_class in ('stav-active', 'vysledek-ok') -%}
 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
-{%- elif trida == 'vysledek-denied' -%}
+{%- elif css_class == 'vysledek-denied' -%}
 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
-{%- elif trida == 'stav-disabled' -%}
+{%- elif css_class == 'stav-disabled' -%}
 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M6 12h12"/></svg>
-{%- elif trida == 'stav-waiting' -%}
+{%- elif css_class == 'stav-waiting' -%}
 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-{%- elif trida == 'stav-expired' -%}
+{%- elif css_class == 'stav-expired' -%}
 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6M9 9l6 6"/></svg>
-{%- elif trida == 'stav-no_credential' -%}
+{%- elif css_class == 'stav-no_credential' -%}
 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9L2.4 17.5A2 2 0 004.1 20.5h15.8a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>
-{%- elif trida == 'vysledek-write' -%}
+{%- elif css_class == 'vysledek-write' -%}
 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>
 {%- endif -%}
 {%- endmacro %}
@@ -29,33 +29,33 @@
    obsah nad tymz auditem, lisi se jen podle ceho se hleda a co je "druha
    strana" udalosti (u cloveka aplikace, u aplikace pozadavek).
    `<details>` funguje bez JS, stejne jako zbytek konzole. #}
-{% macro log_roletky(radek, sloupcu, nadpis='uzivatele.logins',
-                     sloupec='audit.component', prazdno='uzivatele.no_logins',
-                     parovani=True) %}
+{% macro log_dropdowns(row, columns, heading='uzivatele.logins',
+                     column='audit.component', empty_text='uzivatele.no_logins',
+                     pairing=True) %}
 <tr class="rozbaleni">
-  <td colspan="{{ sloupcu }}">
+  <td colspan="{{ columns }}">
     <div class="roletky">
       <details>
-        <summary>{{ t(nadpis) }}</summary>
-        {% if radek.prihlaseni %}
+        <summary>{{ t(heading) }}</summary>
+        {% if row.recent %}
         <div class="log-posuv">
         <table class="tabulka log vnorena">
           <thead>
             <tr>
               <th>{{ t('audit.time') }}</th>
               <th>{{ t('audit.origin') }}</th>
-              <th>{{ t(sloupec) }}</th>
+              <th>{{ t(column) }}</th>
               <th>{{ t('audit.result') }}</th>
             </tr>
           </thead>
           <tbody>
-            {% for p in radek.prihlaseni %}
+            {% for p in row.recent %}
             <tr>
-              <td class="mono">{{ p.cas }}</td>
-              <td class="mono">{{ p.odkud }}</td>
-              <td class="mono">{{ p.protistrana }}</td>
+              <td class="mono">{{ p.time }}</td>
+              <td class="mono">{{ p.origin }}</td>
+              <td class="mono">{{ p.counterpart }}</td>
               <td>
-                {{ stavovy_stitek(p.vysledek_trida, p.vysledek_text) }}
+                {{ status_badge(p.result_class, p.result_text) }}
                 {% if p.reason %}<span class="poznamka">({{ p.reason }})</span>{% endif %}
               </td>
             </tr>
@@ -64,11 +64,11 @@
         </table>
         </div>
         {% else %}
-        <p class="poznamka">{{ t(prazdno) }}</p>
+        <p class="poznamka">{{ t(empty_text) }}</p>
         {% endif %}
       </details>
 
-      {% if parovani %}
+      {% if pairing %}
       <details>
         <summary>{{ t('uzivatele.paired_at') }}</summary>
         <div class="log-posuv">
@@ -76,16 +76,16 @@
           <tbody>
             <tr>
               <td>{{ t('uzivatele.issued_at') }}</td>
-              <td class="mono">{{ radek.vydano or '—' }}</td>
+              <td class="mono">{{ row.issued_at or '—' }}</td>
             </tr>
             <tr>
               <td>{{ t('uzivatele.paired_at') }}</td>
-              <td class="mono">{{ radek.sparovano or '—' }}</td>
+              <td class="mono">{{ row.paired_at or '—' }}</td>
             </tr>
           </tbody>
         </table>
         </div>
-        {% if not radek.sparovano %}
+        {% if not row.paired_at %}
         <p class="poznamka">{{ t('uzivatele.not_paired_yet') }}</p>
         {% endif %}
       </details>
@@ -95,27 +95,27 @@
 </tr>
 {% endmacro %}
 
-{% macro stavovy_stitek(trida, text) -%}
-<span class="{{ 'vysledek' if trida.startswith('vysledek') else 'stav' }} {{ trida }}">{{ ikona_stavu(trida) }}{{ text }}</span>
+{% macro status_badge(css_class, text) -%}
+<span class="{{ 'vysledek' if css_class.startswith('vysledek') else 'stav' }} {{ css_class }}">{{ status_icon(css_class) }}{{ text }}</span>
 {%- endmacro %}
 
 {# Hledani nad dlouhym vypisem. Realm o stovkach identit se bez nej neda
    precist - a filtr take usetri stovky cteni z disku, protoze se radky stavi
    az po nem. GET, zadny CSRF: nic to nemeni. #}
-{% macro hledani(cil, dotaz, videno, celkem) %}
-<form method="get" action="{{ cil }}" class="hledani">
+{% macro search_bar(target, query, shown, total) %}
+<form method="get" action="{{ target }}" class="hledani">
   <label>
     <span class="visually-hidden">{{ t('spolecne.search') }}</span>
-    <input type="search" name="q" value="{{ dotaz or '' }}"
+    <input type="search" name="q" value="{{ query or '' }}"
            placeholder="{{ t('spolecne.search') }}" autocomplete="off">
   </label>
   <button type="submit">{{ t('spolecne.search') }}</button>
-  {% if dotaz %}<a href="{{ cil }}">{{ t('spolecne.clear') }}</a>{% endif %}
+  {% if query %}<a href="{{ target }}">{{ t('spolecne.clear') }}</a>{% endif %}
   <span class="pocet">
-    {%- if dotaz -%}
-      {{ t('spolecne.count_filtered').format(videno=videno, celkem=celkem) }}
+    {%- if query -%}
+      {{ t('spolecne.count_filtered').format(videno=shown, celkem=total) }}
     {%- else -%}
-      {{ t('spolecne.count_all').format(celkem=celkem) }}
+      {{ t('spolecne.count_all').format(celkem=total) }}
     {%- endif -%}
   </span>
 </form>
@@ -123,15 +123,15 @@
 
 {# Nápověda na zacatku kazde stranky: co se tu spravuje a jak to pouziva API.
    Ton je referencni (jako man), ne vypraveci - autorsky hlas patri do docs/. #}
-{% macro napoveda(klic) %}
+{% macro help_box(key) %}
 <section class="napoveda">
   <div>
     <h2>{{ t('napoveda.what') }}</h2>
-    <p>{{ t('napoveda.' ~ klic ~ '.what') }}</p>
+    <p>{{ t('napoveda.' ~ key ~ '.what') }}</p>
   </div>
   <div>
     <h2>{{ t('napoveda.api') }}</h2>
-    <p>{{ t('napoveda.' ~ klic ~ '.api') }}</p>
+    <p>{{ t('napoveda.' ~ key ~ '.api') }}</p>
   </div>
 </section>
 {% endmacro %}
@@ -552,7 +552,7 @@
   /* -- stavovy stitek (aktivni/zakazany/cekajici) ------------------------ */
   /* Zelena a cervena maji temer shodnou SVETLOST (kontrast mezi nimi 1,07),
      takze ve stupnich sedi i pri barvosleposti splynou. Barva proto nesmi
-     nest vyznam sama - kazdy stitek nese i ikonu, viz makro `stitek`. */
+     nest vyznam sama - kazdy stitek nese i ikonu, viz makro `status_badge`. */
   .stav, .vysledek {
     display: inline-flex;
     align-items: center;
@@ -665,16 +665,28 @@
     text-decoration: none;
   }
   .akce button:hover, .akce a:hover { border-color: var(--accent); color: var(--accent); }
-  /* Hranice mezi akcemi nad POVERENIM a akcemi nad UCTEM. Na uzkem okne se
-     radek zalomi a svisla carka by visela na zacatku noveho radku - proto
-     mizi spolu se zalomenim. */
-  .akce .oddelovac {
-    width: 1px;
-    align-self: stretch;
-    background: var(--hranice);
-    margin: 0 0.3rem;
+  /* -- akce v pevne mrizce (uzivatele, spravci) --------------------------- */
+  /* Driv stala tlacitka v jedne bunce za sebou a jejich popisky se podle
+     stavu uctu lisily delkou ("Zneplatnit sparovani" proti "Vydat parovaci
+     token"), takze v kazdem radku zacinala jinde. Kazda akce ma ted vlastni
+     stejne siroke misto a kratky popisek - sloupec tlacitek drzi pod sebou. */
+  .actions-cell { width: 1%; white-space: nowrap; }
+  .action-grid { display: grid; grid-auto-flow: column; grid-auto-columns: 6.6rem; gap: 0.4rem; }
+  .action-grid form { margin: 0; display: flex; }
+  .action-grid a, .action-grid button {
+    flex: 1;
+    box-sizing: border-box;
+    text-align: center;
+    background: none;
+    border: 1px solid var(--hranice);
+    border-radius: 6px;
+    padding: 0.3rem 0.4rem;
+    font-size: 0.82rem;
+    color: var(--text);
+    text-decoration: none;
+    white-space: nowrap;
   }
-  @media (max-width: 900px) { .akce .oddelovac { display: none; } }
+  .action-grid a:hover, .action-grid button:hover { border-color: var(--accent); color: var(--accent); }
 
   /* -- pridani rozsahu primo v radku aplikace --------------------------- */
   /* Sedi pod cipy uz pridanych rozsahu, aby bylo videt, ze patri k TEHLE
@@ -706,35 +718,117 @@
   .tabulka td > form > .stav,
   .tabulka td > form > .chip { margin-right: 0.4rem; }
 
-  /* -- formular na zalozeni jako karta ---------------------------------- */
-  /* `pole-radek` sraz vsechno do jedne radky; u registrace aplikace se tam
-     vedle sebe potkalo textove pole, zaskrtavatko s dvouradkovou napovedou
-     a tlacitko, a nic z toho nesedelo na spolecnou uctaru. */
-  .karta-formular {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.7rem;
+  /* -- panel s formularem: zalozeni cloveka/skupiny/aplikace/spravce ---- */
+  /* Formular na zalozeni stal driv holy na pozadi stranky, uzky a pokazde
+     v odlisne podobe (radek, karta na 34rem). Panel je stejne siroky jako tabulka nad
+     nim a ma stejne zahlavi, takze stranka drzi jednu osu; pole se radi
+     vedle sebe a lamou se az tehdy, kdyz se na sirku nevejdou. Tridy jsou
+     anglicky - novy kod se uz cesky nepojmenovava. */
+  .form-panel {
+    margin: 1.5rem 0 0;
     background: #fff;
     border: 1px solid var(--hranice);
     border-radius: 10px;
-    padding: 1rem 1.1rem;
-    max-width: 34rem;
+    overflow: hidden;
   }
-  .karta-formular label { margin: 0; }
-  .karta-formular > label > span:first-child {
-    display: block;
+  .form-panel > h2, .form-panel-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin: 0;
+    padding: 0.65rem 0.85rem;
+    background: #F0EBE2;
+    border-bottom: 1px solid var(--hranice);
+  }
+  .form-panel > h2, .form-panel-head h2 {
+    margin: 0;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: rgba(36, 26, 17, 0.65);
+  }
+  .form-panel-head h2 .mono { text-transform: none; font-size: 0.9rem; color: var(--text); }
+  .form-panel-head .tlacitko { margin-left: auto; font-size: 0.8rem; text-decoration: none; color: var(--text); }
+  .form-panel-body {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.9rem 1.25rem;
+    margin: 0;
+    padding: 0.95rem 0.85rem 1rem;
+  }
+  .form-panel .field { flex: 1 1 16rem; max-width: 26rem; margin: 0; }
+  .form-panel .field > span:first-child { font-size: 0.8rem; opacity: 0.75; }
+  .form-panel .field input[type="text"],
+  .form-panel .field select { width: 100%; box-sizing: border-box; }
+  .form-panel .odeslat { flex: none; white-space: nowrap; }
+  /* Zaskrtavaci volba s vysvetlenim zabira zbytek radku vedle pole. */
+  .form-panel .volba { flex: 2 1 22rem; max-width: none; margin: 0; align-self: center; }
+  .form-panel-note {
+    margin: 0;
+    padding: 0.6rem 0.85rem;
+    border-top: 1px solid var(--hranice);
+    background: #FBF9F5;
     font-size: 0.8rem;
-    opacity: 0.75;
-    margin-bottom: 0.2rem;
+    color: rgba(36, 26, 17, 0.75);
   }
-  .karta-formular input[type="text"] { min-width: 18rem; }
-  .karta-formular .poznamka { margin: 0; }
+  .form-panel-note span + span::before { content: "\00B7"; margin: 0 0.5rem; opacity: 0.6; }
 
-  /* -- radkovy formular (zalozeni cloveka/skupiny/aplikace/spravce) ------ */
-  .pole-radek { display: flex; align-items: flex-end; gap: 0.75rem; }
-  .pole-radek label { flex: none; }
-  .pole-radek input[type="text"] { min-width: 14rem; }
+  select {
+    font: inherit;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid var(--hranice);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--text);
+  }
+  select:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+
+  /* -- detail skupiny: clenove vlevo, zretezeni vpravo ------------------- */
+  .group-detail { scroll-margin-top: 1rem; }
+  .group-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .group-columns > section { padding: 0.9rem 0.85rem 1rem; min-width: 0; }
+  .group-columns > section + section { border-left: 1px solid var(--hranice); }
+  .group-columns h3 {
+    margin: 0 0 0.55rem;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    opacity: 0.6;
+  }
+  .group-columns h3:not(:first-child) { margin-top: 1.3rem; }
+  .group-columns .poznamka { margin: 0; font-size: 0.82rem; }
+  .member-list { list-style: none; margin: 0; padding: 0; }
+  .member-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.35rem 0;
+    border-bottom: 1px solid var(--hranice);
+    font-size: 0.9rem;
+  }
+  .member-list form { margin: 0; }
+  /* Pridani primo pod seznamem, ke kteremu patri: vyber a tlacitko v jedne
+     radce, vyber se roztahne, tlacitko drzi svou sirku. */
+  .inline-add { display: flex; align-items: center; gap: 0.5rem; margin: 0.75rem 0 0; }
+  .inline-add select { flex: 1 1 auto; min-width: 0; max-width: 22rem; padding: 0.35rem 0.5rem; font-size: 0.85rem; }
+  .small-button, .member-list button, .inline-add button,
+  .tabulka td > form:not(.pridat-rozsah) > button {
+    background: none;
+    border: 1px solid var(--hranice);
+    border-radius: 6px;
+    padding: 0.3rem 0.6rem;
+    font-size: 0.82rem;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .small-button:hover, .member-list button:hover, .inline-add button:hover,
+  .tabulka td > form:not(.pridat-rozsah) > button:hover { border-color: var(--accent); color: var(--accent); }
+  @media (max-width: 900px) {
+    .group-columns { grid-template-columns: 1fr; }
+    .group-columns > section + section { border-left: none; border-top: 1px solid var(--hranice); }
+  }
 
   /* -- zavedeni: QR jako text a tataz hodnota k opsani. Jedina stranka,
      kde poverení smi byt videt - ve vypisech nikdy. -------------------- */
@@ -828,7 +922,8 @@
   .prepinac input:checked + .kolej::after { left: 14px; }
   .prepinac input:focus-visible + .kolej { outline: 2px solid var(--accent); outline-offset: 2px; }
   .odpocet { font-size: 0.75rem; opacity: 0.65; font-variant-numeric: tabular-nums; }
-  .filtr-akce .obdobi { display: inline-flex; margin-left: auto; border: 1px solid var(--hranice); border-radius: 6px; overflow: hidden; }
+  .filtr-akce .obdobi-pasmo { margin-left: auto; font-size: 0.75rem; opacity: 0.7; white-space: nowrap; }
+  .filtr-akce .obdobi { display: inline-flex; border: 1px solid var(--hranice); border-radius: 6px; overflow: hidden; }
   .filtr-akce .obdobi a { border: none; border-radius: 0; border-left: 1px solid var(--hranice); background: #fff; font-size: 0.78rem; padding: 0.3rem 0.7rem; }
   .filtr-akce .obdobi a:first-child { border-left: none; }
   .filtr-akce .obdobi a.aktivni { background: rgba(156, 77, 26, 0.1); color: var(--accent); font-weight: 600; }
@@ -882,9 +977,9 @@
   }
 </style>
 </head>
-{% set prihlaseny = session.get('admin') %}
-<body class="{{ 'app' if prihlaseny else 'anon' }}">
-  {% if prihlaseny %}
+{% set signed_in = session.get('admin') %}
+<body class="{{ 'app' if signed_in else 'anon' }}">
+  {% if signed_in %}
   <aside class="sidebar">
     <div class="znacka">
       <img src="{{ url_for('static', filename='mark.png') }}" alt="">
@@ -892,21 +987,21 @@
     </div>
     <div class="realm">{{ session.get('realm', '') }}</div>
     <nav>
-      <a href="{{ url_for('_uzivatele_seznam') }}">{{ t('nav.users') }}</a>
-      <a href="{{ url_for('_skupiny_seznam') }}">{{ t('nav.groups') }}</a>
-      <a href="{{ url_for('_aplikace_seznam') }}">{{ t('nav.apps') }}</a>
-      <a href="{{ url_for('_spravci_seznam') }}">{{ t('nav.admins') }}</a>
-      <a href="{{ url_for('_audit_spravci') }}">{{ t('nav.audit') }}</a>
+      <a href="{{ url_for('_users_list') }}">{{ t('nav.users') }}</a>
+      <a href="{{ url_for('_groups_list') }}">{{ t('nav.groups') }}</a>
+      <a href="{{ url_for('_apps_list') }}">{{ t('nav.apps') }}</a>
+      <a href="{{ url_for('_admins_list') }}">{{ t('nav.admins') }}</a>
+      <a href="{{ url_for('_audit_admins') }}">{{ t('nav.audit') }}</a>
     </nav>
   </aside>
   {% endif %}
   <div class="main">
     <main class="content">
-      {% with zpravy = get_flashed_messages(with_categories=true) %}
-        {% if zpravy %}
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
         <div class="zpravy">
-          {% for kategorie, zprava in zpravy %}
-          <p class="zprava zprava-{{ kategorie }}" role="alert">{{ zprava }}</p>
+          {% for category, message in messages %}
+          <p class="zprava zprava-{{ category }}" role="alert">{{ message }}</p>
           {% endfor %}
         </div>
         {% endif %}
@@ -914,18 +1009,18 @@
       {% block content %}{% endblock %}
     </main>
     <footer class="paticka">
-      {% block prepinac_jazyka %}
+      {% block language_switch %}
       <div class="jazyk">
-        <a href="{{ url_for('_jazyk', to='cs', next=request.full_path) }}" class="{{ 'aktivni' if session.get('lang', 'cs') == 'cs' else '' }}">CS</a>
+        <a href="{{ url_for('_language', to='cs', next=request.full_path) }}" class="{{ 'aktivni' if session.get('lang', 'cs') == 'cs' else '' }}">CS</a>
         &middot;
-        <a href="{{ url_for('_jazyk', to='en', next=request.full_path) }}" class="{{ 'aktivni' if session.get('lang', 'cs') == 'en' else '' }}">EN</a>
+        <a href="{{ url_for('_language', to='en', next=request.full_path) }}" class="{{ 'aktivni' if session.get('lang', 'cs') == 'en' else '' }}">EN</a>
       </div>
       {% endblock %}
-      {% if prihlaseny %}
+      {% if signed_in %}
       <div class="identita">
         <span>{{ t('spravci.identity') }}: <code>{{ session['admin'] }}</code></span>
-        <form method="post" action="{{ url_for('_odhlasit') }}">
-          {{ csrf_pole() }}
+        <form method="post" action="{{ url_for('_logout') }}">
+          {{ csrf_field() }}
           <button type="submit" class="odhlasit">{{ t('nav.logout') }}</button>
         </form>
       </div>

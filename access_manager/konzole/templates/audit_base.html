@@ -1,35 +1,35 @@
 {% extends "layout.html" %}
 {# Kostra vsech auditnich pohledu: zalozky podle toho, KDO jednal (spravce,
    uzivatel, aplikace) a Vse pro vysetrovani napric. Pohled doplni jen
-   tabulku v bloku `tabulka`. Cela stranka je GET - obnoveni je obycejne
+   tabulku v bloku `table`. Cela stranka je GET - obnoveni je obycejne
    znovunacteni teze adresy se stejnymi filtry. #}
-{% block title %}{{ t('audit.title') }} · {{ t('audit.tab.' ~ pohled) }}{% endblock %}
+{% block title %}{{ t('audit.title') }} · {{ t('audit.tab.' ~ view) }}{% endblock %}
 {% block content %}
-{% set zalozky = [
-  ('spravci', '_audit_spravci', 'audit.tab.spravci'),
-  ('uzivatele', '_audit_uzivatele', 'audit.tab.uzivatele'),
-  ('aplikace', '_audit_aplikace', 'audit.tab.aplikace'),
-  ('vse', '_audit_seznam', 'audit.tab.vse'),
+{% set tabs = [
+  ('spravci', '_audit_admins', 'audit.tab.spravci'),
+  ('uzivatele', '_audit_users', 'audit.tab.uzivatele'),
+  ('aplikace', '_audit_apps', 'audit.tab.aplikace'),
+  ('vse', '_audit_all', 'audit.tab.vse'),
 ] %}
 <div class="audit-hlava"><h1>{{ t('audit.title') }}</h1><span class="mono">{{ session.get('realm', '') }}</span></div>
-{{ napoveda('audit_' ~ pohled if pohled != 'vse' else 'audit') }}
+{{ help_box('audit_' ~ view if view != 'vse' else 'audit') }}
 
 {# `data-*` nese texty pro audit.js - bez skriptu je prepinac skryty
    a obnovuje se tlacitkem. #}
-<div class="audit-lista" data-obnova="{{ pohled }}" data-detail="{{ '1' if detail_id else '0' }}"
+<div class="audit-lista" data-obnova="{{ view }}" data-detail="{{ '1' if detail_id else '0' }}"
      data-dalsi="{{ t('audit.auto_next') }}" data-pozastaveno="{{ t('audit.auto_paused') }}">
   <nav class="zalozky" aria-label="{{ t('audit.title') }}">
-    {% for klic, endpoint, popisek in zalozky %}
-    <a class="zalozka{{ ' aktivni' if klic == pohled else '' }}"
-       href="{{ url_for(endpoint, od=od, do=do) }}"
-       {% if klic == pohled %}aria-current="page"{% endif %}>
-      {{ t(popisek) }}<span class="pocet">{{ '{:,}'.format(pocty[klic]).replace(',', ' ') }}</span>
+    {% for key, endpoint, caption in tabs %}
+    <a class="zalozka{{ ' aktivni' if key == view else '' }}"
+       href="{{ url_for(endpoint, od=date_from, do=date_to) }}"
+       {% if key == view %}aria-current="page"{% endif %}>
+      {{ t(caption) }}<span class="pocet">{{ '{:,}'.format(counts[key]).replace(',', ' ') }}</span>
     </a>
     {% endfor %}
   </nav>
   <div class="obnova">
-    <span class="kdy">{{ t('audit.refreshed').format(cas=aktualizovano) }}</span>
-    <a class="tlacitko" href="{{ odkaz() }}">
+    <span class="kdy">{{ t('audit.refreshed').format(cas=refreshed_at) }}</span>
+    <a class="tlacitko" href="{{ link() }}">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 11-2.64-6.36"/><path d="M21 4v5h-5"/></svg>
       {{ t('audit.refresh') }}
     </a>
@@ -51,19 +51,22 @@
   {# Reset je ODKAZ na holou stranku, ne tlacitko: vyprazdnit pole by
      znamenalo JS, kdezto tohle je prosty GET bez parametru. #}
   <a href="{{ url_for(request.endpoint) }}">{{ t('audit.reset') }}</a>
+  {# Rychle volby i pole od-do pocitaji dny v UTC - stejne dny, podle
+     kterych se jmenuji soubory auditu. #}
+  <span class="obdobi-pasmo">{{ t('audit.range.utc') }}</span>
   <span class="obdobi">
-    {% for volba in rychla_obdobi %}
-    <a href="{{ odkaz(obdobi=volba, od=None, do=None, detail=None) }}"
-       class="{{ 'aktivni' if volba == obdobi else '' }}">{{ t('audit.range.' ~ volba) }}</a>
+    {% for choice in quick_periods %}
+    <a href="{{ link(obdobi=choice, od=None, do=None, detail=None) }}"
+       class="{{ 'aktivni' if choice == period else '' }}">{{ t('audit.range.' ~ choice) }}</a>
     {% endfor %}
   </span>
 </div>
 
 <div class="log-posuv">
-{% block tabulka %}{% endblock %}
+{% block table %}{% endblock %}
 </div>
-{% if celkem > vykresleno %}
-<p class="poznamka">{{ t('audit.limit').format(n=vykresleno, celkem=celkem) }}</p>
+{% if total > rendered %}
+<p class="poznamka">{{ t('audit.limit').format(n=rendered, celkem=total) }}</p>
 {% endif %}
 <script src="{{ url_for('static', filename='audit.js') }}" defer></script>
 {% endblock %}

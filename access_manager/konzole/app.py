@@ -23,7 +23,7 @@ from ..files import FileStore
 from ..origin import resolve_origin
 from ..principals import AUTOMATIC_GROUPS, check_identity, check_name, check_realm
 from ..realms import realm_root
-from . import pohledy, preklady
+from . import audit_views, preklady
 
 #: Sablony jsou soucasti balicku - Flask by je jinak hledal relativne k cwd,
 #: ktery se pri spusteni sluzby muze lisit od umisteni modulu.
@@ -31,14 +31,14 @@ _TEMPLATES = Path(__file__).parent / "templates"
 
 #: Vychozi sirka okna auditu bez filtru - "nedavne udalosti", ne cela
 #: historie (retence je typicky 90 dni, cely vypis by byl neprehledny).
-_AUDIT_VYCHOZI_DNI = 7
+_AUDIT_DEFAULT_DAYS = 7
 
 #: Kolik udalosti ukaze roletka u cloveka, spravce i aplikace ve vypisu. Je
 #: to "co se delo naposled", ne historie - na tu je stranka auditu s filtrem.
-_POSLEDNICH_PRIHLASENI = 5
+_RECENT_LIMIT = 5
 
 
-def _zavedeni_k_opsani(adresar: Path) -> tuple[str | None, str | None]:
+def _enrolment_text(directory: Path) -> tuple[str | None, str | None]:
     """Vrat (uri, tajemstvi) k rucnimu opsani, nebo (None, None).
 
     Cte se `totp.uri`, NIKDY `totp.secret` - a je to zamer. Parovanim se
@@ -48,30 +48,30 @@ def _zavedeni_k_opsani(adresar: Path) -> tuple[str | None, str | None]:
     presne to, co mazani artefaktu ma zarusit. Takhle ma string TOTOZNOU
     zivotnost jako QR vedle nej.
     """
-    cesta = adresar / "totp.uri"
-    if not cesta.is_file():
+    path = directory / "totp.uri"
+    if not path.is_file():
         return None, None
-    uri = cesta.read_text(encoding="utf-8").strip()
-    hodnoty = parse_qs(urlparse(uri).query).get("secret")
-    return uri, (hodnoty[0] if hodnoty else None)
+    uri = path.read_text(encoding="utf-8").strip()
+    values = parse_qs(urlparse(uri).query).get("secret")
+    return uri, (values[0] if values else None)
 
 
 def _require_flask():
     """Vrat `flask`, nebo rekni JAK to doinstalovat."""
     try:
         import flask
-    except ImportError as chybi:
+    except ImportError as missing:
         raise RuntimeError(
             "konzole potrebuje flask: pip install 'access-manager[server]'"
-        ) from chybi
+        ) from missing
     return flask
 
 
 #: Kolik cislic ma jeden TOTP kod. Sablona podle toho vykresli policka.
-DELKA_KODU = 6
+CODE_LENGTH = 6
 
 
-def _kod_z_formulare(form, pole: str) -> str:
+def _code_from_form(form, field: str) -> str:
     """Slozi kod bud z jednoho pole, nebo z policek po cislicich.
 
     Prihlasovaci stranka vykresluje policko na kazdou cislici
@@ -79,18 +79,18 @@ def _kod_z_formulare(form, pole: str) -> str:
     s celym kodem ale zustava platne - posilaji ho testy i kdokoli, kdo si
     formular odesle sam. Bere se to, co prislo; cele pole ma prednost.
     """
-    cely = form.get(pole, "").strip()
-    if cely:
-        return cely
+    whole = form.get(field, "").strip()
+    if whole:
+        return whole
     return "".join(
-        form.get(f"{pole}_{i}", "").strip() for i in range(1, DELKA_KODU + 1)
+        form.get(f"{field}_{i}", "").strip() for i in range(1, CODE_LENGTH + 1)
     )
 
 
 #: Jadra prohlizecu v poradi, v jakem se musi zkouset. Poradi neni libovolne:
 #: Edge i Opera nesou v UA retezci taky "Chrome", Chrome zase "Safari" - kdo
 #: hleda obecnejsi znacku driv, oznaci Edge za Chrome a Safari za cokoli.
-_JADRA = (
+_ENGINES = (
     ("Firefox/", "Firefox (Gecko)"),
     ("Edg/", "Edge (Blink)"),
     ("OPR/", "Opera (Blink)"),
@@ -101,16 +101,16 @@ _JADRA = (
 )
 
 
-def _prohlizec(ua: str) -> str:
+def _browser(ua: str) -> str:
     """Jadro prohlizece z hlavicky User-Agent, nebo prazdno.
 
     Nechceme presnou identifikaci - UA retezec je notoricky lzivy a nic se
     podle nej nerozhoduje. Je to jen informace pro cloveka u obrazovky:
     "prihlasuju se odsud a timhle". Nezname UA se radeji nehada.
     """
-    for znacka, nazev in _JADRA:
-        if znacka in ua:
-            return nazev
+    for marker, name in _ENGINES:
+        if marker in ua:
+            return name
     return ""
 
 
@@ -119,26 +119,26 @@ def _realm_store_kwargs(cfg: ServiceConfig) -> dict[str, dict]:
 
     Zrcadli konstrukci v `server.create_app` - misto hotovych instanci se ale
     drzi jen argumenty, protoze kazdy pozadavek potrebuje `FileStore` s
-    vlastnim `actor` (viz `prihlasen`).
+    vlastnim `actor` (viz `login_required`).
     """
     kwargs: dict[str, dict] = {}
-    videne: set[str] = set()
-    for deklarace in cfg.realms:
-        if "name" not in deklarace:
-            raise ValueError(f"deklarace realmu bez jmena: {deklarace!r}")
-        jmeno = check_realm(deklarace["name"])
-        if jmeno in videne:
-            msg = f"realm {jmeno!r} je deklarovany dvakrat; konflikt zavira start"
+    seen: set[str] = set()
+    for declaration in cfg.realms:
+        if "name" not in declaration:
+            raise ValueError(f"deklarace realmu bez jmena: {declaration!r}")
+        name = check_realm(declaration["name"])
+        if name in seen:
+            msg = f"realm {name!r} je deklarovany dvakrat; konflikt zavira start"
             raise ValueError(msg)
-        videne.add(jmeno)
-        kwargs[jmeno] = {
-            "root": realm_root(cfg.data, jmeno),
-            "realm": jmeno,
+        seen.add(name)
+        kwargs[name] = {
+            "root": realm_root(cfg.data, name),
+            "realm": name,
             "qr_ttl_days": int(
-                deklarace.get("qr_ttl_days", cfg.defaults["qr_ttl_days"])
+                declaration.get("qr_ttl_days", cfg.defaults["qr_ttl_days"])
             ),
             "audit_retention_days": int(
-                deklarace.get(
+                declaration.get(
                     "audit_retention_days", cfg.defaults["audit_retention_days"]
                 )
             ),
@@ -152,21 +152,21 @@ def create_console_app(cfg: ServiceConfig):
     """Postav Flask aplikaci konzole nad realmy z `cfg`.
 
     Dalsi ukoly (prihlaseni, sprava lidi/skupin/aplikaci/spravcu, audit) na
-    tuhle tovarnu stavi dal - pridavaji route a pouzivaji `prihlasen`.
+    tuhle tovarnu stavi dal - pridavaji route a pouzivaji `login_required`.
     """
     flask = _require_flask()
 
-    realmy = _realm_store_kwargs(cfg)
+    realms = _realm_store_kwargs(cfg)
 
-    def _store_pro(jmeno_realmu: str, actor: str) -> FileStore:
+    def _store_for(realm_name: str, actor: str) -> FileStore:
         # Adresa spravce jde s aktorem do kazde udalosti, kterou uloziste
         # jeho jmenem zapise - zapisy, relace. Meri se stejne jako u API
         # a prihlaseni (resolve_origin), ne z holeho remote_addr.
-        parametry = dict(realmy[jmeno_realmu])
-        root = parametry.pop("root")
+        params = dict(realms[realm_name])
+        root = params.pop("root")
         return FileStore(
             root, actor=actor,
-            origin=resolve_origin(flask.request.environ, cfg), **parametry,
+            origin=resolve_origin(flask.request.environ, cfg), **params,
         )
 
     app = flask.Flask(__name__, template_folder=str(_TEMPLATES))
@@ -179,11 +179,11 @@ def create_console_app(cfg: ServiceConfig):
     # provozovatel zapne (spec §3, konfigurace console_secure_cookie).
     app.config["SESSION_COOKIE_SECURE"] = cfg.console_secure_cookie
 
-    def _prelozit(klic: str) -> str:
-        katalog = preklady.nacti(flask.session.get("lang", "cs"))
-        return preklady.prelozit(katalog, klic)
+    def _translate(key: str) -> str:
+        catalog = preklady.nacti(flask.session.get("lang", "cs"))
+        return preklady.prelozit(catalog, key)
 
-    def over_csrf() -> None:
+    def verify_csrf() -> None:
         """Kazda mutace nese `csrf` shodny se session, jinak 400 a zadny zapis.
 
         POST /login je vyjimka: session (a tedy token) jeste neexistuje, takze
@@ -192,9 +192,9 @@ def create_console_app(cfg: ServiceConfig):
         dostane, jsou oba chybejici stavy (nic poslano/nic v session) osetreny
         rovnou abortem, aby compare_digest vzdycky dostal dva stringy.
         """
-        posilany = flask.request.form.get("csrf")
-        ulozeny = flask.session.get("csrf")
-        if not posilany or not ulozeny or not secrets.compare_digest(posilany, ulozeny):
+        sent = flask.request.form.get("csrf")
+        stored = flask.session.get("csrf")
+        if not sent or not stored or not secrets.compare_digest(sent, stored):
             # Do AUDITU, ne do provozniho logu: sem se dojde jen za strazcem,
             # takze realm i spravce jsou znami a je kam zapsat. Zaroven je to
             # presne ta udalost, ktera ma prezit rotaci provozniho logu.
@@ -208,7 +208,7 @@ def create_console_app(cfg: ServiceConfig):
             flask.abort(400)
 
     @app.before_request
-    def _uloz_jazyk():
+    def _save_language():
         # Prepinac funguje na kterekoli strance, ne jen na /login - staci
         # pridat ?lang=cs|en do libovolneho GETu.
         lang = flask.request.args.get("lang")
@@ -216,10 +216,10 @@ def create_console_app(cfg: ServiceConfig):
             flask.session["lang"] = lang
 
     @app.context_processor
-    def _kontext_prekladu():
-        return {"t": _prelozit, "delka_kodu": DELKA_KODU}
+    def _translation_context():
+        return {"t": _translate, "code_length": CODE_LENGTH}
 
-    def prihlasen(view):
+    def login_required(view):
         """Strazce relace: bez platne session presmeruje na `/login`.
 
         Zaroven priprav g.store s actor odvozenym od prihlaseneho spravce -
@@ -227,12 +227,12 @@ def create_console_app(cfg: ServiceConfig):
         """
 
         @functools.wraps(view)
-        def obal(*args, **kwargs):
-            jmeno_realmu = flask.session.get("realm")
+        def wrapper(*args, **kwargs):
+            realm_name = flask.session.get("realm")
             admin = flask.session.get("admin")
-            if not admin or jmeno_realmu not in realmy:
-                return flask.redirect(flask.url_for("_prihlasovaci_stranka"))
-            store = _store_pro(jmeno_realmu, actor=f"admin:{admin}")
+            if not admin or realm_name not in realms:
+                return flask.redirect(flask.url_for("_login_page"))
+            store = _store_for(realm_name, actor=f"admin:{admin}")
             if admin not in store.admins():
                 # Spravce mezitim nekdo odebral (remove_admin) - bez tohohle
                 # by jeho jiz otevrena relace zustala plne funkcni az do
@@ -247,13 +247,13 @@ def create_console_app(cfg: ServiceConfig):
                     reason="admin_removed",
                 )
                 flask.session.clear()
-                return flask.redirect(flask.url_for("_prihlasovaci_stranka"))
+                return flask.redirect(flask.url_for("_login_page"))
             flask.g.store = store
             return view(*args, **kwargs)
 
-        return obal
+        return wrapper
 
-    def _bez_ukladani(vysledek):
+    def _no_store(result):
         """Obal render_template odpovedi hlavickou `Cache-Control: no-store`.
 
         Pro stranky, ktere nesou tajemstvi presne jednou (QR kod, klic
@@ -261,16 +261,16 @@ def create_console_app(cfg: ServiceConfig):
         prohlizec pri Zpet/Vpred) mohla ulozit a zobrazit znovu i po tom,
         co uz je clovek nema videt.
         """
-        odpoved = flask.make_response(vysledek)
-        odpoved.headers["Cache-Control"] = "no-store"
-        return odpoved
+        response = flask.make_response(result)
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.get("/lang")
-    def _jazyk():
+    def _language():
         """Prepinac jazyka, ktery umi presmerovat ZPET na puvodni stranku.
 
-        Doplnuje starsi mechanismus `?lang=cs|en` (viz `_uloz_jazyk`), ktery
-        na strankach vyrenderovanych primo z POST (klic.html) skonci 405
+        Doplnuje starsi mechanismus `?lang=cs|en` (viz `_save_language`), ktery
+        na strankach vyrenderovanych primo z POST (key.html) skonci 405
         (jina metoda) a na strankach s vlastnim dotazem (filtrovany /audit,
         /groups?group=...) dotaz zahodi. `next` se pousti dal JEN kdyz je
         to relativni cesta zacinajici jednim '/' - '//host/...' by prohlizec
@@ -279,12 +279,12 @@ def create_console_app(cfg: ServiceConfig):
         to = flask.request.args.get("to")
         if to in ("cs", "en"):
             flask.session["lang"] = to
-        dalsi = flask.request.args.get("next", "")
-        if dalsi.startswith("/") and not dalsi.startswith("//"):
-            return flask.redirect(dalsi)
+        next_url = flask.request.args.get("next", "")
+        if next_url.startswith("/") and not next_url.startswith("//"):
+            return flask.redirect(next_url)
         return flask.redirect("/")
 
-    def _kontext_pristupu() -> dict:
+    def _access_context() -> dict:
         """Odkud a cim se clovek diva - vypisuje se pod prihlasovacim formularem.
 
         Adresa je TA SAMA, kterou meri origin ACL a audit (resolve_origin),
@@ -293,26 +293,26 @@ def create_console_app(cfg: ServiceConfig):
         z auditu za tri mesice.
         """
         return {
-            "klient_ip": resolve_origin(flask.request.environ, cfg),
-            "klient_prohlizec": _prohlizec(
+            "client_ip": resolve_origin(flask.request.environ, cfg),
+            "client_browser": _browser(
                 flask.request.headers.get("User-Agent", "")
             ),
         }
 
     @app.get("/login")
-    def _prihlasovaci_stranka():
-        return flask.render_template("login.html", **_kontext_pristupu())
+    def _login_page():
+        return flask.render_template("login.html", **_access_context())
 
     @app.post("/login")
-    def _prihlasit():
+    def _login():
         # POST /login je pred existenci session - neni co porovnat s CSRF
         # tokenem, takze se tady over_csrf() zamerne nevola (viz jeho
         # docstring). Neznamy realm i spatne kody hlasi TOTOZNOU hlasku -
         # zadny postranni kanal, ktery by prozradil, ze realm neexistuje.
-        jmeno_realmu = flask.request.form.get("realm", "")
-        jmeno = flask.request.form.get("jmeno", "")
-        kod1 = _kod_z_formulare(flask.request.form, "kod1")
-        kod2 = _kod_z_formulare(flask.request.form, "kod2")
+        realm_name = flask.request.form.get("realm", "")
+        name = flask.request.form.get("jmeno", "")
+        code1 = _code_from_form(flask.request.form, "kod1")
+        code2 = _code_from_form(flask.request.form, "kod2")
         # Puvod se meri stejne jako u API a auditu (resolve_origin), ne z
         # holeho remote_addr - jinak by log za proxy ukazoval proxy.
         origin = resolve_origin(flask.request.environ, cfg)
@@ -335,24 +335,24 @@ def create_console_app(cfg: ServiceConfig):
         # Loguje se tvar, jak PRISEL - zdeformovany. To je ta informace,
         # kterou clovek hleda; normalizovany by nerekl nic.
         try:
-            jmeno_realmu = check_realm(jmeno_realmu)
-            jmeno = check_identity(jmeno)
+            realm_name = check_realm(realm_name)
+            name = check_identity(name)
         except ValueError:
             log.info(
                 "console_login", outcome="denied", reason="bad_form",
-                origin=origin, realm=jmeno_realmu, name=jmeno,
+                origin=origin, realm=realm_name, name=name,
             )
             return flask.render_template(
-                "login.html", chyba=_prelozit("login.failed"), **_kontext_pristupu()
+                "login.html", error=_translate("login.failed"), **_access_context()
             )
 
-        if jmeno_realmu not in realmy:
+        if realm_name not in realms:
             log.info(
                 "console_login", outcome="denied", reason="unknown_realm",
-                origin=origin, realm=jmeno_realmu, name=jmeno,
+                origin=origin, realm=realm_name, name=name,
             )
             return flask.render_template(
-                "login.html", chyba=_prelozit("login.failed"), **_kontext_pristupu()
+                "login.html", error=_translate("login.failed"), **_access_context()
             )
 
         # Odsud dal je realm znamy - vsechno ostatni (ok, bad_code, replay,
@@ -360,17 +360,17 @@ def create_console_app(cfg: ServiceConfig):
         # logu uz to NEJDE: dve mista teze udalosti by se musela drzet
         # v souladu a jedno z nich by pritom rotace zahodila.
 
-        store = _store_pro(jmeno_realmu, actor=f"admin:{jmeno}")
-        verdikt = store.authenticate_admin(jmeno, kod1, kod2, origin=origin)
+        store = _store_for(realm_name, actor=f"admin:{name}")
+        verdict = store.authenticate_admin(name, code1, code2, origin=origin)
 
-        if verdikt.outcome == "throttled":
-            chyba = _prelozit("login.throttled").format(s=verdikt.retry_after)
+        if verdict.outcome == "throttled":
+            error = _translate("login.throttled").format(s=verdict.retry_after)
             return flask.render_template(
-                "login.html", chyba=chyba, **_kontext_pristupu()
+                "login.html", error=error, **_access_context()
             )
-        if not verdikt:
+        if not verdict:
             return flask.render_template(
-                "login.html", chyba=_prelozit("login.failed"), **_kontext_pristupu()
+                "login.html", error=_translate("login.failed"), **_access_context()
             )
 
         # Cista relace: zadny stav z doby pred prihlasenim (treba rozdelane
@@ -378,38 +378,38 @@ def create_console_app(cfg: ServiceConfig):
         # vedome prenese.
         lang = flask.session.get("lang", "cs")
         flask.session.clear()
-        flask.session["realm"] = jmeno_realmu
-        flask.session["admin"] = jmeno
+        flask.session["realm"] = realm_name
+        flask.session["admin"] = name
         flask.session["lang"] = lang
         flask.session["csrf"] = secrets.token_hex(16)
-        return flask.redirect(flask.url_for("_uvod"))
+        return flask.redirect(flask.url_for("_home"))
 
     @app.post("/logout")
-    @prihlasen
-    def _odhlasit():
-        over_csrf()
+    @login_required
+    def _logout():
+        verify_csrf()
         flask.g.store.audit_event(
             kind="session", op="logout",
             actor=f"admin:{flask.session.get('admin')}",
         )
         flask.session.clear()
-        return flask.redirect(flask.url_for("_prihlasovaci_stranka"))
+        return flask.redirect(flask.url_for("_login_page"))
 
     @app.get("/")
-    @prihlasen
-    def _uvod():
-        return flask.redirect(flask.url_for("_uzivatele_seznam"))
+    @login_required
+    def _home():
+        return flask.redirect(flask.url_for("_users_list"))
 
     # == uzivatele ==========================================================
     #
     # VZOR pro dalsi stranky (skupiny/aplikace/spravci/audit): kazda mutace
     # je @prihlasen + POST, prvni radek je over_csrf(), knihovni volani bezi
     # v try/except ValueError, uspech i chyba konci flashem a redirectem
-    # (Post/Redirect/Get). `_uzivatele_mutace` tenhle tvar nese za vsechny
+    # (Post/Redirect/Get). `_users_mutation` tenhle tvar nese za vsechny
     # jednoduche akce - vyjimkou je jen `/users/add` s vlastnim GET view
     # (formular), ktere tu neni potreba.
 
-    def _radek_cloveka(store, jmeno: str) -> dict:
+    def _user_row(store, name: str) -> dict:
         """Jeden radek vypisu: stav (aktivni/zakazany/cekajici na parovani/
         bez povereni) a skupinove chipy z plocheho uzaveru principalu.
 
@@ -432,466 +432,476 @@ def create_console_app(cfg: ServiceConfig):
         - ceka na parovani: `totp.issued` je, `totp.paired` jeste neni.
         - aktivni: zbytek (typicky `totp.paired`).
         """
-        clovek = store.user(jmeno)
+        user = store.user(name)
         # Vychozi napred, pak zbytek abecedne: automaticke skupiny jsou
         # kontext ("tohle ma kazdy"), prirazene jsou rozhodnuti spravce.
-        skupiny = sorted(
+        groups = sorted(
             (
-                {"nazev": nazev, "vychozi": nazev in AUTOMATIC_GROUPS}
-                for principal in clovek.principals
+                {"name": group_name, "default": group_name in AUTOMATIC_GROUPS}
+                for principal in user.principals
                 if principal.startswith("group:")
-                for nazev in (principal[len("group:"):],)
+                for group_name in (principal[len("group:"):],)
             ),
-            key=lambda s: (not s["vychozi"], s["nazev"]),
+            key=lambda s: (not s["default"], s["name"]),
         )
-        adresar = store.home / f"user-{jmeno}"
-        if not clovek.enabled:
-            stav, stav_text = "disabled", _prelozit("uzivatele.disabled")
+        directory = store.home / f"user-{name}"
+        if not user.enabled:
+            state, state_text = "disabled", _translate("uzivatele.disabled")
         else:
-            tajemstvi = adresar / "totp.secret"
-            vydano = adresar / "totp.issued"
-            sparovano = adresar / "totp.paired"
-            if not tajemstvi.is_file() and not vydano.is_file():
-                stav, stav_text = "no_credential", _prelozit("uzivatele.no_credential")
-            elif vydano.is_file() and not sparovano.is_file():
-                if store.enrolment_expired(adresar):
+            secret_file = directory / "totp.secret"
+            issued = directory / "totp.issued"
+            paired = directory / "totp.paired"
+            if not secret_file.is_file() and not issued.is_file():
+                state = "no_credential"
+                state_text = _translate("uzivatele.no_credential")
+            elif issued.is_file() and not paired.is_file():
+                if store.enrolment_expired(directory):
                     # Bez tehle vetve spadne vyprsely token do "ceka"
                     # a vypise se jako "plati jeste 0 dni" - tedy jako by
                     # na nej porad slo cekat.
-                    stav = "expired"
-                    stav_text = _prelozit("uzivatele.expired")
+                    state = "expired"
+                    state_text = _translate("uzivatele.expired")
                 else:
-                    stav = "waiting"
-                    stav_text = _prelozit("uzivatele.waiting").format(
-                        dni=store.enrolment_days_left(adresar)
+                    state = "waiting"
+                    state_text = _translate("uzivatele.waiting").format(
+                        dni=store.enrolment_days_left(directory)
                     )
             else:
-                stav, stav_text = "active", _prelozit("uzivatele.active")
+                state, state_text = "active", _translate("uzivatele.active")
         return {
-            "jmeno": jmeno, "stav": stav, "stav_text": stav_text, "skupiny": skupiny,
+            "name": name, "state": state, "state_text": state_text, "groups": groups,
             # Kdy bylo zavedeni vydano a kdy se spotrebovalo. `totp.paired`
             # pise `_complete_pairing` v okamziku PRVNIHO uspesneho prihlaseni
             # - je to tedy razitko prave toho pozadavku, ktery QR ze stranky
             # odebral. Nikam se to dopisovat nemusi, uz to na disku je.
-            "vydano": _razitko(adresar / "totp.issued"),
-            "sparovano": _razitko(adresar / "totp.paired"),
+            "issued_at": _file_stamp(directory / "totp.issued"),
+            "paired_at": _file_stamp(directory / "totp.paired"),
         }
 
-    def _razitko(cesta: Path) -> str | None:
-        """Unixove razitko ze souboru jako ISO v UTC, nebo None.
+    def _file_stamp(path: Path) -> str | None:
+        """Unixove razitko ze souboru jako `2026-10-01 16:12:05 UTC`, nebo None.
 
-        `totp.issued` a `totp.paired` drzi cislo; audit i provozni log pisou
-        ISO v UTC. Prevod je tady, at se v rozhrani nepotkaji dva tvary casu.
+        `totp.issued` a `totp.paired` drzi cislo; konzole ukazuje kazdy cas
+        v UTC a s oznacenim. Prevod je tady, at se v rozhrani nepotkaji dva
+        tvary casu.
         Poskozeny soubor je "nevim" - stejna uvaha jako v
         `FileStore._enrolment_expired`, jen tam je fail-closed a tady staci
         neukazat nic.
         """
-        if not cesta.is_file():
+        if not path.is_file():
             return None
         try:
-            razitko = int(cesta.read_text(encoding="utf-8").strip())
+            stamp = int(path.read_text(encoding="utf-8").strip())
         except (ValueError, OSError):
             return None
-        return datetime.fromtimestamp(razitko, UTC).isoformat(timespec="seconds")
+        return audit_views.format_stamp(datetime.fromtimestamp(stamp, UTC))
 
-    def _duvod(udalost: dict) -> str:
+    def _reason(event: dict) -> str:
         """Co stoji vedle vysledku: `reason`, u pozadavku aplikace HTTP stav.
 
         Radek `access` zadny `reason` nema - neuspech je tam 400/404 a to je
         ta informace, kterou clovek hleda. U uspechu se stav nepise, "200"
         vedle "ok" nerika nic.
         """
-        if udalost.get("reason"):
-            return str(udalost["reason"])
-        if udalost.get("outcome") != "ok" and "status" in udalost:
-            return str(udalost["status"])
+        if event.get("reason"):
+            return str(event["reason"])
+        if event.get("outcome") != "ok" and "status" in event:
+            return str(event["status"])
         return ""
 
-    def _pozadavek(udalost: dict) -> str:
+    def _request_text(event: dict) -> str:
         """Co aplikace chtela - sloupec roletky u aplikace.
 
         U overeni je to koho overovala, u ostatnich metoda a cesta. Klic je
         vpredu, protoze po vymene klice zustava jmeno aplikace stejne a bez
         nej by stary a novy klic v roletce splynuly.
         """
-        if udalost.get("kind") == "authenticate":
-            co = f"authenticate {udalost.get('subject') or ''}".strip()
-        elif udalost.get("path"):
-            co = " ".join(
-                kus for kus in (udalost.get("method"), udalost["path"]) if kus
+        if event.get("kind") == "authenticate":
+            what = f"authenticate {event.get('subject') or ''}".strip()
+        elif event.get("path"):
+            what = " ".join(
+                part for part in (event.get("method"), event["path"]) if part
             )
         else:
-            co = udalost.get("kind", "")
-        return " · ".join(kus for kus in (udalost.get("key_id"), co) if kus)
+            what = event.get("kind", "")
+        return " · ".join(part for part in (event.get("key_id"), what) if part)
 
-    def _radek_prihlaseni(udalost: dict, protistrana: str) -> dict:
+    def _recent_row(event: dict, counterpart: str) -> dict:
         """Jeden radek roletky. Stejna ctverice a stejne tridy jako stranka
-        auditu (`_radek_udalosti`) - je to tyz zaznam, jen uzsi vyber.
+        auditu (`_event_row`) - je to tyz zaznam, jen uzsi vyber.
 
         Treti sloupec je "druha strana" udalosti: u cloveka aplikace, ktera
         se ptala, u aplikace to, na co se ptala.
         """
-        outcome = udalost.get("outcome")
+        outcome = event.get("outcome")
         if outcome == "ok":
-            trida = "vysledek-ok"
+            css_class = "vysledek-ok"
         elif outcome == "denied":
-            trida = "vysledek-denied"
+            css_class = "vysledek-denied"
         else:
-            trida = "vysledek-jiny"
+            css_class = "vysledek-jiny"
         return {
-            "cas": udalost.get("t", ""),
+            "time": audit_views.utc_stamp(event),
             # Chybejici pole je pomlcka, ne prazdno: lokalni volani adresu
             # nema (viz `FileStore.authenticate`) a prazdna bunka by vypadala
             # jako rozbite vykresleni.
-            "odkud": udalost.get("origin") or "—",
-            "protistrana": protistrana or "—",
-            "vysledek_text": outcome or "",
-            "vysledek_trida": trida,
-            "reason": _duvod(udalost),
+            "origin": event.get("origin") or "—",
+            "counterpart": counterpart or "—",
+            "result_text": outcome or "",
+            "result_class": css_class,
+            "reason": _reason(event),
         }
 
-    def _vyfiltruj(jmena, dotaz):
+    def _filter_names(names, query):
         """Podretezcovy filtr pres jmeno. Prazdny dotaz nefiltruje.
 
         Zamerne obycejny podretezec, ne prefix: spravce hleda "novak" a chce
         najit i "jan.novak@example.com".
         """
-        if not dotaz:
-            return list(jmena)
-        return [jmeno for jmeno in jmena if dotaz in jmeno]
+        if not query:
+            return list(names)
+        return [name for name in names if query in name]
 
     @app.get("/users")
-    @prihlasen
-    def _uzivatele_seznam():
+    @login_required
+    def _users_list():
         store = flask.g.store
-        vsichni = store.users()
-        dotaz = flask.request.args.get("q", "").strip().lower()
-        # Filtruje se PRED stavbou radku. `_radek_cloveka` sahne kazde identite
+        all_users = store.users()
+        query = flask.request.args.get("q", "").strip().lower()
+        # Filtruje se PRED stavbou radku. `_user_row` sahne kazde identite
         # na disk zvlast (stav poverni, zbyvajici platnost QR, skupiny), takze
         # u stovek identit je nefiltrovany vypis stovky cteni na jedno
         # zobrazeni - a vetsinu z nich pak nikdo necte.
-        vybrani = _vyfiltruj(vsichni, dotaz)
-        uzivatele = [_radek_cloveka(store, jmeno) for jmeno in vybrani]
+        selected = _filter_names(all_users, query)
+        users = [_user_row(store, name) for name in selected]
         # JEDEN pruchod auditem pro celou stranku, ne jeden na kazdeho -
         # `recent_by` cte od nejnovejsiho dne a konci, jakmile ma
         # kazdy dost. Az PO filtru, ze stejneho duvodu jako radky vyse.
-        prihlaseni = recent_by(
+        recent = recent_by(
             store.home, "subject",
-            [f"user:{jmeno}" for jmeno in vybrani],
+            [f"user:{name}" for name in selected],
             kind="authenticate",
-            limit=_POSLEDNICH_PRIHLASENI,
+            limit=_RECENT_LIMIT,
         )
-        for radek in uzivatele:
-            radek["prihlaseni"] = [
-                _radek_prihlaseni(u, u.get("component"))
-                for u in prihlaseni.get(f"user:{radek['jmeno']}", ())
+        for row in users:
+            row["recent"] = [
+                _recent_row(u, u.get("component"))
+                for u in recent.get(f"user:{row['name']}", ())
             ]
         return flask.render_template(
-            "uzivatele.html", uzivatele=uzivatele, dotaz=dotaz,
-            celkem=len(vsichni), videno=len(vybrani),
+            "users.html", users=users, query=query,
+            total=len(all_users), shown=len(selected),
         )
 
-    def _uzivatele_mutace(jmeno, akce, presmerovani=None):
+    def _users_mutation(name, action, redirect_to=None):
         """Spolecny tvar mutaci lidi: CSRF -> knihovni volani -> flash ->
-        redirect. `presmerovani(vysledek)` urcuje cil PRI USPECHU (napr. na
+        redirect. `redirect_to(result)` urcuje cil PRI USPECHU (napr. na
         stranku QR) - vychozi je zpet na /users. Chyba vzdy konci na /users,
-        `presmerovani` se pak nevola."""
-        over_csrf()
-        seznam = flask.url_for("_uzivatele_seznam")
+        `redirect_to` se pak nevola."""
+        verify_csrf()
+        listing = flask.url_for("_users_list")
         try:
-            vysledek = akce(jmeno)
-        except ValueError as chyba:
-            flask.flash(f"{_prelozit('spolecne.error')}: {chyba}", "chyba")
-            return flask.redirect(seznam)
-        flask.flash(_prelozit("spolecne.done"), "ok")
-        return flask.redirect(presmerovani(vysledek) if presmerovani else seznam)
+            result = action(name)
+        except ValueError as error:
+            flask.flash(f"{_translate('spolecne.error')}: {error}", "chyba")
+            return flask.redirect(listing)
+        flask.flash(_translate("spolecne.done"), "ok")
+        return flask.redirect(redirect_to(result) if redirect_to else listing)
 
     @app.post("/users/add")
-    @prihlasen
-    def _uzivatele_pridat():
-        jmeno = flask.request.form.get("jmeno", "")
-        return _uzivatele_mutace(
-            jmeno, flask.g.store.add_user,
-            presmerovani=lambda zavedeni: flask.url_for(
-                "_uzivatele_qr", jmeno=zavedeni.name
+    @login_required
+    def _users_add():
+        name = flask.request.form.get("jmeno", "")
+        return _users_mutation(
+            name, flask.g.store.add_user,
+            redirect_to=lambda enrolment: flask.url_for(
+                "_users_qr", name=enrolment.name
             ),
         )
 
-    @app.post("/users/<jmeno>/disable")
-    @prihlasen
-    def _uzivatele_vypnout(jmeno):
-        return _uzivatele_mutace(jmeno, flask.g.store.disable_user)
+    @app.post("/users/<name>/disable")
+    @login_required
+    def _users_disable(name):
+        return _users_mutation(name, flask.g.store.disable_user)
 
-    @app.post("/users/<jmeno>/enable")
-    @prihlasen
-    def _uzivatele_zapnout(jmeno):
-        return _uzivatele_mutace(jmeno, flask.g.store.enable_user)
+    @app.post("/users/<name>/enable")
+    @login_required
+    def _users_enable(name):
+        return _users_mutation(name, flask.g.store.enable_user)
 
-    @app.post("/users/<jmeno>/delete")
-    @prihlasen
-    def _uzivatele_smazat(jmeno):
-        return _uzivatele_mutace(jmeno, flask.g.store.remove_user)
+    @app.post("/users/<name>/delete")
+    @login_required
+    def _users_delete(name):
+        return _users_mutation(name, flask.g.store.remove_user)
 
-    @app.post("/users/<jmeno>/revoke")
-    @prihlasen
-    def _uzivatele_odvolat(jmeno):
-        return _uzivatele_mutace(jmeno, flask.g.store.revoke_credential)
+    @app.post("/users/<name>/revoke")
+    @login_required
+    def _users_revoke(name):
+        return _users_mutation(name, flask.g.store.revoke_credential)
 
-    @app.post("/users/<jmeno>/pair")
-    @prihlasen
-    def _uzivatele_parovat(jmeno):
-        return _uzivatele_mutace(
-            jmeno, flask.g.store.pair,
-            presmerovani=lambda zavedeni: flask.url_for(
-                "_uzivatele_qr", jmeno=zavedeni.name
+    @app.post("/users/<name>/pair")
+    @login_required
+    def _users_pair(name):
+        return _users_mutation(
+            name, flask.g.store.pair,
+            redirect_to=lambda enrolment: flask.url_for(
+                "_users_qr", name=enrolment.name
             ),
         )
 
-    @app.get("/users/qr/<jmeno>")
-    @prihlasen
-    def _uzivatele_qr(jmeno):
+    @app.get("/users/qr/<name>")
+    @login_required
+    def _users_qr(name):
         # Jmeno se sklada do cesty na disku - overit DRIV, nez se ceho
         # dotkne, stejny vzorec jako knihovni metody (check_identity() prvni
         # radek). Zdeformovane jmeno je 404, ne 500 z divneho souboroveho
         # dotazu.
         try:
-            jmeno = check_identity(jmeno)
+            name = check_identity(name)
         except ValueError:
             flask.abort(404)
         store = flask.g.store
-        adresar = store.home / f"user-{jmeno}"
-        cesta = adresar / "totp.txt"
-        obrazec = cesta.read_text(encoding="utf-8") if cesta.is_file() else None
-        sparovano = (adresar / "totp.paired").is_file()
+        directory = store.home / f"user-{name}"
+        path = directory / "totp.txt"
+        qr_art = path.read_text(encoding="utf-8") if path.is_file() else None
+        paired = (directory / "totp.paired").is_file()
         # Vyprsele zavedeni uz `authenticate` odmita (`expired`) - ukazovat
         # k nemu dal QR a tajemstvi znamena posilat cloveka opsat neco, co
         # mu stejne neprojde. Artefakty na disku zustavaji; skryva se jen
         # jejich zobrazeni, dokud nekdo nevyda nove.
-        vyprselo = store.enrolment_expired(adresar)
-        stitek = f"{store.realm}-member-{jmeno}"
+        expired = store.enrolment_expired(directory)
+        label = f"{store.realm}-member-{name}"
         # Tyz obsah jako QR, jen k opsani - kdo sedi u konzole a nema cim
         # skenovat, jinak nema jak zavedeni dokoncit.
-        uri, secret = _zavedeni_k_opsani(adresar)
-        return _bez_ukladani(flask.render_template(
-            "qr.html", jmeno=jmeno, obrazec=obrazec, sparovano=sparovano,
-            vyprselo=vyprselo, stitek=stitek, uri=uri, secret=secret,
-            zpet=flask.url_for("_uzivatele_seznam"),
+        uri, secret = _enrolment_text(directory)
+        return _no_store(flask.render_template(
+            "qr.html", name=name, qr_art=qr_art, paired=paired,
+            expired=expired, label=label, uri=uri, secret=secret,
+            back_url=flask.url_for("_users_list"),
         ))
 
     # == skupiny =============================================================
     #
-    # Na rozdil od `_uzivatele_mutace` bere `_skupiny_mutace` cil presmerovani
+    # Na rozdil od `_users_mutation` bere `_groups_mutation` cil presmerovani
     # VZDY explicitne (`cil=`) - mutace clenu/zretezeni maji po chybe
     # i po uspechu zustat na detailu prave upravovane skupiny, ne skocit
     # zpatky na holy vypis (jedina vyjimka je smazani skupiny samotne,
     # po kterem uz detail nedava smysl).
 
-    def _radek_skupiny(store, nazev: str) -> dict:
-        skupina = store.group(nazev)
+    def _group_row(store, name: str) -> dict:
+        group = store.group(name)
         return {
-            "nazev": nazev,
-            "pocet_clenu": len(skupina.members),
-            "pocet_zahrnuti": len(skupina.includes),
+            "name": name,
+            "member_count": len(group.members),
+            "include_count": len(group.includes),
         }
 
-    def _detail_skupiny(store, nazev: str) -> dict | None:
+    def _group_detail(store, name: str) -> dict | None:
         """Detail jedne skupiny: prime cleny, zahrnute skupiny a kdo do ni
         patri jen pres zretezeni (uzaver principalu minus prime clenstvi -
-        cteni bez zamku, stejne jako `_radek_cloveka`)."""
-        skupina = store.group(nazev)
-        if skupina is None:
+        cteni bez zamku, stejne jako `_user_row`)."""
+        group = store.group(name)
+        if group is None:
             return None
-        principal = f"group:{nazev}"
-        pres_zretezeni = sorted(
-            jmeno for jmeno in store.users()
-            if jmeno not in skupina.members
-            and principal in store.user(jmeno).principals
+        principal = f"group:{name}"
+        via_chain = sorted(
+            user_name for user_name in store.users()
+            if user_name not in group.members
+            and principal in store.user(user_name).principals
         )
         return {
-            "nazev": nazev,
-            "clenove": skupina.members,
-            "zahrnute": skupina.includes,
-            "pres_zretezeni": pres_zretezeni,
-            "kandidati_clenove": [
-                j for j in store.users() if j not in skupina.members
+            "name": name,
+            "members": group.members,
+            "includes": group.includes,
+            "via_chain": via_chain,
+            "member_candidates": [
+                j for j in store.users() if j not in group.members
             ],
-            "ostatni_skupiny": [
+            "other_groups": [
                 g for g in store.groups()
-                if g != nazev and g not in skupina.includes
+                if g != name and g not in group.includes
             ],
         }
 
     @app.get("/groups")
-    @prihlasen
-    def _skupiny_seznam():
+    @login_required
+    def _groups_list():
         store = flask.g.store
-        vsechny = store.groups()
-        dotaz = flask.request.args.get("q", "").strip().lower()
-        vybrane = _vyfiltruj(vsechny, dotaz)
-        skupiny = [_radek_skupiny(store, nazev) for nazev in vybrane]
+        all_groups = store.groups()
+        query = flask.request.args.get("q", "").strip().lower()
+        selected = _filter_names(all_groups, query)
+        groups = [_group_row(store, name) for name in selected]
         detail = None
-        pozadovana = flask.request.args.get("group")
-        if pozadovana:
+        requested = flask.request.args.get("group")
+        if requested:
             try:
-                pozadovana = check_name(pozadovana)
+                requested = check_name(requested)
             except ValueError:
-                pozadovana = None
-            if pozadovana:
-                detail = _detail_skupiny(store, pozadovana)
+                requested = None
+            if requested:
+                detail = _group_detail(store, requested)
         return flask.render_template(
-            "skupiny.html", skupiny=skupiny, detail=detail, dotaz=dotaz,
-            celkem=len(vsechny), videno=len(vybrane),
+            "groups.html", groups=groups, detail=detail, query=query,
+            total=len(all_groups), shown=len(selected),
         )
 
-    def _skupiny_mutace(akce, *args, cil, presmerovani=None):
+    def _groups_mutation(action, *args, target, redirect_to=None):
         """Spolecny tvar mutaci skupin: CSRF -> knihovni volani -> flash ->
-        redirect na `cil` (chyba i vychozi uspech) nebo `presmerovani(vysledek)`
+        redirect na `target` (chyba i vychozi uspech) nebo `redirect_to(result)`
         (uspech, kdyz ma jit jinam)."""
-        over_csrf()
+        verify_csrf()
         try:
-            vysledek = akce(*args)
-        except ValueError as chyba:
-            flask.flash(f"{_prelozit('spolecne.error')}: {chyba}", "chyba")
-            return flask.redirect(cil)
-        flask.flash(_prelozit("spolecne.done"), "ok")
-        return flask.redirect(presmerovani(vysledek) if presmerovani else cil)
+            result = action(*args)
+        except ValueError as error:
+            flask.flash(f"{_translate('spolecne.error')}: {error}", "chyba")
+            return flask.redirect(target)
+        flask.flash(_translate("spolecne.done"), "ok")
+        return flask.redirect(redirect_to(result) if redirect_to else target)
 
     @app.post("/groups/add")
-    @prihlasen
-    def _skupiny_pridat():
-        nazev = flask.request.form.get("nazev", "")
-        return _skupiny_mutace(
-            flask.g.store.add_group, nazev,
-            cil=flask.url_for("_skupiny_seznam"),
-            presmerovani=lambda _: flask.url_for("_skupiny_seznam", group=nazev),
+    @login_required
+    def _groups_add():
+        name = flask.request.form.get("nazev", "")
+        return _groups_mutation(
+            flask.g.store.add_group, name,
+            target=flask.url_for("_groups_list"),
+            redirect_to=lambda _: flask.url_for(
+                "_groups_list", group=name, _anchor="group-detail",
+            ),
         )
 
-    @app.post("/groups/<nazev>/delete")
-    @prihlasen
-    def _skupiny_smazat(nazev):
-        return _skupiny_mutace(
-            flask.g.store.remove_group, nazev,
-            cil=flask.url_for("_skupiny_seznam"),
+    @app.post("/groups/<name>/delete")
+    @login_required
+    def _groups_delete(name):
+        return _groups_mutation(
+            flask.g.store.remove_group, name,
+            target=flask.url_for("_groups_list"),
         )
 
-    @app.post("/groups/<nazev>/member")
-    @prihlasen
-    def _skupiny_clen_pridat(nazev):
-        clen = flask.request.form.get("clen", "")
-        return _skupiny_mutace(
-            flask.g.store.add_member, nazev, clen,
-            cil=flask.url_for("_skupiny_seznam", group=nazev),
+    @app.post("/groups/<name>/member")
+    @login_required
+    def _groups_member_add(name):
+        member = flask.request.form.get("clen", "")
+        return _groups_mutation(
+            flask.g.store.add_member, name, member,
+            target=flask.url_for(
+                "_groups_list", group=name, _anchor="group-detail",
+            ),
         )
 
-    @app.post("/groups/<nazev>/member/<clen>/remove")
-    @prihlasen
-    def _skupiny_clen_odebrat(nazev, clen):
-        return _skupiny_mutace(
-            flask.g.store.remove_member, nazev, clen,
-            cil=flask.url_for("_skupiny_seznam", group=nazev),
+    @app.post("/groups/<name>/member/<member>/remove")
+    @login_required
+    def _groups_member_remove(name, member):
+        return _groups_mutation(
+            flask.g.store.remove_member, name, member,
+            target=flask.url_for(
+                "_groups_list", group=name, _anchor="group-detail",
+            ),
         )
 
-    @app.post("/groups/<nazev>/chain")
-    @prihlasen
-    def _skupiny_zretezit(nazev):
-        zahrnuti = flask.request.form.get("zahrnuti", "")
-        return _skupiny_mutace(
-            flask.g.store.include, nazev, zahrnuti,
-            cil=flask.url_for("_skupiny_seznam", group=nazev),
+    @app.post("/groups/<name>/chain")
+    @login_required
+    def _groups_chain(name):
+        included = flask.request.form.get("zahrnuti", "")
+        return _groups_mutation(
+            flask.g.store.include, name, included,
+            target=flask.url_for(
+                "_groups_list", group=name, _anchor="group-detail",
+            ),
         )
 
     # == aplikace =============================================================
     #
     # Jedina stranka s vyjimkou z PRG: uspesna registrace vraci PLNY klic
     # PRAVE JEDNOU - misto redirectu se rovnou renderuje vysledkova sablona
-    # `klic.html` primo z teto POST odpovedi. Klic nikdy nejde do session ani
+    # `key.html` primo z teto POST odpovedi. Klic nikdy nejde do session ani
     # do flashe (obe jsou cookie - klic by tam byl navic a mohl by presahnout
     # limit velikosti cookie). Neuspech (napr. duplicitni jmeno) naopak
     # zustava na PRG + flash, presne jako u ostatnich stranek - znovunacteni
     # po chybe je bezpecne (dalsi pokus zase jen selze na duplicite).
 
-    def _radek_aplikace(komponenta) -> dict:
+    def _app_row(component) -> dict:
         return {
-            "jmeno": komponenta.name,
-            "key_id": komponenta.key_id,
-            "otisk": komponenta.key_hash[:12],
-            "origins": komponenta.origins,
-            "detail": komponenta.detail,
+            "name": component.name,
+            "key_id": component.key_id,
+            "fingerprint": component.key_hash[:12],
+            "origins": component.origins,
+            "detail": component.detail,
         }
 
     @app.get("/applications")
-    @prihlasen
-    def _aplikace_seznam():
+    @login_required
+    def _apps_list():
         store = flask.g.store
-        aplikace = [_radek_aplikace(k) for k in store.components()]
+        apps = [_app_row(k) for k in store.components()]
         # Tataz roletka jako u lidi a spravcu, nad tymz auditem a stejnym
         # jednim pruchodem - jen se hleda podle `component` misto `subject`
         # a bez filtru na `kind`: aplikaci patri kazdy jeji pozadavek
         # (`authenticate`, `access`, `origin_denied`).
-        pouziti = recent_by(
+        usage = recent_by(
             store.home, "component",
-            [radek["jmeno"] for radek in aplikace],
-            limit=_POSLEDNICH_PRIHLASENI,
+            [row["name"] for row in apps],
+            limit=_RECENT_LIMIT,
         )
-        for radek in aplikace:
-            radek["prihlaseni"] = [
-                _radek_prihlaseni(u, _pozadavek(u))
-                for u in pouziti.get(radek["jmeno"], ())
+        for row in apps:
+            row["recent"] = [
+                _recent_row(u, _request_text(u))
+                for u in usage.get(row["name"], ())
             ]
-        return flask.render_template("aplikace.html", aplikace=aplikace)
+        return flask.render_template("applications.html", apps=apps)
 
     @app.post("/applications/add")
-    @prihlasen
-    def _aplikace_pridat():
+    @login_required
+    def _apps_add():
         """Prvni krok: vznikne aplikace a klic. Rozsahy se pridavaji zvlast.
 
         Jedno pole na cárkami oddeleny seznam CIDR bylo nesrozumitelne a
         neslo z nej po zalozeni nic ubrat, aniz by se vymenil klic. Registrace
-        proto rozsahy nebere; druhy krok (`_aplikace_rozsah_pridat`) je pridava
+        proto rozsahy nebere; druhy krok (`_apps_range_add`) je pridava
         po jednom a umi je i odebrat.
         """
-        over_csrf()
-        jmeno = flask.request.form.get("jmeno", "").strip()
+        verify_csrf()
+        name = flask.request.form.get("jmeno", "").strip()
         detail = flask.request.form.get("detail") == "on"
         try:
-            klic = flask.g.store.register_component(
-                jmeno, origins=(), detail=detail
+            key = flask.g.store.register_component(
+                name, origins=(), detail=detail
             )
-        except ValueError as chyba:
-            flask.flash(f"{_prelozit('spolecne.error')}: {chyba}", "chyba")
-            return flask.redirect(flask.url_for("_aplikace_seznam"))
-        return _bez_ukladani(
-            flask.render_template("klic.html", jmeno=jmeno, klic=klic)
+        except ValueError as error:
+            flask.flash(f"{_translate('spolecne.error')}: {error}", "chyba")
+            return flask.redirect(flask.url_for("_apps_list"))
+        return _no_store(
+            flask.render_template("key.html", name=name, key=key)
         )
 
-    def _aplikace_mutace(jmeno, akce):
-        """Stejny tvar jako `_uzivatele_mutace`/`_skupiny_mutace`, jen bez
+    def _apps_mutation(name, action):
+        """Stejny tvar jako `_users_mutation`/`_groups_mutation`, jen bez
         volitelneho presmerovani - odvolani vzdy konci zpet na vypisu."""
-        over_csrf()
+        verify_csrf()
         try:
-            akce(jmeno)
-        except ValueError as chyba:
-            flask.flash(f"{_prelozit('spolecne.error')}: {chyba}", "chyba")
+            action(name)
+        except ValueError as error:
+            flask.flash(f"{_translate('spolecne.error')}: {error}", "chyba")
         else:
-            flask.flash(_prelozit("spolecne.done"), "ok")
-        return flask.redirect(flask.url_for("_aplikace_seznam"))
+            flask.flash(_translate("spolecne.done"), "ok")
+        return flask.redirect(flask.url_for("_apps_list"))
 
-    @app.post("/applications/<jmeno>/revoke")
-    @prihlasen
-    def _aplikace_odvolat(jmeno):
-        return _aplikace_mutace(jmeno, flask.g.store.revoke_component)
+    @app.post("/applications/<name>/revoke")
+    @login_required
+    def _apps_revoke(name):
+        return _apps_mutation(name, flask.g.store.revoke_component)
 
-    @app.post("/applications/<jmeno>/detail")
-    @prihlasen
-    def _aplikace_detail(jmeno):
+    @app.post("/applications/<name>/detail")
+    @login_required
+    def _apps_detail(name):
         # Cilovy stav chodi formularem, ne prepinacem "obrat to": dva
         # soubezne otevrene vypisy by se jinak prehazovaly navzajem.
-        chce = flask.request.form.get("detail") == "on"
-        return _aplikace_mutace(
-            jmeno, lambda n: flask.g.store.set_detail(n, chce)
+        wanted = flask.request.form.get("detail") == "on"
+        return _apps_mutation(
+            name, lambda n: flask.g.store.set_detail(n, wanted)
         )
 
-    def _aplikace_rozsah(jmeno, akce):
+    def _apps_range(name, action):
         """Spolecny tvar pro pridani i odebrani rozsahu.
 
         Rozsah chodi FORMULAREM, ne v ceste: CIDR obsahuje lomitko a v ceste
@@ -899,44 +909,44 @@ def create_console_app(cfg: ServiceConfig):
         stoji primo v radku sve aplikace, takze cil je dany radkem a nevybira
         se ze seznamu. Drive tu seznam byl a jmeno muselo chodit s nim.
         """
-        over_csrf()
-        rozsah = flask.request.form.get("rozsah", "").strip()
-        if not jmeno or not rozsah:
+        verify_csrf()
+        cidr = flask.request.form.get("rozsah", "").strip()
+        if not name or not cidr:
             flask.flash(
-                f"{_prelozit('spolecne.error')}: {_prelozit('aplikace.range_empty')}",
+                f"{_translate('spolecne.error')}: {_translate('aplikace.range_empty')}",
                 "chyba",
             )
-            return flask.redirect(flask.url_for("_aplikace_seznam"))
+            return flask.redirect(flask.url_for("_apps_list"))
         try:
-            akce(jmeno, rozsah)
-        except ValueError as chyba:
-            flask.flash(f"{_prelozit('spolecne.error')}: {chyba}", "chyba")
+            action(name, cidr)
+        except ValueError as error:
+            flask.flash(f"{_translate('spolecne.error')}: {error}", "chyba")
         else:
-            flask.flash(_prelozit("spolecne.done"), "ok")
-        return flask.redirect(flask.url_for("_aplikace_seznam"))
+            flask.flash(_translate("spolecne.done"), "ok")
+        return flask.redirect(flask.url_for("_apps_list"))
 
-    @app.post("/applications/<jmeno>/ranges/add")
-    @prihlasen
-    def _aplikace_rozsah_pridat(jmeno):
-        return _aplikace_rozsah(jmeno, flask.g.store.add_origin)
+    @app.post("/applications/<name>/ranges/add")
+    @login_required
+    def _apps_range_add(name):
+        return _apps_range(name, flask.g.store.add_origin)
 
-    @app.post("/applications/<jmeno>/ranges/remove")
-    @prihlasen
-    def _aplikace_rozsah_odebrat(jmeno):
-        return _aplikace_rozsah(jmeno, flask.g.store.remove_origin)
+    @app.post("/applications/<name>/ranges/remove")
+    @login_required
+    def _apps_range_remove(name):
+        return _apps_range(name, flask.g.store.remove_origin)
 
     # == spravci ==============================================================
     #
-    # Zrcadli uzivatele (`_uzivatele_mutace`/`_radek_cloveka`), jen bez "zakazany" -
+    # Zrcadli uzivatele (`_users_mutation`/`_user_row`), jen bez "zakazany" -
     # spravci nemaji disable_admin/enable_admin, takze ten stav pro ne
-    # neexistuje. `qr.html` je SDILENA s uzivateli - `_spravci_qr` je tenka route
+    # neexistuje. `qr.html` je SDILENA s uzivateli - `_admins_qr` je tenka route
     # nad stejnou sablonou, jen cte z `admin-<jmeno>` a posila jiny stitek
     # a jiny "zpet" cil.
 
-    def _radek_spravce(store, jmeno: str) -> dict:
+    def _admin_row(store, name: str) -> dict:
         """Jeden radek vypisu spravcu: stitek pro parovani a stav.
 
-        Tri stavy, v tomto poradi (stejna uvaha jako `_radek_cloveka`, jen bez
+        Tri stavy, v tomto poradi (stejna uvaha jako `_user_row`, jen bez
         vetve "zakazany" - ta pro spravce v konzoli neexistuje):
         - bez povereni: zadne `totp.secret` ani `totp.issued` - typicky po
           `revoke_admin_credential`, pred novym parovanim.
@@ -944,128 +954,128 @@ def create_console_app(cfg: ServiceConfig):
         - sparovano: zbytek (typicky `totp.paired`) - vizualne stejna trida
           jako "aktivni" u lidi (`stav-active`), text z `spravci.paired`.
         """
-        adresar = store.home / f"admin-{jmeno}"
-        tajemstvi = adresar / "totp.secret"
-        vydano = adresar / "totp.issued"
-        sparovano = adresar / "totp.paired"
-        if not tajemstvi.is_file() and not vydano.is_file():
-            stav, stav_text = "no_credential", _prelozit("uzivatele.no_credential")
-        elif vydano.is_file() and not sparovano.is_file():
-            if store.enrolment_expired(adresar):
-                # Viz `_radek_cloveka` - stejna past s "plati jeste 0 dni".
-                stav = "expired"
-                stav_text = _prelozit("uzivatele.expired")
+        directory = store.home / f"admin-{name}"
+        secret_file = directory / "totp.secret"
+        issued = directory / "totp.issued"
+        paired = directory / "totp.paired"
+        if not secret_file.is_file() and not issued.is_file():
+            state, state_text = "no_credential", _translate("uzivatele.no_credential")
+        elif issued.is_file() and not paired.is_file():
+            if store.enrolment_expired(directory):
+                # Viz `_user_row` - stejna past s "plati jeste 0 dni".
+                state = "expired"
+                state_text = _translate("uzivatele.expired")
             else:
-                stav = "waiting"
-                stav_text = _prelozit("uzivatele.waiting").format(
-                    dni=store.enrolment_days_left(adresar)
+                state = "waiting"
+                state_text = _translate("uzivatele.waiting").format(
+                    dni=store.enrolment_days_left(directory)
                 )
         else:
-            stav, stav_text = "active", _prelozit("spravci.paired")
+            state, state_text = "active", _translate("spravci.paired")
         return {
-            "jmeno": jmeno, "stitek": f"{store.realm}-admin-{jmeno}",
-            "stav": stav, "stav_text": stav_text,
-            "vydano": _razitko(vydano),
-            "sparovano": _razitko(sparovano),
+            "name": name, "label": f"{store.realm}-admin-{name}",
+            "state": state, "state_text": state_text,
+            "issued_at": _file_stamp(issued),
+            "paired_at": _file_stamp(paired),
         }
 
     @app.get("/admins")
-    @prihlasen
-    def _spravci_seznam():
+    @login_required
+    def _admins_list():
         store = flask.g.store
-        jmena = store.admins()
-        spravci = [_radek_spravce(store, jmeno) for jmeno in jmena]
-        # Jeden pruchod auditem pro celou stranku - viz `_uzivatele_seznam`.
+        names = store.admins()
+        admins = [_admin_row(store, name) for name in names]
+        # Jeden pruchod auditem pro celou stranku - viz `_users_list`.
         # Lisi se jen prefix subjektu: spravce a clen stejneho jmena jsou
         # dve ruzne identity (viz `Enrolment.principal`).
-        prihlaseni = recent_by(
+        recent = recent_by(
             store.home, "subject",
-            [f"admin:{jmeno}" for jmeno in jmena],
+            [f"admin:{name}" for name in names],
             kind="authenticate",
-            limit=_POSLEDNICH_PRIHLASENI,
+            limit=_RECENT_LIMIT,
         )
-        for radek in spravci:
-            radek["prihlaseni"] = [
-                _radek_prihlaseni(u, u.get("component"))
-                for u in prihlaseni.get(f"admin:{radek['jmeno']}", ())
+        for row in admins:
+            row["recent"] = [
+                _recent_row(u, u.get("component"))
+                for u in recent.get(f"admin:{row['name']}", ())
             ]
-        return flask.render_template("spravci.html", spravci=spravci)
+        return flask.render_template("admins.html", admins=admins)
 
-    def _spravci_mutace(jmeno, akce, presmerovani=None):
-        """Stejny tvar jako `_uzivatele_mutace` - CSRF -> knihovni volani -> flash ->
+    def _admins_mutation(name, action, redirect_to=None):
+        """Stejny tvar jako `_users_mutation` - CSRF -> knihovni volani -> flash ->
         redirect. Guard posledniho spravce (`_require_not_last_admin`) hlasi
         `ValueError` s presnym textem z knihovny, zobrazenym surove."""
-        over_csrf()
+        verify_csrf()
         try:
-            vysledek = akce(jmeno)
-        except ValueError as chyba:
-            flask.flash(f"{_prelozit('spolecne.error')}: {chyba}", "chyba")
-            return flask.redirect(flask.url_for("_spravci_seznam"))
-        flask.flash(_prelozit("spolecne.done"), "ok")
-        cil = (
-            presmerovani(vysledek) if presmerovani
-            else flask.url_for("_spravci_seznam")
+            result = action(name)
+        except ValueError as error:
+            flask.flash(f"{_translate('spolecne.error')}: {error}", "chyba")
+            return flask.redirect(flask.url_for("_admins_list"))
+        flask.flash(_translate("spolecne.done"), "ok")
+        target = (
+            redirect_to(result) if redirect_to
+            else flask.url_for("_admins_list")
         )
-        return flask.redirect(cil)
+        return flask.redirect(target)
 
     @app.post("/admins/add")
-    @prihlasen
-    def _spravci_pridat():
-        jmeno = flask.request.form.get("jmeno", "")
-        return _spravci_mutace(
-            jmeno, flask.g.store.add_admin,
-            presmerovani=lambda zavedeni: flask.url_for(
-                "_spravci_qr", jmeno=zavedeni.name
+    @login_required
+    def _admins_add():
+        name = flask.request.form.get("jmeno", "")
+        return _admins_mutation(
+            name, flask.g.store.add_admin,
+            redirect_to=lambda enrolment: flask.url_for(
+                "_admins_qr", name=enrolment.name
             ),
         )
 
-    @app.post("/admins/<jmeno>/remove")
-    @prihlasen
-    def _spravci_odebrat(jmeno):
-        return _spravci_mutace(jmeno, flask.g.store.remove_admin)
+    @app.post("/admins/<name>/remove")
+    @login_required
+    def _admins_remove(name):
+        return _admins_mutation(name, flask.g.store.remove_admin)
 
-    @app.post("/admins/<jmeno>/revoke")
-    @prihlasen
-    def _spravci_odvolat(jmeno):
-        return _spravci_mutace(jmeno, flask.g.store.revoke_admin_credential)
+    @app.post("/admins/<name>/revoke")
+    @login_required
+    def _admins_revoke(name):
+        return _admins_mutation(name, flask.g.store.revoke_admin_credential)
 
-    @app.post("/admins/<jmeno>/pair")
-    @prihlasen
-    def _spravci_parovat(jmeno):
-        return _spravci_mutace(
-            jmeno, flask.g.store.pair_admin,
-            presmerovani=lambda zavedeni: flask.url_for(
-                "_spravci_qr", jmeno=zavedeni.name
+    @app.post("/admins/<name>/pair")
+    @login_required
+    def _admins_pair(name):
+        return _admins_mutation(
+            name, flask.g.store.pair_admin,
+            redirect_to=lambda enrolment: flask.url_for(
+                "_admins_qr", name=enrolment.name
             ),
         )
 
-    @app.get("/admins/qr/<jmeno>")
-    @prihlasen
-    def _spravci_qr(jmeno):
-        # Stejna uvaha jako u `_uzivatele_qr`: jmeno overit DRIV, nez se ceho na
+    @app.get("/admins/qr/<name>")
+    @login_required
+    def _admins_qr(name):
+        # Stejna uvaha jako u `_users_qr`: jmeno overit DRIV, nez se ceho na
         # disku dotkne - zdeformovane jmeno je 404, ne 500.
         try:
-            jmeno = check_identity(jmeno)
+            name = check_identity(name)
         except ValueError:
             flask.abort(404)
         store = flask.g.store
-        adresar = store.home / f"admin-{jmeno}"
-        cesta = adresar / "totp.txt"
-        obrazec = cesta.read_text(encoding="utf-8") if cesta.is_file() else None
-        sparovano = (adresar / "totp.paired").is_file()
+        directory = store.home / f"admin-{name}"
+        path = directory / "totp.txt"
+        qr_art = path.read_text(encoding="utf-8") if path.is_file() else None
+        paired = (directory / "totp.paired").is_file()
         # Vyprsele zavedeni uz `authenticate` odmita (`expired`) - ukazovat
         # k nemu dal QR a tajemstvi znamena posilat cloveka opsat neco, co
         # mu stejne neprojde. Artefakty na disku zustavaji; skryva se jen
         # jejich zobrazeni, dokud nekdo nevyda nove.
-        vyprselo = store.enrolment_expired(adresar)
-        stitek = f"{store.realm}-admin-{jmeno}"
+        expired = store.enrolment_expired(directory)
+        label = f"{store.realm}-admin-{name}"
         # Tyz obsah jako QR, jen k opsani - kdo sedi u konzole a nema cim
         # skenovat, jinak nema jak zavedeni dokoncit.
-        uri, secret = _zavedeni_k_opsani(adresar)
-        return _bez_ukladani(flask.render_template(
-            "qr.html", jmeno=jmeno, obrazec=obrazec, sparovano=sparovano,
-            vyprselo=vyprselo, stitek=stitek, uri=uri, secret=secret,
-            zpet=flask.url_for("_spravci_seznam"),
+        uri, secret = _enrolment_text(directory)
+        return _no_store(flask.render_template(
+            "qr.html", name=name, qr_art=qr_art, paired=paired,
+            expired=expired, label=label, uri=uri, secret=secret,
+            back_url=flask.url_for("_admins_list"),
         ))
 
     # == audit ================================================================
@@ -1075,7 +1085,7 @@ def create_console_app(cfg: ServiceConfig):
     # `.get` - rucne poskozeny/kusy radek (napr. jen {"t": ..., "kind":
     # "weird"}) nesmi stranku shodit, jen se zobrazi prazdne/surove.
 
-    def _validni_den(text: str) -> str | None:
+    def _valid_day(text: str) -> str | None:
         """`text` jako 'RRRR-MM-DD', jinak None (= pouzij vychozi den).
 
         HTML date input muze dorazit prazdny nebo rucne poskozeny (upraveny
@@ -1090,242 +1100,249 @@ def create_console_app(cfg: ServiceConfig):
             return None
         return text
 
-    def _radek_udalosti(udalost: dict) -> dict:
+    def _event_row(event: dict) -> dict:
         """Jeden radek auditu - vsechna pole tolerantne pres `.get`.
 
-        `vysledek` ma tri barvy: `ok` zelene, `denied` cervene (+ `reason`
+        Vysledek ma tri barvy: `ok` zelene, `denied` cervene (+ `reason`
         vedle), zapisy (`kind == "write"`, ktere `outcome` vubec nemaji)
         modre; cokoli jine (`need_factor`, `throttled`, chybejici) neutralne.
         Neznamy `kind` se do udalosti propise surove - zadny seznam znamych
         hodnot, zadna vyjimka.
         """
-        kind = udalost.get("kind", "")
-        outcome = udalost.get("outcome")
+        kind = event.get("kind", "")
+        outcome = event.get("outcome")
         if outcome == "ok":
-            trida, text = "vysledek-ok", outcome
+            css_class, text = "vysledek-ok", outcome
         elif outcome == "denied":
-            trida, text = "vysledek-denied", outcome
+            css_class, text = "vysledek-denied", outcome
         elif outcome:
-            trida, text = "vysledek-jiny", outcome
+            css_class, text = "vysledek-jiny", outcome
         elif kind == "write":
-            trida, text = "vysledek-write", kind
+            css_class, text = "vysledek-write", kind
         else:
-            trida, text = "vysledek-jiny", ""
-        udalost_text = " ".join(
-            kus for kus in (
+            css_class, text = "vysledek-jiny", ""
+        event_text = " ".join(
+            part for part in (
                 kind,
-                udalost.get("op") or udalost.get("purpose") or udalost.get("path"),
-            ) if kus
+                event.get("op") or event.get("purpose") or event.get("path"),
+            ) if part
         )
         # `component` uz do "kdo" NEPATRI - ma vlastni sloupec. Zustava
         # subjekt (koho se ptalo) nebo akter (kdo zapsal); pozadavek odmitnuty
         # origin ACL zadneho nema, protoze padl driv, nez do hry vstoupila
         # jakakoli identita.
-        kdo = udalost.get("subject") or udalost.get("actor") or "—"
+        who = event.get("subject") or event.get("actor") or "—"
         return {
-            "cas": udalost.get("t", ""),
-            "udalost": udalost_text,
-            "kdo": kdo,
+            "time": audit_views.utc_stamp(event),
+            "event": event_text,
+            "who": who,
             # Chybejici pole je pomlcka, ne prazdno: lokalni volani adresu
             # nema a prazdna bunka by vypadala jako rozbite vykresleni.
-            "odkud": udalost.get("origin") or "—",
-            "aplikace": udalost.get("component") or "—",
-            "key_id": udalost.get("key_id", ""),
-            "vysledek_text": text,
-            "vysledek_trida": trida,
-            "reason": _duvod(udalost),
+            "origin": event.get("origin") or "—",
+            "app": event.get("component") or "—",
+            "key_id": event.get("key_id", ""),
+            "result_text": text,
+            "result_class": css_class,
+            "reason": _reason(event),
         }
 
     # -- spolecne vsem auditnim pohledum -------------------------------------
 
     #: Rychle volby obdobi -> kolik dni zpet (vcetne dneska).
-    _OBDOBI = {"dnes": 1, "7": 7, "30": 30, "90": 90}
+    _PERIODS = {"dnes": 1, "7": 7, "30": 30, "90": 90}
 
-    def _obdobi() -> tuple[str, str, str]:
-        """(od, do, rychla volba) - dny jsou MISTNI, jak je vidi clovek.
+    def _utc_today() -> date:
+        """Dnesek v UTC - tyz den, pod kterym audit prave zapisuje."""
+        return datetime.now(UTC).date()
+
+    def _period() -> tuple[str, str, str]:
+        """(od, do, rychla volba) - dny jsou v UTC, stejne jako soubory auditu.
 
         Explicitni `od`/`do` z formulare maji prednost pred rychlou volbou.
         Volba, ktera obdobi presne odpovida, se oznaci i tehdy, kdyz prislo
         jako dvojice dat.
         """
-        dnes = datetime.now().astimezone().date()
-        volba = flask.request.args.get("obdobi", "")
-        dni = _OBDOBI.get(volba, _AUDIT_VYCHOZI_DNI)
-        vychozi_od = (dnes - timedelta(days=dni - 1)).isoformat()
+        today = _utc_today()
+        choice = flask.request.args.get("obdobi", "")
+        days = _PERIODS.get(choice, _AUDIT_DEFAULT_DAYS)
+        default_from = (today - timedelta(days=days - 1)).isoformat()
         # Jmena MUSI sedet s `name=` ve formulari. Drive tu stalo
         # "from"/"to"/"subject", zatimco formular posilal "od"/"do"/"subjekt"
         # - tri z peti filtru proto tise nedelaly nic.
-        od = _validni_den(flask.request.args.get("od", "")) or vychozi_od
-        do = _validni_den(flask.request.args.get("do", "")) or dnes.isoformat()
-        oznacena = ""
-        if do == dnes.isoformat():
-            for klic, pocet in _OBDOBI.items():
-                if od == (dnes - timedelta(days=pocet - 1)).isoformat():
-                    oznacena = klic
-        return od, do, oznacena
+        date_from = _valid_day(flask.request.args.get("od", "")) or default_from
+        date_to = _valid_day(flask.request.args.get("do", "")) or today.isoformat()
+        marked = ""
+        if date_to == today.isoformat():
+            for key, count in _PERIODS.items():
+                if date_from == (today - timedelta(days=count - 1)).isoformat():
+                    marked = key
+        return date_from, date_to, marked
 
-    def _udalosti_obdobi(store, od: str, do: str) -> list[dict]:
-        """Vsechny udalosti obdobi, chronologicky, podle MISTNIHO dne.
+    def _period_events(store, date_from: str, date_to: str) -> list[dict]:
+        """Vsechny udalosti obdobi, chronologicky, podle dne v UTC.
 
-        Soubory auditu jsou po dnech v UTC, clovek ale vybira mistni dny.
-        Cte se proto o den vic z kazde strany a orizne se az podle mistniho
-        casu udalosti - jinak by "Dnes" v CEST prislo o prvni dve hodiny.
+        Soubory auditu jsou po dnech v UTC a obdobi se vybira take v UTC,
+        takze zvolene dny jsou primo soubory, ktere se prectou. Nic se
+        neprepocitava a zadna udalost nepreskoci do sousedniho dne.
         """
-        prvni = (date.fromisoformat(od) - timedelta(days=1)).isoformat()
-        posledni = (date.fromisoformat(do) + timedelta(days=1)).isoformat()
-        vysledek = []
-        for u in read_events(store.home, day_from=prvni, day_to=posledni):
-            d = pohledy.den(u)
-            if d is None or od <= d.isoformat() <= do:
-                vysledek.append(u)
-        return vysledek
+        return read_events(store.home, day_from=date_from, day_to=date_to)
 
-    def _odkaz(**zmeny) -> str:
-        """Tataz stranka se stejnymi filtry, jen se `zmeny` (None = pryc)."""
-        argumenty = flask.request.args.to_dict()
-        for klic, hodnota in zmeny.items():
-            if hodnota in (None, ""):
-                argumenty.pop(klic, None)
+    def _link(**changes) -> str:
+        """Tataz stranka se stejnymi filtry, jen se `changes` (None = pryc)."""
+        arguments = flask.request.args.to_dict()
+        for key, value in changes.items():
+            if value in (None, ""):
+                arguments.pop(key, None)
             else:
-                argumenty[klic] = hodnota
-        return flask.url_for(flask.request.endpoint, **argumenty)
+                arguments[key] = value
+        return flask.url_for(flask.request.endpoint, **arguments)
 
-    def _filtry(jmena) -> dict[str, str]:
+    def _filters(names) -> dict[str, str]:
         return {
-            jmeno: flask.request.args.get(jmeno, "").strip().lower()
-            for jmeno in jmena
+            name: flask.request.args.get(name, "").strip().lower()
+            for name in names
         }
 
-    def _kostra(pohled: str, udalosti, od: str, do: str, obdobi: str) -> dict:
+    def _frame(view: str, events, date_from: str, date_to: str, period: str) -> dict:
         """Kontext hlavicky, ktery maji vsechny pohledy stejny."""
         return {
-            "pohled": pohled, "pocty": pohledy.pocty(udalosti),
-            "od": od, "do": do, "obdobi": obdobi,
-            "rychla_obdobi": list(_OBDOBI),
-            "aktualizovano": datetime.now().astimezone().strftime("%H:%M:%S"),
-            "odkaz": _odkaz,
+            "view": view, "counts": audit_views.counts(events),
+            "date_from": date_from, "date_to": date_to, "period": period,
+            "quick_periods": list(_PERIODS),
+            "refreshed_at": audit_views.format_clock(datetime.now(UTC)),
+            "link": _link,
             "detail_id": flask.request.args.get("detail", ""),
-            "limit": pohledy.LIMIT_RADKU,
+            "limit": audit_views.ROW_LIMIT,
         }
 
-    def _detail(radek) -> dict | None:
-        if radek is None:
+    def _detail(row) -> dict | None:
+        if row is None:
             return None
-        u = radek["udalost"]
+        u = row["event"]
         return {
-            "id": radek["id"],
-            "pole": pohledy.pole_detailu(u, _prelozit),
-            "surovy": pohledy.surovy_radek(u),
-            "pocet": radek.get("pocet", 1),
-            "od": radek.get("od", ""),
+            "id": row["id"],
+            "fields": audit_views.detail_fields(u, _translate),
+            "raw": audit_views.raw_line(u),
+            "count": row.get("count", 1),
+            "since": row.get("since", ""),
         }
 
     # -- Spravci --------------------------------------------------------------
 
     @app.get("/audit/admins")
-    @prihlasen
-    def _audit_spravci():
+    @login_required
+    def _audit_admins():
         store = flask.g.store
-        od, do, obdobi = _obdobi()
-        udalosti = _udalosti_obdobi(store, od, do)
-        filtry = _filtry(("spravce", "odkud", "co", "vysledek"))
-        skupiny = pohledy.skupiny_spravcu(udalosti, filtry, _prelozit)
-        dnes = datetime.now().astimezone().date()
-        celkem = sum(len(sk["radky"]) for sk in skupiny)
-        polozky, vykresleno, posledni_den = [], 0, None
-        for skupina in skupiny:
-            if vykresleno >= pohledy.LIMIT_RADKU:
+        date_from, date_to, period = _period()
+        events = _period_events(store, date_from, date_to)
+        filters = _filters(("spravce", "odkud", "co", "vysledek"))
+        groups = audit_views.admin_groups(events, filters, _translate)
+        today = _utc_today()
+        total = sum(len(grp["rows"]) for grp in groups)
+        entries, rendered, last_day = [], 0, None
+        for group in groups:
+            if rendered >= audit_views.ROW_LIMIT:
                 break
-            den_skupiny = pohledy.den(skupina["posledni"])
-            if den_skupiny != posledni_den:
-                polozky.append({"den": pohledy.popis_dne(den_skupiny, dnes, _prelozit)})
-                posledni_den = den_skupiny
-            radky = skupina["radky"][: pohledy.LIMIT_RADKU - vykresleno]
-            vykresleno += len(radky)
-            polozky.append({
-                "skupina": skupina,
-                "hlavicka": pohledy.hlavicka_skupiny(skupina, _prelozit),
-                "radky": radky,
+            group_day = audit_views.utc_day(group["last"])
+            if group_day != last_day:
+                entries.append({
+                    "day": audit_views.day_label(group_day, today, _translate),
+                })
+                last_day = group_day
+            rows = group["rows"][: audit_views.ROW_LIMIT - rendered]
+            rendered += len(rows)
+            entries.append({
+                "group": group,
+                "header": audit_views.group_header(group, _translate),
+                "rows": rows,
             })
-        vsechny_radky = [r for sk in skupiny for r in sk["radky"]]
+        all_rows = [r for grp in groups for r in grp["rows"]]
         return flask.render_template(
-            "audit_spravci.html", polozky=polozky, filtry=filtry,
-            celkem=celkem, vykresleno=vykresleno,
+            "audit_admins.html", entries=entries, filters=filters,
+            total=total, rendered=rendered,
             detail=_detail(
-                pohledy.najdi(vsechny_radky, flask.request.args.get("detail"))
+                audit_views.find_row(all_rows, flask.request.args.get("detail"))
             ),
-            **_kostra("spravci", udalosti, od, do, obdobi),
+            **_frame("spravci", events, date_from, date_to, period),
         )
 
     # -- Uzivatele ------------------------------------------------------------
 
     @app.get("/audit/users")
-    @prihlasen
-    def _audit_uzivatele():
+    @login_required
+    def _audit_users():
         store = flask.g.store
-        od, do, obdobi = _obdobi()
-        udalosti = _udalosti_obdobi(store, od, do)
-        filtry = _filtry(("uzivatel", "klient", "aplikace", "ucel", "vysledek"))
-        radky = pohledy.radky_uzivatelu(udalosti, filtry, _prelozit)
-        dnes = datetime.now().astimezone().date()
+        date_from, date_to, period = _period()
+        events = _period_events(store, date_from, date_to)
+        filters = _filters(("uzivatel", "klient", "aplikace", "ucel", "vysledek"))
+        rows = audit_views.user_rows(events, filters, _translate)
+        today = _utc_today()
         return flask.render_template(
-            "audit_uzivatele.html",
-            polozky=pohledy.se_dny(radky[: pohledy.LIMIT_RADKU], dnes, _prelozit),
-            filtry=filtry, celkem=len(radky),
-            vykresleno=min(len(radky), pohledy.LIMIT_RADKU),
-            detail=_detail(pohledy.najdi(radky, flask.request.args.get("detail"))),
-            **_kostra("uzivatele", udalosti, od, do, obdobi),
+            "audit_users.html",
+            entries=audit_views.with_days(
+                rows[: audit_views.ROW_LIMIT], today, _translate
+            ),
+            filters=filters, total=len(rows),
+            rendered=min(len(rows), audit_views.ROW_LIMIT),
+            detail=_detail(
+                audit_views.find_row(rows, flask.request.args.get("detail"))
+            ),
+            **_frame("uzivatele", events, date_from, date_to, period),
         )
 
     # -- Aplikace -------------------------------------------------------------
 
     @app.get("/audit/apps")
-    @prihlasen
-    def _audit_aplikace():
+    @login_required
+    def _audit_apps():
         store = flask.g.store
-        od, do, obdobi = _obdobi()
-        udalosti = _udalosti_obdobi(store, od, do)
-        filtry = _filtry(("aplikace", "klic", "odkud", "pozadavek", "vysledek"))
-        radky = pohledy.radky_aplikaci(udalosti, filtry, _prelozit)
-        dnes = datetime.now().astimezone().date()
+        date_from, date_to, period = _period()
+        events = _period_events(store, date_from, date_to)
+        filters = _filters(("aplikace", "klic", "odkud", "pozadavek", "vysledek"))
+        rows = audit_views.app_rows(events, filters, _translate)
+        today = _utc_today()
         return flask.render_template(
-            "audit_aplikace.html",
-            polozky=pohledy.se_dny(radky[: pohledy.LIMIT_RADKU], dnes, _prelozit),
-            filtry=filtry, celkem=len(radky),
-            vykresleno=min(len(radky), pohledy.LIMIT_RADKU),
-            detail=_detail(pohledy.najdi(radky, flask.request.args.get("detail"))),
-            **_kostra("aplikace", udalosti, od, do, obdobi),
+            "audit_apps.html",
+            entries=audit_views.with_days(
+                rows[: audit_views.ROW_LIMIT], today, _translate
+            ),
+            filters=filters, total=len(rows),
+            rendered=min(len(rows), audit_views.ROW_LIMIT),
+            detail=_detail(
+                audit_views.find_row(rows, flask.request.args.get("detail"))
+            ),
+            **_frame("aplikace", events, date_from, date_to, period),
         )
 
     # -- Vse: puvodni tabulka pro vysetrovani napric -------------------------
 
     @app.get("/audit")
-    @prihlasen
-    def _audit_seznam():
+    @login_required
+    def _audit_all():
         store = flask.g.store
-        od, do, obdobi = _obdobi()
-        udalosti = _udalosti_obdobi(store, od, do)
+        date_from, date_to, period = _period()
+        events = _period_events(store, date_from, date_to)
         # `.lower()` jako u filtru nad vypisem lidi - `odpovida` porovnava
         # podretezec proti male variante, takze dotaz musi prijit stejne.
-        kdo = flask.request.args.get("kdo", "").strip().lower() or None
+        who = flask.request.args.get("kdo", "").strip().lower() or None
         kind = flask.request.args.get("kind", "").strip() or None
-        odkud = flask.request.args.get("odkud", "").strip() or None
-        aplikace = flask.request.args.get("aplikace", "").strip() or None
+        origin = flask.request.args.get("odkud", "").strip() or None
+        component = flask.request.args.get("aplikace", "").strip() or None
         outcome = flask.request.args.get("outcome", "").strip() or None
-        vybrane = [
-            u for u in udalosti
-            if odpovida(u, who=kdo, outcome=outcome, kind=kind,
-                        origin=odkud, component=aplikace)
+        selected = [
+            u for u in events
+            if odpovida(u, who=who, outcome=outcome, kind=kind,
+                        origin=origin, component=component)
         ]
         # Nejnovejsi nahoru - audit je chronologicky, coz je pro cteni logu
         # pozpatku.
-        radky = [_radek_udalosti(u) for u in reversed(vybrane)]
+        rows = [_event_row(u) for u in reversed(selected)]
         return flask.render_template(
-            "audit.html", udalosti=radky[: pohledy.LIMIT_RADKU],
-            celkem=len(radky), vykresleno=min(len(radky), pohledy.LIMIT_RADKU),
-            kdo=kdo or "", kind=kind or "", outcome=outcome or "",
-            odkud=odkud or "", aplikace=aplikace or "",
-            **_kostra("vse", udalosti, od, do, obdobi),
+            "audit.html", events=rows[: audit_views.ROW_LIMIT],
+            total=len(rows), rendered=min(len(rows), audit_views.ROW_LIMIT),
+            who=who or "", kind=kind or "", outcome=outcome or "",
+            origin=origin or "", component=component or "",
+            **_frame("vse", events, date_from, date_to, period),
         )
 
     return app

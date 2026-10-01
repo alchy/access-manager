@@ -1,0 +1,49 @@
+{% extends "audit_base.html" %}
+{% import "_audit_macros.html" as am with context %}
+{% block table %}
+<table class="tabulka audit">
+  <thead>
+    <tr>
+      <th>{{ t('audit.time') }}</th>
+      <th>{{ t('audit.col.admin') }}</th>
+      <th>{{ t('audit.origin') }}</th>
+      <th>{{ t('audit.col.changed') }}</th>
+      <th>{{ t('audit.result') }}</th>
+    </tr>
+    <tr class="filtr-radek">
+      {{ am.period_filter() }}
+      {{ am.filter_field('spravce', filters.spravce) }}
+      {{ am.filter_field('odkud', filters.odkud) }}
+      {{ am.filter_field('co', filters.co, t('audit.ph.change')) }}
+      {{ am.filter_field('vysledek', filters.vysledek) }}
+    </tr>
+  </thead>
+  <tbody>
+    {% for entry in entries %}
+      {% if entry.day %}
+        {{ am.day_row(entry.day, 5) }}
+      {% else %}
+        <tr class="skupina skupina-{{ entry.group.kind }}"><td colspan="5">{{ entry.header }}</td></tr>
+        {% for row in entry.rows %}
+        <tr class="odsazeno{{ ' vybrany' if row.id == detail_id else '' }}">
+          {{ am.time_link(row) }}
+          <td class="mono">{{ row.admin }}</td>
+          <td class="mono">{{ row.origin }}</td>
+          <td>{{ row.action }}{% if row.target %} <span class="cil">{{ row.target }}</span>{% endif %}</td>
+          {{ am.result(row) }}
+        </tr>
+        {% if row.id == detail_id and detail %}
+          {{ am.detail_row(detail, 5, [
+            (t('audit.detail.admin_all').format(jmeno=row.admin),
+             url_for('_audit_admins', spravce=row.admin, od=date_from, do=date_to)),
+          ]) }}
+        {% endif %}
+        {% endfor %}
+      {% endif %}
+    {% endfor %}
+    {% if not entries %}
+    <tr><td colspan="5" class="poznamka">{{ t('spolecne.nothing_found') }}</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+{% endblock %}

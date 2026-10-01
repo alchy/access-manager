@@ -1,0 +1,58 @@
+{% extends "audit_base.html" %}
+{% import "_audit_macros.html" as am with context %}
+{% block table %}
+<table class="tabulka audit">
+  <thead>
+    <tr>
+      <th>{{ t('audit.time') }}</th>
+      <th>{{ t('audit.col.user') }}</th>
+      <th>{{ t('audit.col.client') }}</th>
+      <th>{{ t('audit.col.via') }}</th>
+      <th>{{ t('audit.col.purpose') }}</th>
+      <th>{{ t('audit.result') }}</th>
+    </tr>
+    <tr class="filtr-radek">
+      {{ am.period_filter() }}
+      {{ am.filter_field('uzivatel', filters.uzivatel) }}
+      {{ am.filter_field('klient', filters.klient) }}
+      {{ am.filter_field('aplikace', filters.aplikace) }}
+      {{ am.filter_field('ucel', filters.ucel) }}
+      {{ am.filter_field('vysledek', filters.vysledek) }}
+    </tr>
+  </thead>
+  <tbody>
+    {% for entry in entries %}
+      {% if entry.day %}
+        {{ am.day_row(entry.day, 6) }}
+      {% else %}
+        {% set row = entry.row %}
+        <tr class="{{ 'vybrany' if row.id == detail_id else '' }}">
+          {{ am.time_link(row) }}
+          <td class="mono">{{ row.user }}</td>
+          <td class="mono">{{ row.client }}</td>
+          <td>
+            <span class="mono">{{ row.app }}</span>
+            {% if row.key_id %}<span class="vedlejsi">{{ row.key_id }}</span>{% endif %}
+            {% if row.server %}<span class="vysvetlivka mono">{{ row.server }}</span>{% endif %}
+          </td>
+          <td>{{ row.purpose }}{% if row.purpose_extra %} <span class="vedlejsi mono">{{ row.purpose_extra }}</span>{% endif %}</td>
+          {{ am.result(row) }}
+        </tr>
+        {% if row.id == detail_id and detail %}
+          {% set links = [(t('audit.detail.user_all').format(jmeno=row.user),
+                            url_for('_audit_users', uzivatel=row.user, od=date_from, do=date_to))] %}
+          {% if row.app != '—' and row.day %}
+            {% set links = links + [(t('audit.detail.app_day').format(jmeno=row.app),
+                                      url_for('_audit_apps', aplikace=row.app,
+                                              od=row.day.isoformat(), do=row.day.isoformat()))] %}
+          {% endif %}
+          {{ am.detail_row(detail, 6, links) }}
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+    {% if not entries %}
+    <tr><td colspan="6" class="poznamka">{{ t('spolecne.nothing_found') }}</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+{% endblock %}
