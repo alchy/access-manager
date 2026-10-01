@@ -15,10 +15,11 @@ s diakritikou. V testech smí být cokoli pojmenováno česky.
 ## Stav k 1. 10. 2026
 
 **Produkce** běží z obrazu `localhost/access-manager:latest` sestaveného 1. 10. 2026 z `main`
-(commit `086d6e1`; pozdější commity v `main` mění jen tento soubor). Nasazeno 1. 10. 2026 v 18:02 UTC; restart trval
-21 sekund. Obsah obrazu je ověřený proti repozitáři soubor po souboru.
+(commit `3406cb9`; pozdější commity v `main` mění jen tento soubor). Nasazeno 1. 10. 2026
+v 18:45 UTC; restart trval půl minuty. Obsah obrazu je ověřený proti repozitáři soubor po
+souboru. Ten den proběhla dvě nasazení: v 18:02 UTC commit `086d6e1`, v 18:45 UTC `3406cb9`.
 
-Co nasazená verze nese proti předchozí (obraz z 16. 9., commit `76bed4d`):
+Co nasazená verze nese proti obrazu z 16. 9. (commit `76bed4d`):
 
 | oblast | co se změnilo |
 |---|---|
@@ -27,34 +28,35 @@ Co nasazená verze nese proti předchozí (obraz z 16. 9., commit `76bed4d`):
 | formuláře | panel Přidat přes celou šířku, detail skupiny ve dvou sloupcích pod výpisem |
 | akce | u Uživatelů a Správců dva sloupce s pevnou mřížkou a krátkými popisky |
 | opravy z revizí | viz „Opraveno“ níže |
+| panely Přidat | stejné rozložení, příklad a vysvětlení bez předpony, bez číslovky u aplikace |
+| omezování pokusů | klíčem je jméno a adresa klienta, zámek roste (bod 1 níže) |
 
-Testů **599** zelených, `ruff check .` čistý. `AM_TZ=Europe/Prague`
+Testů **620** zelených, `ruff check .` čistý. `AM_TZ=Europe/Prague`
 v `/etc/sysconfig/access-manager-container` zůstává; hodiny kontejneru jsou v pražském čase,
 zobrazení v konzoli to neovlivňuje.
 
-**Návrat k předchozí verzi.** Předchozí obraz je označený `localhost/access-manager:rollback-20260916`.
-Formát dat se nezměnil, návrat je jen výměna obrazu (jako `access-manager`, viz Zvláštnosti stroje):
+**Návrat k předchozí verzi.** Starší obrazy jsou označené:
 
-    podman tag localhost/access-manager:rollback-20260916 localhost/access-manager:latest
+| značka | commit | co v něm chybí |
+|---|---|---|
+| `rollback-20261001` | `086d6e1` | nové omezování pokusů a úprava panelů Přidat |
+| `rollback-20260916` | `76bed4d` | všechno z 1. 10. 2026 |
+
+Formát dat se nezměnil, návrat je jen výměna obrazu (jako `access-manager`, viz Zvláštnosti
+stroje). Starší verze čte nový `throttle.json` jako prázdný, zámky tím zaniknou.
+
+    podman tag localhost/access-manager:rollback-20261001 localhost/access-manager:latest
     systemctl restart access-manager-container.service        # jako root
 
-Větev `feat/console-utc-hardening` je sloučená do `main` a na `origin` zůstává; smí se smazat.
-
-**Nenasazené větve** (nesloučené do `main`):
-
-| větev | obsah |
-|---|---|
-| `ui/add-panel-layout` (na `origin`) | panely Přidat mají stejné rozložení, příklad a vysvětlení bez předpony, bez číslovky u aplikace |
-| `feat/throttle-backoff` (na `origin`) | staví na předchozí; omezování pokusů podle dvojice jméno a adresa klienta s rostoucím zámkem (viz bod 1 níže) |
-
-Repozitář na serveru je přepnutý na `feat/throttle-backoff`; testů v ní **620**.
+Větve `feat/console-utc-hardening`, `ui/add-panel-layout` a `feat/throttle-backoff` jsou
+sloučené do `main` a na `origin` zůstávají; smějí se smazat.
 
 Git proti `origin` jde jen přes klíč uživatele `tech` spuštěný jako root, potom
 `chown -R access-manager: .git`.
 
 **Nasazení další verze:** zkouška na zkušební instanci (níže), `deploy/container-build-access-manager.sh`,
 restart `access-manager-container.service`. Restart odhlásí všechny správce a API je asi
-20 sekund nedostupné, tedy i přihlášení do Workbenche a SOC portálu.
+půl minuty nedostupné, tedy i přihlášení do Workbenche a SOC portálu.
 
 ## Zkouška před sestavením produkčního obrazu
 
@@ -64,7 +66,7 @@ restart `access-manager-container.service`. Restart odhlásí všechny správce 
     sudo /www/access-manager/mock-e2e/run.sh up      # sestaví, spustí, otestuje
     sudo /www/access-manager/mock-e2e/run.sh down    # uklidí
 
-Nasazená verze i větev `feat/throttle-backoff` touto zkouškou prošly celé. Zkušební kontejner neběží; `run.sh up` ho postaví znovu.
+Nasazená verze touto zkouškou prošla celá. Zkušební kontejner neběží; `run.sh up` ho postaví znovu.
 
 ## Opraveno a nasazeno 1. 10. 2026
 
@@ -93,11 +95,10 @@ Nic z toho není opravené. Řazeno podle závažnosti.
 
 ### Vysoká
 
-1. **Omezování pokusů a hádání kódu.** Ve větvi `feat/throttle-backoff`, nenasazeno:
-   klíčem je dvojice jméno a adresa klienta, zámek roste (minuta, dvojnásobky, nejvýš den)
+1. **Omezování pokusů a hádání kódu.** Nasazeno 1. 10. 2026: klíčem je dvojice jméno a adresa klienta, zámek roste (minuta, dvojnásobky, nejvýš den)
    a neúspěchy se nezapomínají po minutě. U uživatele je nad adresami pomalé počítadlo na
    jméno (20 neúspěchů, zámek nejvýš hodinu). Konzole dává při zámku stejnou hlášku jako při
-   špatném kódu. Pravidla jsou v `docs/admin.md`. **Co po nasazení zbývá:**
+   špatném kódu. Pravidla jsou v `docs/admin.md`. **Co zbývá:**
    - **Workbench neposílá `client_origin`** (SOC portál ano). Jeho uživatelé proto zůstávají
      na pevném okně na jméno: jdou zamknout odkudkoli na minutu a hádání má dál pět pokusů
      za minutu. Dokud Workbench adresu klienta nepošle, větev pro ně nic nemění.
@@ -105,8 +106,8 @@ Nic z toho není opravené. Řazeno podle závažnosti.
      pokusů denně (0,15 %). Stejným počítadlem jde uživatele z několika adres zamknout až
      na hodinu. Vyřeší to až další krok: po opakovaných chybách chtít dva kódy po sobě místo
      zámku. Je to změna rozhraní, kterou musí umět Workbench i SOC portál.
-   - Soubory `throttle.json` ve starém tvaru se při nasazení berou jako prázdné; rozdělané
-     zámky tím jednorázově zaniknou.
+   - Řádky auditu se zámkem (`lock_scope`) nemají v konzoli filtr ani štítek; jsou vidět
+     v detailu záznamu.
 2. **Před konzolí není seznam povolených adres.** Zámek správce z jedné adresy už ostatní
    adresy nezasáhne, ale přihlašovací stránka je v internetu.
 
