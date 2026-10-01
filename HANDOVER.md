@@ -14,11 +14,11 @@ s diakritikou. V testech smí být cokoli pojmenováno česky.
 
 ## Stav k 1. 10. 2026
 
-**Produkce** běží z obrazu `localhost/access-manager:latest` z 16. 9. 2026, tedy z commitu
-`76bed4d` (`main` = `origin/main`). Konzole v produkci proto ukazuje **místní čas bez označení**.
+**Produkce** běží z obrazu `localhost/access-manager:latest` sestaveného 1. 10. 2026 z `main`
+(commit `086d6e1`; pozdější commity v `main` mění jen tento soubor). Nasazeno 1. 10. 2026 v 18:02 UTC; restart trval
+21 sekund. Obsah obrazu je ověřený proti repozitáři soubor po souboru.
 
-**Větev `feat/console-utc-hardening`** (na `origin`, tři commity nad `main`) nese změny,
-které **nejsou nasazené** ani sloučené do `main`:
+Co nasazená verze nese proti předchozí (obraz z 16. 9., commit `76bed4d`):
 
 | oblast | co se změnilo |
 |---|---|
@@ -28,14 +28,24 @@ které **nejsou nasazené** ani sloučené do `main`:
 | akce | u Uživatelů a Správců dva sloupce s pevnou mřížkou a krátkými popisky |
 | opravy z revizí | viz „Opraveno“ níže |
 
-Testů **599** zelených, `ruff check .` čistý.
+Testů **599** zelených, `ruff check .` čistý. `AM_TZ=Europe/Prague`
+v `/etc/sysconfig/access-manager-container` zůstává; hodiny kontejneru jsou v pražském čase,
+zobrazení v konzoli to neovlivňuje.
+
+**Návrat k předchozí verzi.** Předchozí obraz je označený `localhost/access-manager:rollback-20260916`.
+Formát dat se nezměnil, návrat je jen výměna obrazu (jako `access-manager`, viz Zvláštnosti stroje):
+
+    podman tag localhost/access-manager:rollback-20260916 localhost/access-manager:latest
+    systemctl restart access-manager-container.service        # jako root
+
+Větev `feat/console-utc-hardening` je sloučená do `main` a na `origin` zůstává; smí se smazat.
 
 Git proti `origin` jde jen přes klíč uživatele `tech` spuštěný jako root, potom
 `chown -R access-manager: .git`.
 
-**Nasazení** (neproběhlo): sloučit větev do `main`, `deploy/container-build-access-manager.sh`, pak restart
-`access-manager-container.service`. Restart odhlásí všechny správce. `AM_TZ=Europe/Prague`
-v `/etc/sysconfig/access-manager-container` smí zůstat, zobrazení už neovlivňuje.
+**Nasazení další verze:** zkouška na zkušební instanci (níže), `deploy/container-build-access-manager.sh`,
+restart `access-manager-container.service`. Restart odhlásí všechny správce a API je asi
+20 sekund nedostupné, tedy i přihlášení do Workbenche a SOC portálu.
 
 ## Zkouška před sestavením produkčního obrazu
 
@@ -45,9 +55,9 @@ v `/etc/sysconfig/access-manager-container` smí zůstat, zobrazení už neovliv
     sudo /www/access-manager/mock-e2e/run.sh up      # sestaví, spustí, otestuje
     sudo /www/access-manager/mock-e2e/run.sh down    # uklidí
 
-Větev touto zkouškou prošla celá. Zkušební kontejner teď **běží** (porty 22100 a 22101).
+Nasazená verze touto zkouškou prošla celá. Zkušební kontejner neběží; `run.sh up` ho postaví znovu.
 
-## Opraveno ve větvi
+## Opraveno a nasazeno 1. 10. 2026
 
 Všechno má test v `tests/test_hardening.py` nebo u příslušné stránky.
 
@@ -120,8 +130,8 @@ Nic z toho není opravené. Řazeno podle závažnosti.
    (10 000 položek drží vlákno 0,9 s, vlákna jsou čtyři). Chybí `MAX_CONTENT_LENGTH`.
    Poškozený `used.json`, `gen` nebo `components.json` dává 500; `/readyz` to nepozná.
 10. **Jméno aplikace** je skoro bez kontroly: s lomítkem ji z konzole nejde odvolat.
-11. **Obraz**: `python:3.12-slim` bez digestu a závislosti bez zámku. Nový obraz má Werkzeug
-    3.1.9, produkce 3.1.8. `container-run.sh` nemá `--pids-limit` ani `--memory`.
+11. **Obraz**: `python:3.12-slim` bez digestu a závislosti bez zámku. Sestavení 1. 10. tak
+    tiše zvedlo Werkzeug z 3.1.8 na 3.1.9. `container-run.sh` nemá `--pids-limit` ani `--memory`.
 12. **Stránky konzole** kromě QR a klíče nemají `Cache-Control: no-store`.
 13. **Provozní log ve formátu `text`** neescapuje řídicí znaky; produkce má `json`.
 14. **Poslední správce**: stráž počítá i nespárované správce, takže jediný spárovaný smí
