@@ -138,7 +138,6 @@ Nic z toho není opravené. Řazeno podle závažnosti.
 ### Nízká
 
 8. **nginx** (`/etc/nginx/conf.d/autumnpartials-access-manager*.conf`):
-   - `/etc/nginx/staged/` má starý zápis `$proxy_add_x_forwarded_for`; smazat nebo srovnat.
    - `limit_req` vrací 503 s HTML; klientská knihovna 5xx opakuje. Nastavit 429 a JSON.
    - `/readyz` a `/v1/version` jsou veřejné; `/readyz` při potíži vrací cesty úložiště.
    - `client_max_body_size 4m` je pro obě služby zbytečně moc, stačí desítky kB.
@@ -182,7 +181,7 @@ Nic z toho není opravené. Řazeno podle závažnosti.
   (`sudo -u access-manager …`), jinak v repozitáři vzniknou soubory roota.
 - Rootless podman: `sudo -u access-manager env HOME=/www/access-manager
   XDG_RUNTIME_DIR=/run/user/980 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/980/bus podman …`.
-- V relaci roota může být `cp` alias na `cp -i` a ve skriptu pak čeká na odpověď; psát
-  `command cp -f`.
+- V relaci roota jsou `cp` a `rm` aliasy na `cp -i` a `rm -i`. Ve skriptu čekají na odpověď,
+  nic neudělají a vrátí úspěch; psát `command cp -f` a `command rm -f` a výsledek ověřit.
 - Řádek provozního logu začíná razítkem podmana v místním čase hostitele. Čas služby je pole
   `t` uvnitř JSON, vždy v UTC.
