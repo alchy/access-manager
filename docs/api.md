@@ -76,10 +76,15 @@ uživatele. Pověření je mapa `mechanismus → hodnota` (dnes jediný
 mechanismus: `totp`); `purpose` má tvar `login` nebo `unlock:<cíl>`.
 
 Volitelné pole `"client_origin": "193.0.231.250"` je adresa **člověka**, kterého
-aplikace ověřuje — typicky z hlavičky vlastní proxy. Služba ji jen zapíše do
+aplikace ověřuje — typicky z hlavičky vlastní proxy. Služba ji zapíše do
 auditu vedle `origin` (adresa, ze které přišel tento požadavek) a konzole ji
-ukazuje jako „Odkud (klient)“. O ničem nerozhoduje: origin ACL měří dál
-`origin`. Musí to být jedna IP adresa, jinak `400`.
+ukazuje jako „Odkud (klient)“. O výsledku ověření nerozhoduje a origin ACL měří
+dál `origin`. Je ale **klíčem omezování pokusů**: s ní se brzdí adresa, ze které
+neúspěchy jdou; bez ní sdílejí všechny požadavky bez adresy jedno okno na jméno
+(viz `docs/admin.md`). Aplikace ji má
+posílat vždy. Musí to být jedna IP adresa, jinak `400`.
+
+`retry_after` u `throttled` může být až den (`max_lock_s`).
 
 ## Model důvěry
 

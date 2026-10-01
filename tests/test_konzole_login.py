@@ -118,14 +118,35 @@ def test_an_unknown_realm_shows_the_same_failure_message(prostredi):
     assert "Přihlášení se nezdařilo" in telo
 
 
-def test_repeated_failures_throttle_and_show_retry_after(prostredi):
+def test_repeated_failures_throttle_without_confirming_the_name(prostredi):
+    """Vlastni hlasku "prilis mnoho pokusu" dostal jen existujici spravce -
+    sest pozadavku tak stacilo k overeni, ze jmeno existuje. Odpoved je ted
+    stejna jako u spatneho kodu i u jmena, ktere neni."""
     spatne = {"realm": REALM, "jmeno": "jindrich", "kod1": "000000", "kod2": "111111"}
     for _ in range(5):
         prostredi.post("/login", data=spatne)
-    odpoved = prostredi.post("/login", data=spatne)
-    assert odpoved.status_code == 200
-    telo = odpoved.get_data(as_text=True)
-    assert "Příliš mnoho pokusů" in telo
+    zamceny = prostredi.post("/login", data=spatne)
+    assert zamceny.status_code == 200
+    telo = zamceny.get_data(as_text=True)
+    assert "Přihlášení se nezdařilo" in telo
+    assert "Příliš mnoho" not in telo
+
+    neznamy = prostredi.post("/login", data={**spatne, "jmeno": "nikdo"})
+    assert neznamy.get_data(as_text=True) == telo
+
+
+def test_a_throttled_address_does_not_lock_the_admin_out(prostredi, tmp_path):
+    spatne = {"realm": REALM, "jmeno": "jindrich", "kod1": "000000", "kod2": "111111"}
+    for _ in range(6):
+        prostredi.post("/login", data=spatne,
+                       environ_overrides={"REMOTE_ADDR": "203.0.113.50"})
+    prvni, druhy = admin_kody(tmp_path / "data")
+    odpoved = prostredi.post(
+        "/login",
+        data={"realm": REALM, "jmeno": "jindrich", "kod1": prvni, "kod2": druhy},
+        environ_overrides={"REMOTE_ADDR": "192.0.2.10"},
+    )
+    assert odpoved.status_code == 302
 
 
 def test_logout_logs_out(prostredi, tmp_path):

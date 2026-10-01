@@ -534,7 +534,8 @@ Uzavřené — rozhodnuté a postavené:
   a restart ve 3 ráno by je zneplatnil všechny.
 - ~~Omezování pokusů~~ (`throttled`) — postavené. Běží **až po** kontrole
   původu (§2b): kdyby běželo dřív, zamkne kdokoli z internetu cizí účet
-  střelbou z blokované adresy.
+  střelbou z blokované adresy. Klíčem je dvojice jméno a adresa klienta
+  a zámek roste; pravidla jsou v `docs/admin.md`.
 - ~~Fragmentovaná konfigurace~~ — postavená. `conf.d/*.json` se při startu
   sečtou, skalární konflikt **zavře start**. Má to důsledek, který musí být
   napsaný, než na něj někdo doplatí: **sjednocením nejde nic odebrat.**

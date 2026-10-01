@@ -94,7 +94,9 @@ neprocházejí do hloubky a `realms/` je jediný, na který se služba dívá.
   "hops": 1,
   "console_secure_cookie": true,
   "defaults": { "qr_ttl_days": 14, "audit_retention_days": 90 },
-  "throttle": { "attempts": 5, "window_s": 60 },
+  "throttle": { "attempts": 5, "window_s": 60, "max_lock_s": 86400,
+                "reset_after_s": 86400, "name_attempts": 20,
+                "name_max_lock_s": 3600 },
   "log": { "level": "info", "format": "json" } }
 ```
 
@@ -305,7 +307,8 @@ server {
     proxy_read_timeout    30s;
 
     # Ověřování je nejcitlivější místo - přísnější limit. Služba má vlastní
-    # throttle (5 pokusů / 60 s na identitu); tohle je vrstva navíc, na adresu.
+    # throttle (5 pokusů na jméno a adresu klienta, zámek roste); tohle je
+    # vrstva navíc, na adresu volající aplikace.
     location /v1/authenticate {
         limit_req zone=am_auth burst=10 nodelay;
         proxy_pass http://127.0.0.1:22000;

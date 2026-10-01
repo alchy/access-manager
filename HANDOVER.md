@@ -40,6 +40,15 @@ Formát dat se nezměnil, návrat je jen výměna obrazu (jako `access-manager`,
 
 Větev `feat/console-utc-hardening` je sloučená do `main` a na `origin` zůstává; smí se smazat.
 
+**Nenasazené větve** (nesloučené do `main`):
+
+| větev | obsah |
+|---|---|
+| `ui/add-panel-layout` (na `origin`) | panely Přidat mají stejné rozložení, příklad a vysvětlení bez předpony, bez číslovky u aplikace |
+| `feat/throttle-backoff` (na `origin`) | staví na předchozí; omezování pokusů podle dvojice jméno a adresa klienta s rostoucím zámkem (viz bod 1 níže) |
+
+Repozitář na serveru je přepnutý na `feat/throttle-backoff`; testů v ní **620**.
+
 Git proti `origin` jde jen přes klíč uživatele `tech` spuštěný jako root, potom
 `chown -R access-manager: .git`.
 
@@ -49,13 +58,13 @@ restart `access-manager-container.service`. Restart odhlásí všechny správce 
 
 ## Zkouška před sestavením produkčního obrazu
 
-`/www/access-manager/mock-e2e/` (mimo repozitář) — 213 kontrol po síti proti kontejneru
+`/www/access-manager/mock-e2e/` (mimo repozitář) — 225 kontrol po síti proti kontejneru
 `am-test` z obrazu `:test`, na vlastních portech, síti a datech. Viz tamní `README.md`.
 
     sudo /www/access-manager/mock-e2e/run.sh up      # sestaví, spustí, otestuje
     sudo /www/access-manager/mock-e2e/run.sh down    # uklidí
 
-Nasazená verze touto zkouškou prošla celá. Zkušební kontejner neběží; `run.sh up` ho postaví znovu.
+Nasazená verze i větev `feat/throttle-backoff` touto zkouškou prošly celé. Zkušební kontejner neběží; `run.sh up` ho postaví znovu.
 
 ## Opraveno a nasazeno 1. 10. 2026
 
@@ -84,16 +93,22 @@ Nic z toho není opravené. Řazeno podle závažnosti.
 
 ### Vysoká
 
-1. **Omezování pokusů se váže jen na jméno.** Pět špatných kódů odkudkoli zamkne účet na
-   minutu, takže kdokoli z internetu drží jmenovaného správce zamčeného, dokud útok trvá.
-   Hláška „Příliš mnoho pokusů“ navíc potvrdí, že správce existuje; neexistující jméno ji
-   nedostane nikdy. `docs/admin.md` tvrdí, že cizí účet zamknout nejde — platí to jen pro
-   neexistující jména. Návrh: v konzoli stejná hláška jako u odmítnutí; rychlé počítadlo podle
-   dvojice jméno a původ, pomalé podle jména; zvážit seznam povolených adres před konzolí.
-2. **Rozpočet hádání kódu je pět pokusů za minutu donekonečna.** Platí tři kódy z milionu,
-   tedy asi 2 % denně na účet pro toho, kdo umí volat ověření na cizí jméno (přihlašovací
-   formulář napojené aplikace). Návrh: prodleva, která se s neúspěchy prodlužuje, denní strop
-   s výraznou auditní událostí. Jde to proti bodu 1, proto dvojí klíč.
+1. **Omezování pokusů a hádání kódu.** Ve větvi `feat/throttle-backoff`, nenasazeno:
+   klíčem je dvojice jméno a adresa klienta, zámek roste (minuta, dvojnásobky, nejvýš den)
+   a neúspěchy se nezapomínají po minutě. U uživatele je nad adresami pomalé počítadlo na
+   jméno (20 neúspěchů, zámek nejvýš hodinu). Konzole dává při zámku stejnou hlášku jako při
+   špatném kódu. Pravidla jsou v `docs/admin.md`. **Co po nasazení zbývá:**
+   - **Workbench neposílá `client_origin`** (SOC portál ano). Jeho uživatelé proto zůstávají
+     na pevném okně na jméno: jdou zamknout odkudkoli na minutu a hádání má dál pět pokusů
+     za minutu. Dokud Workbench adresu klienta nepošle, větev pro ně nic nemění.
+   - **Hádání z mnoha adres** brzdí u uživatele jen pomalé počítadlo na jméno, zhruba 500
+     pokusů denně (0,15 %). Stejným počítadlem jde uživatele z několika adres zamknout až
+     na hodinu. Vyřeší to až další krok: po opakovaných chybách chtít dva kódy po sobě místo
+     zámku. Je to změna rozhraní, kterou musí umět Workbench i SOC portál.
+   - Soubory `throttle.json` ve starém tvaru se při nasazení berou jako prázdné; rozdělané
+     zámky tím jednorázově zaniknou.
+2. **Před konzolí není seznam povolených adres.** Zámek správce z jedné adresy už ostatní
+   adresy nezasáhne, ale přihlašovací stránka je v internetu.
 
 ### Střední
 

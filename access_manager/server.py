@@ -21,7 +21,7 @@ from ipaddress import ip_address, ip_network
 from pathlib import Path
 
 from . import log
-from .config import ServiceConfig, load_config
+from .config import ServiceConfig, load_config, throttle_kwargs
 from .files import FileStore
 from .konzole.app import create_console_app
 from .origin import resolve_origin
@@ -214,8 +214,7 @@ def create_app(cfg: ServiceConfig):
                     "audit_retention_days", cfg.defaults["audit_retention_days"]
                 )
             ),
-            throttle_attempts=int(cfg.throttle["attempts"]),
-            throttle_window_s=int(cfg.throttle["window_s"]),
+            **throttle_kwargs(cfg),
         )
 
     # Cache klic -> (realm, komponenta, gen); zije po dobu aplikace, ne

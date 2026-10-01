@@ -17,6 +17,12 @@ def test_a_minimal_config_gets_defaults(tmp_path):
     assert cfg.listeners["api"] == "127.0.0.1:22000"
     assert cfg.hops == 1
     assert cfg.throttle["attempts"] == 5
+    # Stupnovany zamek ma vychozi hodnoty, aby stavajici service.json
+    # (jen `attempts` a `window_s`) platil dal beze zmeny.
+    assert cfg.throttle == {
+        "attempts": 5, "window_s": 60, "max_lock_s": 86400,
+        "reset_after_s": 86400, "name_attempts": 20, "name_max_lock_s": 3600,
+    }
     assert cfg.realms == ()
 
 

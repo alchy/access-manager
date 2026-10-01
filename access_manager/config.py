@@ -77,6 +77,14 @@ def load_config(conf_dir: Path) -> ServiceConfig:
         throttle_config["attempts"] = 5
     if "window_s" not in throttle_config:
         throttle_config["window_s"] = 60
+    # Stupnovany zamek na dvojici jmeno a adresa klienta (viz `files.py`):
+    # nejdelsi zamek adresy, po jak dlouhem klidu se zapomina, kolik neuspechu
+    # ze vsech adres zamkne jmeno a nejdelsi zamek jmena. Vychozi hodnoty jsou
+    # tady, at se stavajici service.json nemusi menit.
+    throttle_config.setdefault("max_lock_s", 86400)
+    throttle_config.setdefault("reset_after_s", 86400)
+    throttle_config.setdefault("name_attempts", 20)
+    throttle_config.setdefault("name_max_lock_s", 3600)
 
     # Vychozi False - Secure cookie bez TLS by prohlizec zahodil rovnou a
     # konzole by nikdy neprihlasila nikoho; kdo bezi za TLS proxy, zapne to
@@ -126,3 +134,18 @@ def load_config(conf_dir: Path) -> ServiceConfig:
         console_secure_cookie=console_secure_cookie,
         log=log_config,
     )
+
+
+def throttle_kwargs(cfg: ServiceConfig) -> dict[str, int]:
+    """Nastaveni omezovani pokusu jako argumenty `FileStore`.
+
+    API i konzole stavi uloziste nad tymz nastavenim; jedno misto drzi, ze
+    obe meri stejne.
+    """
+    return {
+        f"throttle_{key}": int(cfg.throttle[key])
+        for key in (
+            "attempts", "window_s", "max_lock_s", "reset_after_s",
+            "name_attempts", "name_max_lock_s",
+        )
+    }

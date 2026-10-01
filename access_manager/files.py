@@ -144,6 +144,10 @@ class FileStore:
         origin: str | None = None,
         throttle_attempts: int = 5,
         throttle_window_s: int = 60,
+        throttle_max_lock_s: int = 86400,
+        throttle_reset_after_s: int = 86400,
+        throttle_name_attempts: int = 20,
+        throttle_name_max_lock_s: int = 3600,
     ) -> None:
         self.home = Path(root).expanduser()
         self.realm = realm
@@ -155,6 +159,10 @@ class FileStore:
         self.origin = origin
         self.throttle_attempts = throttle_attempts
         self.throttle_window_s = throttle_window_s
+        self.throttle_max_lock_s = throttle_max_lock_s
+        self.throttle_reset_after_s = throttle_reset_after_s
+        self.throttle_name_attempts = throttle_name_attempts
+        self.throttle_name_max_lock_s = throttle_name_max_lock_s
 
     def _dir(self, prefix: str, name: str) -> Path:
         """Cesta k adresari identifikujici se podle prefixu a jmena."""
@@ -381,39 +389,135 @@ class FileStore:
             (directory / "totp.txt").unlink(missing_ok=True)
 
     # == omezovani pokusu ==================================================
+    #
+    # Klic je DVOJICE jmeno a adresa klienta. Neuspechy z jedne adresy brzdi
+    # tu adresu, ne cloveka: kdo hada cizi kod, zamyka sam sebe a majitel uctu
+    # se ze sve adresy prihlasi dal. Zamek se s kazdou dalsi serii zdvojnasobi
+    # (`window_s`, 2x, 4x ... az `max_lock_s`) a neuspechy se nezapominaji po
+    # minute - driv stacilo zustat na ctyrech pokusech za okno a omezeni
+    # neprislo nikdy. Nuluje je uspech z te adresy nebo `reset_after_s` klidu.
+    #
+    # Adresu klienta zna sluzba jen tehdy, kdyz ji dostane: u uzivatele ji
+    # hlasi aplikace (`client_origin`), u spravce ji meri proxy pred konzoli.
+    # Bez ni plati puvodni pevne okno na jmeno - stupnovany zamek na jmeno
+    # by znamenal, ze pet pokusu denne zamkne ciziho cloveka na cely den.
+    #
+    # U uzivatele (jeden kod, sance 3 z milionu na pokus) je nad adresami
+    # jeste POMALE pocitadlo na jmeno: kdo strida adresy, ma kazdou zvlast,
+    # a s vlastnim rozsahem IPv6 by jich mel tisice. U spravce (dva kody po
+    # sobe) tohle pocitadlo neni - hadani tam nehrozi a slouzilo by jen
+    # k zamykani.
 
-    def _throttled(self, directory: Path) -> int | None:
-        """Kolik sekund jeste identita ceka - nebo None. Cteni bez zamku."""
-        cesta = directory / THROTTLE
-        if not cesta.is_file():
-            return None
-        try:
-            data = json.loads(cesta.read_text(encoding="utf-8"))
-            od, pokusu = int(data["od"]), int(data["pokusu"])
-        except (ValueError, KeyError, OSError):
-            return None                      # poskozeny soubor neblokuje
-        zbyva = od + self.throttle_window_s - int(time.time())
-        if pokusu >= self.throttle_attempts and zbyva > 0:
-            return zbyva
-        return None
+    def _throttled(
+        self, directory: Path, key: str | None, name_cap: bool,
+    ) -> int | None:
+        """Kolik sekund jeste tahle dvojice ceka - nebo None. Cteni bez zamku."""
+        state = _read_throttle(directory / THROTTLE)
+        now = _now()
+        waits = []
+        if key is None:
+            plain = state["plain"]
+            left = plain["since"] + self.throttle_window_s - now
+            if plain["failures"] >= self.throttle_attempts and left > 0:
+                waits.append(left)
+        else:
+            entry = state["addresses"].get(key)
+            if entry and entry["until"] > now:
+                waits.append(entry["until"] - now)
+        if name_cap and state["name"]["until"] > now:
+            waits.append(state["name"]["until"] - now)
+        return max(waits) if waits else None
 
-    def _record_failure(self, directory: Path) -> None:
-        # Pocita se jen neuspech EXISTUJICI identity (bad_code/replay) -
-        # neexistujici jmeno pocitadlo nezveda, jinak jde zamknout cizi ucet.
+    def _record_failure(
+        self, directory: Path, key: str | None, name_cap: bool,
+    ) -> dict:
+        """Zapocitej neuspech. Vraci pole pro audit, kdyz tim nastal zamek.
+
+        Pocita se jen neuspech EXISTUJICI identity (bad_code/replay) -
+        neexistujici jmeno pocitadlo nezveda.
+        """
+        lock: dict = {}
         with _locked(self.home):
             cesta = directory / THROTTLE
-            ted = int(time.time())
-            try:
-                data = json.loads(cesta.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                data = {"od": ted, "pokusu": 0}
-            if int(data.get("od", 0)) + self.throttle_window_s <= ted:
-                data = {"od": ted, "pokusu": 0}
-            data["pokusu"] = int(data.get("pokusu", 0)) + 1
-            _replace(cesta, json.dumps(data))
+            state = _read_throttle(cesta)
+            now = _now()
+            reset = self.throttle_reset_after_s
+            addresses = {
+                k: e for k, e in state["addresses"].items()
+                if e["until"] > now or e["last"] + reset > now
+            }
+            if key is None:
+                plain = state["plain"]
+                if plain["since"] + self.throttle_window_s <= now:
+                    plain = {"since": now, "failures": 0}
+                plain["failures"] += 1
+                state["plain"] = plain
+            else:
+                entry = addresses.get(key) or {
+                    "failures": 0, "level": 0, "until": 0, "last": now,
+                }
+                entry["failures"] += 1
+                entry["last"] = now
+                if entry["failures"] >= self.throttle_attempts:
+                    entry["level"] += 1
+                    seconds = _lock_seconds(
+                        self.throttle_window_s, entry["level"],
+                        self.throttle_max_lock_s,
+                    )
+                    entry["until"] = now + seconds
+                    entry["failures"] = 0
+                    lock = {"lock_scope": "address", "lock_level": entry["level"],
+                            "lock_s": seconds}
+                addresses[key] = entry
+                # Strop poctu adres: kdo je strida, nesmi soubor nafukovat.
+                # Vyhazuje se nejstarsi; stridani stejne chyti pocitadlo jmena.
+                while len(addresses) > MAX_THROTTLE_ADDRESSES:
+                    del addresses[min(addresses, key=lambda k: addresses[k]["last"])]
+                if name_cap:
+                    name = state["name"]
+                    if name["since"] + reset <= now:
+                        level = name["level"] if name["until"] + reset > now else 0
+                        name = {"failures": 0, "level": level, "until": name["until"],
+                                "since": now}
+                    name["failures"] += 1
+                    if name["failures"] >= self.throttle_name_attempts:
+                        name["level"] += 1
+                        seconds = _lock_seconds(
+                            self.throttle_window_s, name["level"],
+                            self.throttle_name_max_lock_s,
+                        )
+                        name["until"] = now + seconds
+                        name["failures"] = 0
+                        name["since"] = now
+                        lock = {"lock_scope": "name", "lock_level": name["level"],
+                                "lock_s": seconds}
+                    state["name"] = name
+            state["addresses"] = addresses
+            _replace(cesta, json.dumps(state))
+        return lock
 
-    def _clear_throttle(self, directory: Path) -> None:
-        (directory / THROTTLE).unlink(missing_ok=True)
+    def _clear_throttle(self, directory: Path, key: str | None) -> None:
+        """Uspech: zapomen neuspechy TEHLE adresy. Ostatni adresy a pomale
+        pocitadlo jmena zustavaji - cizi pokusy uspechem majitele nezmizi."""
+        cesta = directory / THROTTLE
+        if not cesta.is_file():
+            return
+        with _locked(self.home):
+            state = _read_throttle(cesta)
+            if key is None:
+                state["plain"] = {"since": 0, "failures": 0}
+            else:
+                state["addresses"].pop(key, None)
+            now = _now()
+            idle = (
+                not state["addresses"] and not state["plain"]["failures"]
+                and not state["name"]["failures"] and state["name"]["until"] <= now
+                and state["name"]["level"] == 0
+            )
+            if idle:
+                cesta.unlink(missing_ok=True)
+            else:
+                _replace(cesta, json.dumps(state))
 
     # == overeni ===========================================================
 
@@ -444,7 +548,11 @@ class FileStore:
         name = check_identity(username)
         if client_origin is not None:
             client_origin = _check_client_origin(client_origin)
-        verdikt = self._authenticate_verdict(name, credentials, purpose)
+        # Klic omezovani je adresa CLOVEKA. Adresa serveru aplikace (`origin`)
+        # jim neni: sdili ji vsichni jeji uzivatele.
+        verdikt, lock = self._authenticate_verdict(
+            name, credentials, purpose, _throttle_key(client_origin),
+        )
         self._audit(
             kind="authenticate",
             subject=f"user:{name}",
@@ -455,45 +563,56 @@ class FileStore:
             # a prazdna hodnota by predstirala, ze se meril a nic nevysel.
             **({"key_id": key_id} if key_id else {}),
             **({"origin": origin} if origin else {}),
-            # Adresa CLOVEKA, jak ji hlasi aplikace. Jen pro informaci:
-            # o nicem nerozhoduje a origin ACL dal meri `origin`, tedy to,
-            # odkud pozadavek skutecne prisel.
+            # Adresa CLOVEKA, jak ji hlasi aplikace. O overeni nerozhoduje
+            # a origin ACL dal meri `origin`, tedy to, odkud pozadavek
+            # skutecne prisel; je ale klicem omezovani pokusu.
             **({"client_origin": client_origin} if client_origin else {}),
             outcome=verdikt.outcome,
             **({"reason": verdikt.reason} if verdikt.reason else {}),
+            # Timhle pokusem nastal zamek: rozsah (adresa/jmeno), kolikaty
+            # v rade a na jak dlouho. Zamek na JMENO znamena hadani z mnoha
+            # adres - to je radek, ktery ma spravce v auditu hledat.
+            **lock,
             gen=verdikt.gen,
         )
         return verdikt
 
-    def _authenticate_verdict(self, name: str, credentials, purpose: str) -> Verdict:
+    def _authenticate_verdict(
+        self, name: str, credentials, purpose: str, key: str | None = None,
+    ) -> tuple[Verdict, dict]:
         """Samotny vypocet verdiktu - jediny vystupni bod dela `authenticate`,
-        aby audit zalogoval kazde volani prave jednou."""
+        aby audit zalogoval kazde volani prave jednou.
+
+        `key` je klic omezovani (adresa klienta, viz `_throttle_key`). Druha
+        polozka vysledku jsou pole zamku pro audit - prazdna, kdyz timhle
+        pokusem zadny nenastal.
+        """
         directory = self._dir(USER_PREFIX, name)
         gen = self.generation()
 
         if not directory.is_dir():
-            return Verdict.refused("unknown_user", gen=gen)
+            return Verdict.refused("unknown_user", gen=gen), {}
         if (directory / "disabled").exists():
-            return Verdict.refused("disabled", gen=gen)
+            return Verdict.refused("disabled", gen=gen), {}
 
         secret = directory / "totp.secret"
         if not _usable_secret(secret):
             # Zalozeny adresar bez tajemstvi neni "spatny kod": je to
             # nedokoncene zavedeni a spravce to ma poznat z auditu.
-            return Verdict.refused("no_secret", gen=gen)
+            return Verdict.refused("no_secret", gen=gen), {}
 
         if self._enrolment_expired(directory):
-            return Verdict.refused("expired", gen=gen)
+            return Verdict.refused("expired", gen=gen), {}
 
-        zbyva = self._throttled(directory)
+        zbyva = self._throttled(directory, key, name_cap=True)
         if zbyva is not None:
-            return Verdict.throttled(zbyva, gen=gen)
+            return Verdict.throttled(zbyva, gen=gen), {}
 
         # Co je potreba, rozhoduje KOMPONENTA. Nezname jmeno mechanismu se
         # chova, jako by neprislo - jinak si klient vybere ten slabsi.
         code = dict(credentials or {}).get("totp")
         if not code:
-            return Verdict.need_factor(("totp",), gen=gen)
+            return Verdict.need_factor(("totp",), gen=gen), {}
 
         # Nevalidni tvar je tentyz bad_code jako spatny kod - vcetne pocitadla
         # pokusu a auditu. Jiny reason by prozradil, jak vstup vypadal.
@@ -502,21 +621,21 @@ class FileStore:
             if _is_code(code) else None
         )
         if step is None:
-            self._record_failure(directory)
-            return Verdict.refused("bad_code", gen=gen)
+            lock = self._record_failure(directory, key, name_cap=True)
+            return Verdict.refused("bad_code", gen=gen), lock
         if not self._consume(name, purpose, step):
-            self._record_failure(directory)
-            return Verdict.refused("replay", gen=gen)
+            lock = self._record_failure(directory, key, name_cap=True)
+            return Verdict.refused("replay", gen=gen), lock
 
         user = self.user(name)
         if user is None:
             # Soubeh: mezi _consume a timhle dotazem stihl remove_user smazat
             # adresar. Spravny kod bez existujiciho uzivatele neni verdikt.
-            return Verdict.refused("unknown_user", gen=gen)
+            return Verdict.refused("unknown_user", gen=gen), {}
 
-        self._clear_throttle(directory)
+        self._clear_throttle(directory, key)
         self._complete_pairing(directory)
-        return Verdict.ok(user.subject_id, user.principals, gen=gen)
+        return Verdict.ok(user.subject_id, user.principals, gen=gen), {}
 
     def authenticate_admin(
         self, name: str, first, second, *, origin: str | None = None,
@@ -528,7 +647,11 @@ class FileStore:
         hodin plati pro nalezeni s, ne pro sousednost.
         """
         name = check_identity(name)
-        verdikt = self._authenticate_admin_verdict(name, first, second)
+        # U konzole je `origin` adresa cloveka (meri ji proxy pred ni), takze
+        # je to zaroven klic omezovani.
+        verdikt, lock = self._authenticate_admin_verdict(
+            name, first, second, _throttle_key(origin),
+        )
         self._audit(
             kind="authenticate",
             subject=f"admin:{name}",
@@ -539,29 +662,37 @@ class FileStore:
             **({"origin": origin} if origin else {}),
             outcome=verdikt.outcome,
             **({"reason": verdikt.reason} if verdikt.reason else {}),
+            **lock,
             gen=verdikt.gen,
         )
         return verdikt
 
-    def _authenticate_admin_verdict(self, name: str, first, second) -> Verdict:
+    def _authenticate_admin_verdict(
+        self, name: str, first, second, key: str | None = None,
+    ) -> tuple[Verdict, dict]:
         """Samotny vypocet verdiktu - jediny vystupni bod dela
-        `authenticate_admin`, aby audit zalogoval kazde volani prave jednou."""
+        `authenticate_admin`, aby audit zalogoval kazde volani prave jednou.
+
+        Bez pomaleho pocitadla na jmeno (`name_cap=False`): dva kody po sobe
+        se uhodnout nedaji a zamek na jmeno by tu slouzil jen k tomu, aby
+        nekdo spravce z konzole vyradil.
+        """
         directory = self._dir(ADMIN_PREFIX, name)
         gen = self.generation()
 
         if not directory.is_dir():
-            return Verdict.refused("unknown_user", gen=gen)
+            return Verdict.refused("unknown_user", gen=gen), {}
         if (directory / "disabled").exists():
-            return Verdict.refused("disabled", gen=gen)
+            return Verdict.refused("disabled", gen=gen), {}
         secret = directory / "totp.secret"
         if not _usable_secret(secret):
-            return Verdict.refused("no_secret", gen=gen)
+            return Verdict.refused("no_secret", gen=gen), {}
         if self._enrolment_expired(directory):
-            return Verdict.refused("expired", gen=gen)
+            return Verdict.refused("expired", gen=gen), {}
 
-        zbyva = self._throttled(directory)
+        zbyva = self._throttled(directory, key, name_cap=False)
         if zbyva is not None:
-            return Verdict.throttled(zbyva, gen=gen)
+            return Verdict.throttled(zbyva, gen=gen), {}
 
         tajemstvi = secret.read_text(encoding="utf-8").strip()
         # Stejne jako u uzivatele: nevalidni tvar kterehokoli z kodu je bad_code.
@@ -570,15 +701,15 @@ class FileStore:
             if _is_code(first) and _is_code(second) else None
         )
         if step is None or not _code_at_step(tajemstvi, step + 1, second):
-            self._record_failure(directory)
-            return Verdict.refused("bad_code", gen=gen)
+            lock = self._record_failure(directory, key, name_cap=False)
+            return Verdict.refused("bad_code", gen=gen), lock
         if not self._consume(name, "admin", step, step + 1, prefix=ADMIN_PREFIX):
-            self._record_failure(directory)
-            return Verdict.refused("replay", gen=gen)
+            lock = self._record_failure(directory, key, name_cap=False)
+            return Verdict.refused("replay", gen=gen), lock
 
-        self._clear_throttle(directory)
+        self._clear_throttle(directory, key)
         self._complete_pairing(directory)
-        return Verdict.ok(f"admin:{name}", frozenset(), gen=gen)
+        return Verdict.ok(f"admin:{name}", frozenset(), gen=gen), {}
 
     # == zapis: uzivatele ==================================================
 
@@ -1356,6 +1487,72 @@ def _qr_text(uri: str) -> str:
     buffer = io.StringIO()
     code.print_ascii(out=buffer)
     return buffer.getvalue()
+
+
+#: Kolik adres si omezovani u jedne identity pamatuje.
+MAX_THROTTLE_ADDRESSES = 64
+
+
+def _now() -> int:
+    """Cas pro omezovani pokusu. Vlastni funkce, at ho testy umi posunout."""
+    return int(time.time())
+
+
+def _throttle_key(address) -> str | None:
+    """Klic omezovani z adresy klienta - nebo None, kdyz adresa neni.
+
+    IPv4 cela adresa. U IPv6 jen sit /64: jeden pocitac v ni ma 2^64 adres
+    a kazda by jinak mela vlastni pocitadlo. Adresa IPv4 zabalena v IPv6
+    (`::ffff:a.b.c.d`) je tataz adresa IPv4. Cokoli, co adresa neni, klic
+    nedava a plati pevne okno na jmeno.
+    """
+    if not address:
+        return None
+    try:
+        ip = ipaddress.ip_address(str(address).strip())
+    except ValueError:
+        return None
+    if ip.version == 6:
+        if ip.ipv4_mapped is not None:
+            return str(ip.ipv4_mapped)
+        return str(ipaddress.ip_network((ip, 64), strict=False))
+    return str(ip)
+
+
+def _lock_seconds(window_s: int, level: int, cap_s: int) -> int:
+    """Delka zamku: okno, s kazdou dalsi serii dvojnasobek, nejvys `cap_s`."""
+    return min(window_s * 2 ** min(level - 1, 30), cap_s)
+
+
+def _empty_throttle() -> dict:
+    return {
+        "addresses": {},
+        "name": {"failures": 0, "level": 0, "until": 0, "since": 0},
+        "plain": {"since": 0, "failures": 0},
+    }
+
+
+def _read_throttle(path: Path) -> dict:
+    """Stav omezovani jedne identity; necitelny soubor je prazdny stav.
+
+    Poskozeny soubor NEBLOKUJE - radeji o pocitadlo prijit nez nekoho zamknout
+    navzdy. Stejne dopadne soubor ve starsim tvaru (`od`, `pokusu`): prvni
+    neuspech ho prepise.
+    """
+    state = _empty_throttle()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        for key, entry in data["addresses"].items():
+            state["addresses"][str(key)] = {
+                field: int(entry[field])
+                for field in ("failures", "level", "until", "last")
+            }
+        for part in ("name", "plain"):
+            for field in state[part]:
+                state[part][field] = int(data[part][field])
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return _empty_throttle()
+    return state
 
 
 #: Nejkratsi tajemstvi, se kterym se smi overovat (znaku base32, tj. 80 bitu).

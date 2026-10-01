@@ -168,10 +168,34 @@ a vydá nový; změna platí okamžitě, bez restartu.
 
 ## Omezování pokusů
 
-Po `attempts` (výchozí 5) špatných kódech téže identity v okně `window_s`
-(výchozí 60 s) vrací ověření `throttled` s `retry_after`. Počítají se jen
-neúspěchy existujících identit — cizí ani náhodná jména počítadlo nezvedají,
-takže nikdo nemůže zamknout cizí účet střelbou od vedle.
+Klíčem je **dvojice jméno a adresa klienta**. Po `attempts` (výchozí 5) špatných
+kódech z jedné adresy vrací ověření pro tuto adresu `throttled` s `retry_after`.
+Kdo hádá cizí kód, zamyká tedy sám sebe; majitel účtu se ze své adresy přihlásí dál.
+
+- **Zámek roste.** První trvá `window_s` (výchozí 60 s), každý další dvojnásobek,
+  nejvýš `max_lock_s` (výchozí den). Neúspěchy se nezapomínají po minutě: nuluje
+  je úspěšné ověření z téže adresy nebo `reset_after_s` (výchozí den) klidu.
+- **Adresa klienta** je u správce ta, kterou měří proxy před konzolí. U uživatele
+  ji hlásí aplikace polem `client_origin`. U IPv6 je klíčem síť /64.
+- **Bez adresy klienta** (aplikace ji neposílá, lokální volání) platí pevné okno
+  na jméno: `attempts` neúspěchů během `window_s` zamkne do konce okna další
+  požadavky **bez adresy klienta**, bez růstu. Požadavky s adresou klienta tento
+  zámek nezasáhne, takže pokusy přes aplikaci, která adresu neposílá, nezamknou
+  uživatele aplikace, která ji posílá. Uživatele takové aplikace ale jde zamykat
+  odkudkoli a hádání brzdí jen toto okno — aplikace má `client_origin` posílat.
+- **Pomalé počítadlo na jméno** platí jen pro uživatele: `name_attempts` (výchozí
+  20) neúspěchů ze všech adres během `reset_after_s` zamkne jméno pro všechny
+  adresy, poprvé na `window_s`, pak dvojnásobky do `name_max_lock_s` (výchozí
+  hodina). Brání hádání z mnoha adres; kdo jich má dost, může jím uživatele
+  na tu dobu zamknout. U správce není: dva kódy po sobě se uhodnout nedají.
+- Počítají se jen neúspěchy existujících identit — cizí ani náhodná jména
+  počítadlo nezvedají.
+
+Pokus, kterým zámek nastal, nese v auditu `lock_scope` (`address` nebo `name`),
+`lock_level` a `lock_s`. Řádek s `lock_scope: name` znamená hádání z mnoha adres.
+
+Konzole při `throttled` ukáže stejnou hlášku jako při špatném kódu, aby
+z odpovědi nešlo poznat, že správce existuje.
 
 ## Audit
 
@@ -206,7 +230,8 @@ Záznam ověření nese kromě `subject` (koho se ptalo) i to, **kdo se ptal**:
 | `key_id` | kterým klíčem; po výměně klíče je z něj poznat který |
 | `origin` | z jaké adresy — měřeno `resolve_origin`, stejně jako origin ACL |
 
-| `client_origin` | odkud se hlásil člověk — jak ho aplikace poslala; jen pro informaci |
+| `client_origin` | odkud se hlásil člověk — jak ho aplikace poslala; klíč omezování pokusů |
+| `lock_scope`, `lock_level`, `lock_s` | tímto pokusem nastal zámek: rozsah (`address`/`name`), kolikátý v řadě, na kolik sekund |
 
 Nepředané pole se **nepíše**. Lokální volání přes `Access.local` žádnou
 adresu ani klíč nemá; prázdná hodnota by předstírala, že se měřily a nic

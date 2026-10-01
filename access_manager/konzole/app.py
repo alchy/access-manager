@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .. import log
 from ..audit import odpovida, read_events, recent_by
-from ..config import ServiceConfig
+from ..config import ServiceConfig, throttle_kwargs
 from ..files import FileStore
 from ..origin import resolve_origin
 from ..principals import AUTOMATIC_GROUPS, check_identity, check_name, check_realm
@@ -159,8 +159,7 @@ def _realm_store_kwargs(cfg: ServiceConfig) -> dict[str, dict]:
                     "audit_retention_days", cfg.defaults["audit_retention_days"]
                 )
             ),
-            "throttle_attempts": int(cfg.throttle["attempts"]),
-            "throttle_window_s": int(cfg.throttle["window_s"]),
+            **throttle_kwargs(cfg),
         }
     return kwargs
 
@@ -383,11 +382,10 @@ def create_console_app(cfg: ServiceConfig):
         store = _store_for(realm_name, actor=f"admin:{name}")
         verdict = store.authenticate_admin(name, code1, code2, origin=origin)
 
-        if verdict.outcome == "throttled":
-            error = _translate("login.throttled").format(s=verdict.retry_after)
-            return flask.render_template(
-                "login.html", error=error, **_access_context()
-            )
+        # `throttled` dostane STEJNOU hlasku jako spatny kod. Vlastni hlasku
+        # ("prilis mnoho pokusu") dostal jen existujici spravce, takze sest
+        # pozadavku stacilo k overeni, ze jmeno existuje. Ze se po opakovanych
+        # chybach ceka, rika hlaska vzdy; presny cas je v auditu.
         if not verdict:
             return flask.render_template(
                 "login.html", error=_translate("login.failed"), **_access_context()
