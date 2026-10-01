@@ -122,9 +122,12 @@
     {{ csrf_field() }}
     <label class="field">
       <span>{{ t('skupiny.name') }}</span>
-      <input type="text" name="nazev" autocomplete="off" required>
+      <input type="text" name="nazev" autocomplete="off" required
+             placeholder="obchod">
     </label>
     <button type="submit" class="odeslat">{{ t('skupiny.add_group') }}</button>
+    {# Co do pole patri: jen jmeno, predponu doplni sluzba sama. #}
+    <p class="field-hint">{{ t('skupiny.add_hint') }}</p>
   </form>
 </section>
 {% endblock %}

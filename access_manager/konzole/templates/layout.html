@@ -757,13 +757,17 @@
     margin: 0;
     padding: 0.95rem 0.85rem 1rem;
   }
-  .form-panel .field { flex: 1 1 16rem; max-width: 26rem; margin: 0; }
+  /* Vsechny panely stejne: pole, hned za nim tlacitko; pod nimi pres celou
+     sirku vysvetleni k poli a pak pripadna volba. `order` drzi tohle poradi i tam, kde ve
+     zdrojaku stoji volba pred tlacitkem (kvuli poradi pri Tab). */
+  .form-panel .field { order: 1; flex: 1 1 16rem; max-width: 26rem; margin: 0; }
   .form-panel .field > span:first-child { font-size: 0.8rem; opacity: 0.75; }
   .form-panel .field input[type="text"],
   .form-panel .field select { width: 100%; box-sizing: border-box; }
-  .form-panel .odeslat { flex: none; white-space: nowrap; }
+  .form-panel .odeslat { order: 2; flex: none; white-space: nowrap; }
   /* Zaskrtavaci volba s vysvetlenim zabira zbytek radku vedle pole. */
-  .form-panel .volba { flex: 2 1 22rem; max-width: none; margin: 0; align-self: center; }
+  .form-panel .field-hint { order: 3; flex: 1 1 100%; margin: 0; font-size: 0.82rem; opacity: 0.75; }
+  .form-panel .volba { order: 4; flex: 1 1 100%; max-width: none; margin: 0; }
   .form-panel-note {
     margin: 0;
     padding: 0.6rem 0.85rem;

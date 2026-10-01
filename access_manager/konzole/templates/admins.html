@@ -59,9 +59,12 @@
     {{ csrf_field() }}
     <label class="field">
       <span>{{ t('spravci.identity') }}</span>
-      <input type="text" name="jmeno" autocomplete="off" required>
+      <input type="text" name="jmeno" autocomplete="off" required
+             placeholder="eva.dvorakova">
     </label>
     <button type="submit" class="odeslat">{{ t('spravci.add_title') }}</button>
+    {# Co do pole patri: jen jmeno, predponu doplni sluzba sama. #}
+    <p class="field-hint">{{ t('spravci.add_hint') }}</p>
   </form>
 </section>
 {% endblock %}

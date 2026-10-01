@@ -91,16 +91,17 @@
   </tbody>
 </table>
 
-{# Jmeno, volba a tlacitko v jedne radce pres celou sirku; co je jen
-   vysvetleni (klic se ukaze jednou, tvary rozsahu), stoji v pate panelu. #}
+{# Stejne rozlozeni jako u ostatnich panelu Pridat: pole a hned tlacitko,
+   volba pod nimi; co je jen vysvetleni (klic se ukaze jednou, tvary
+   rozsahu), stoji v pate panelu. Bez cislovky - neni to krok postupu. #}
 <section class="form-panel">
-  <h2>{{ t('aplikace.step_add') }}</h2>
+  <h2>{{ t('aplikace.add_title') }}</h2>
   <form method="post" action="{{ url_for('_apps_add') }}" class="form-panel-body">
     {{ csrf_field() }}
     <label class="field">
       <span>{{ t('aplikace.name') }}</span>
       <input type="text" name="jmeno" autocomplete="off" required
-             placeholder="app:mzdy">
+             placeholder="workbench">
     </label>
     <label class="volba">
       <input type="checkbox" name="detail" value="on">
@@ -109,7 +110,9 @@
         <span class="poznamka">{{ t('aplikace.detail_hint') }}</span>
       </span>
     </label>
-    <button type="submit" class="odeslat">{{ t('aplikace.step_add') }}</button>
+    <button type="submit" class="odeslat">{{ t('aplikace.add_title') }}</button>
+    {# Co do pole patri: jen jmeno, predponu doplni sluzba sama. #}
+    <p class="field-hint">{{ t('aplikace.add_hint') }}</p>
   </form>
   <p class="form-panel-note">
     <span>{{ t('aplikace.step_add_hint') }}</span>
