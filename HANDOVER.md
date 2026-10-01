@@ -48,8 +48,8 @@ stroje). Starší verze čte nový `throttle.json` jako prázdný, zámky tím z
     podman tag localhost/access-manager:rollback-20261001 localhost/access-manager:latest
     systemctl restart access-manager-container.service        # jako root
 
-Větve `feat/console-utc-hardening`, `ui/add-panel-layout` a `feat/throttle-backoff` jsou
-sloučené do `main` a na `origin` zůstávají; smějí se smazat.
+Na `origin` je jen `main`. Sloučené větve jsou tam smazané; jejich lokální kopie v tomto
+repozitáři zůstaly a smějí se smazat také.
 
 Git proti `origin` jde jen přes klíč uživatele `tech` spuštěný jako root, potom
 `chown -R access-manager: .git`.
