@@ -124,9 +124,12 @@ Nic z toho není opravené. Řazeno podle závažnosti.
    Návrh: registr relací v paměti, nečinnost 15 minut, strop 8 hodin.
 5. **`/v1/authenticate` prozradí existenci účtu** i bez `detail`: prázdné `credentials` vrátí
    `need_factor` jen existujícímu uživateli, a to bez omezení pokusů.
-6. **Workbench volá `/v1/whoami` každé 2,5 sekundy** (od 29. 9.). Audit roste o 34 tisíc
-   řádků denně; stránka auditu čte celé období při každém zobrazení. Dnes 0,7 s, při 90 dnech
-   retence přes 10 s. Opravit ve Workbenchi, případně úspěšné `whoami` neauditovat.
+6. **Audit nese 75 tisíc řádků `whoami` z 29. 9. – 1. 10.** Workbench po restartu serveru
+   spouštěl dvě sady jednotek zároveň a padající služba identity volala `/v1/whoami` při
+   každém startu, každé 2,7 s. Opraveno ve Workbenchi 1. 10. v 19:03 UTC (jeho commit
+   `684efa9`); od té doby je audit klidný. Staré řádky zůstanou do konce retence a stránka
+   auditu je za ty tři dny pomalejší. Stránka čte celé období při každém zobrazení, takže
+   podobná záplava ji zpomalí znovu; služba sama se proti ní nebrání.
 7. **Zápis `totp.secret` není atomický** (soubor se založí a pak plní). Prázdný soubor už
    neověřuje, ale `pair()` ho neopraví („už tajemství má“). Návrh: dočasný soubor a `os.link`.
 
