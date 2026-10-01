@@ -418,10 +418,15 @@ def test_every_view_shows_utc_times_whatever_the_process_zone(
     presne = datetime.now(UTC)
     for cesta in ("/audit/admins", "/audit/users", "/audit/apps", "/audit"):
         telo = klient.get(cesta).get_data(as_text=True)
-        obnova = re.search(r'class="kdy">Aktualizováno (\d\d):\d\d:\d\d UTC<', telo)
+        obnova = re.search(
+            r'class="kdy">Aktualizováno (\d\d:\d\d:\d\d) UTC<', telo)
         assert obnova, cesta
-        # Hodina je z UTC, ne z pasma procesu (v Praze o hodinu ci dve vic).
-        assert abs(int(obnova.group(1)) - presne.hour) in (0, 1, 23), cesta
+        # Na minuty, ne na hodiny: mistni cas se od UTC lisi o hodinu (v zime)
+        # nebo o dve, takze volnejsi mez by ho v zime pustila.
+        vypsano = datetime.combine(
+            presne.date(), datetime.strptime(obnova.group(1), "%H:%M:%S").time(), UTC)
+        rozdil = abs((vypsano - presne).total_seconds())
+        assert min(rozdil, 86400 - rozdil) < 300, cesta
         assert "<th>Čas (UTC)</th>" in telo, cesta
         assert "dny v UTC" in telo, cesta
     # Radek pod hlavickou dne nese hodiny, hlavicka den - oboji v UTC.
@@ -435,7 +440,9 @@ def test_every_view_shows_utc_times_whatever_the_process_zone(
     assert "+00:00</td>" not in telo
 
 
-def test_the_period_is_counted_in_utc_days(prihlaseny_klient, tmp_path):
+def test_the_period_is_counted_in_utc_days(
+    prague_zone, prihlaseny_klient, tmp_path,
+):
     # Dva radky tesne kolem pulnoci UTC, kazdy ve svem dennim souboru. V Praze
     # by oba padly do tehoz mistniho dne; konzole je deli tak, jak lezi
     # v souborech auditu. `append_event` pise vzdy do dneska, proto primo.
@@ -459,6 +466,24 @@ def test_the_period_is_counted_in_utc_days(prihlaseny_klient, tmp_path):
         f"/audit/apps?od={predevcirem}&do={predevcirem}").get_data(as_text=True)
     assert "/v1/pred" in telo and "/v1/po" not in telo
     assert "23:59:30 UTC" in telo
+
+
+def test_a_day_without_leading_zeros_means_the_same_day(prihlaseny_klient, tmp_path):
+    """`strptime` vezme i "2026-1-5". Obdobi se ale porovnava se jmeny souboru
+    jako retezec, takze se den musi nejdriv prevest na kanonicky tvar."""
+    import json
+    adresar = koren(tmp_path / "data") / "audit"
+    radek = {"t": "2026-09-05T10:00:00+00:00", "kind": "access", "component": "wb",
+             "key_id": "k1", "origin": "10.0.0.1", "method": "GET",
+             "path": "/v1/zari", "status": 200, "outcome": "ok"}
+    (adresar / "2026-09-05.jsonl").write_text(json.dumps(radek) + "\n")
+    klient, _ = prihlaseny_klient
+    telo = klient.get("/audit/apps?od=2026-9-5&do=2026-9-5").get_data(as_text=True)
+    assert "/v1/zari" in telo
+    assert 'name="od" form="filtr" value="2026-09-05"' in telo
+    # Leden az zari zapsane bez nul nesmi ukazat rijen.
+    telo = klient.get("/audit/apps?od=2026-1-5&do=2026-9-9").get_data(as_text=True)
+    assert "/v1/zari" in telo and "/v1/whoami" not in telo
 
 
 def test_a_hand_written_minimal_event_does_not_crash_any_view(

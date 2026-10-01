@@ -1,4 +1,4 @@
-{# Skryty CSRF vstup - kazda mutace v konzoli ho musi nest (viz over_csrf).
+{# Skryty CSRF vstup - kazda mutace v konzoli ho musi nest (viz verify_csrf).
    Definovano tady, protoze layout.html je spolecny predek vsech sablon a
    Jinja macro z rodice je videt i uvnitr bloku potomka bez importu. #}
 {% macro csrf_field() %}<input type="hidden" name="csrf" value="{{ session.get('csrf', '') }}">{% endmacro %}
@@ -813,7 +813,7 @@
      radce, vyber se roztahne, tlacitko drzi svou sirku. */
   .inline-add { display: flex; align-items: center; gap: 0.5rem; margin: 0.75rem 0 0; }
   .inline-add select { flex: 1 1 auto; min-width: 0; max-width: 22rem; padding: 0.35rem 0.5rem; font-size: 0.85rem; }
-  .small-button, .member-list button, .inline-add button,
+  .member-list button, .inline-add button,
   .tabulka td > form:not(.pridat-rozsah) > button {
     background: none;
     border: 1px solid var(--hranice);
@@ -823,7 +823,7 @@
     color: var(--text);
     white-space: nowrap;
   }
-  .small-button:hover, .member-list button:hover, .inline-add button:hover,
+  .member-list button:hover, .inline-add button:hover,
   .tabulka td > form:not(.pridat-rozsah) > button:hover { border-color: var(--accent); color: var(--accent); }
   @media (max-width: 900px) {
     .group-columns { grid-template-columns: 1fr; }

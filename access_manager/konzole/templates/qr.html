@@ -25,15 +25,14 @@
 
 <p>{{ t('uzivatele.manual_secret') }}</p>
 <p class="mono klic-hodnota" id="totp-secret">{{ secret }}</p>
-<button type="button"
-        onclick="navigator.clipboard.writeText(document.getElementById('totp-secret').textContent.trim())">
+{# Zadny `onclick` - viz key.html a copy.js. #}
+<button type="button" data-copy-from="totp-secret">
   {{ t('aplikace.copy') }}
 </button>
 
 <p>{{ t('uzivatele.manual_uri') }}</p>
 <p class="mono klic-hodnota" id="totp-uri">{{ uri }}</p>
-<button type="button"
-        onclick="navigator.clipboard.writeText(document.getElementById('totp-uri').textContent.trim())">
+<button type="button" data-copy-from="totp-uri">
   {{ t('aplikace.copy') }}
 </button>
 {% endif %}
@@ -45,4 +44,5 @@
 {% endif %}
 
 <p><a href="{{ back_url }}">{{ t('spolecne.back') }}</a></p>
+<script src="{{ url_for('static', filename='copy.js') }}" defer></script>
 {% endblock %}

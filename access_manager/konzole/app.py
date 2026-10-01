@@ -11,6 +11,7 @@ naimportovat bez extras (`pip install 'access-manager[server]'`), stejne jako
 from __future__ import annotations
 
 import functools
+import re
 import secrets
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -28,6 +29,22 @@ from . import audit_views, preklady
 #: Sablony jsou soucasti balicku - Flask by je jinak hledal relativne k cwd,
 #: ktery se pri spusteni sluzby muze lisit od umisteni modulu.
 _TEMPLATES = Path(__file__).parent / "templates"
+
+#: Kam smi `/lang` presmerovat: cesta na TOMTO serveru a nic jineho. Zacina
+#: jednim lomitkem, za nim nesmi byt druhe lomitko ani zpetne lomitko, a cela
+#: se sklada jen z tisknutelnych znaku ASCII bez mezery a bez zpetneho lomitka.
+#: Samotny test "zacina '/' a ne '//'" nestacil: tabulator a konec radku
+#: prohlizec z adresy vypusti, takze z "/<TAB>/cizi.example" je
+#: "//cizi.example" - tedy cizi server. Konec radku navic shodil odpoved na
+#: 500. Stranky konzole si `next` skladaji z `request.full_path`, ktery je
+#: zakodovany do ASCII, takze poctive cile tudy projdou vsechny.
+_LOCAL_PATH = re.compile(r"/(?![/\\])[\x21-\x5b\x5d-\x7e]*")
+
+
+def _local_target(target: str) -> str:
+    """`target`, je-li to cesta na tomto serveru; jinak uvodni stranka."""
+    return target if _LOCAL_PATH.fullmatch(target) else "/"
+
 
 #: Vychozi sirka okna auditu bez filtru - "nedavne udalosti", ne cela
 #: historie (retence je typicky 90 dni, cely vypis by byl neprehledny).
@@ -170,6 +187,7 @@ def create_console_app(cfg: ServiceConfig):
         )
 
     app = flask.Flask(__name__, template_folder=str(_TEMPLATES))
+    log.adopt(app.logger)
     # Restart = odhlaseni vsech spravcu - zamer, ne nedopatreni. Zadne
     # tajemstvi se nikam neuklada, klic zije jen po dobu behu procesu.
     app.secret_key = secrets.token_hex(32)
@@ -190,11 +208,15 @@ def create_console_app(cfg: ServiceConfig):
         se overuje az od prvni mutace PO prihlaseni (napr. /logout). Porovnani
         je casove konstantni (`secrets.compare_digest`) - drive nez se na nej
         dostane, jsou oba chybejici stavy (nic poslano/nic v session) osetreny
-        rovnou abortem, aby compare_digest vzdycky dostal dva stringy.
+        rovnou abortem. Porovnavaji se BAJTY: na textu s ne-ASCII znakem
+        `compare_digest` nevrati False, ale hodi TypeError, a z odmitnuti by
+        byla chyba 500 bez zaznamu v auditu.
         """
         sent = flask.request.form.get("csrf")
         stored = flask.session.get("csrf")
-        if not sent or not stored or not secrets.compare_digest(sent, stored):
+        if not sent or not stored or not secrets.compare_digest(
+            sent.encode("utf-8"), stored.encode("utf-8")
+        ):
             # Do AUDITU, ne do provozniho logu: sem se dojde jen za strazcem,
             # takze realm i spravce jsou znami a je kam zapsat. Zaroven je to
             # presne ta udalost, ktera ma prezit rotaci provozniho logu.
@@ -273,16 +295,14 @@ def create_console_app(cfg: ServiceConfig):
         na strankach vyrenderovanych primo z POST (key.html) skonci 405
         (jina metoda) a na strankach s vlastnim dotazem (filtrovany /audit,
         /groups?group=...) dotaz zahodi. `next` se pousti dal JEN kdyz je
-        to relativni cesta zacinajici jednim '/' - '//host/...' by prohlizec
-        vzal jako absolutni URL na cizi host (open redirect).
+        to cesta na tomto serveru (viz `_LOCAL_PATH`) - '//host/...' i
+        '/<TAB>/host' by prohlizec vzal jako adresu ciziho serveru.
         """
         to = flask.request.args.get("to")
         if to in ("cs", "en"):
             flask.session["lang"] = to
         next_url = flask.request.args.get("next", "")
-        if next_url.startswith("/") and not next_url.startswith("//"):
-            return flask.redirect(next_url)
-        return flask.redirect("/")
+        return flask.redirect(_local_target(next_url))
 
     def _access_context() -> dict:
         """Odkud a cim se clovek diva - vypisuje se pod prihlasovacim formularem.
@@ -306,7 +326,7 @@ def create_console_app(cfg: ServiceConfig):
     @app.post("/login")
     def _login():
         # POST /login je pred existenci session - neni co porovnat s CSRF
-        # tokenem, takze se tady over_csrf() zamerne nevola (viz jeho
+        # tokenem, takze se tady verify_csrf() zamerne nevola (viz jeho
         # docstring). Neznamy realm i spatne kody hlasi TOTOZNOU hlasku -
         # zadny postranni kanal, ktery by prozradil, ze realm neexistuje.
         realm_name = flask.request.form.get("realm", "")
@@ -319,7 +339,7 @@ def create_console_app(cfg: ServiceConfig):
 
         # Normalizace DRIV, nez se cokoli porovna nebo ulozi do session:
         # authenticate_admin normalizuje jmeno pres check_identity uvnitr
-        # sebe, ale strazce (prihlasen) porovnava syrove session["admin"]
+        # sebe, ale strazce (login_required) porovnava syrove session["admin"]
         # proti uz normalizovanym admins() - bez tehle normalizace by
         # "Jindrich " (velke pismeno, mezera navic) prihlaseni uspelo, ale
         # KAZDY dalsi pozadavek by strazce odrazel zpatky na /login. Zdeformo-
@@ -403,7 +423,7 @@ def create_console_app(cfg: ServiceConfig):
     # == uzivatele ==========================================================
     #
     # VZOR pro dalsi stranky (skupiny/aplikace/spravci/audit): kazda mutace
-    # je @prihlasen + POST, prvni radek je over_csrf(), knihovni volani bezi
+    # je @login_required + POST, prvni radek je verify_csrf(), knihovni volani bezi
     # v try/except ValueError, uspech i chyba konci flashem a redirectem
     # (Post/Redirect/Get). `_users_mutation` tenhle tvar nese za vsechny
     # jednoduche akce - vyjimkou je jen `/users/add` s vlastnim GET view
@@ -683,7 +703,7 @@ def create_console_app(cfg: ServiceConfig):
     # == skupiny =============================================================
     #
     # Na rozdil od `_users_mutation` bere `_groups_mutation` cil presmerovani
-    # VZDY explicitne (`cil=`) - mutace clenu/zretezeni maji po chybe
+    # VZDY explicitne (`target=`) - mutace clenu/zretezeni maji po chybe
     # i po uspechu zustat na detailu prave upravovane skupiny, ne skocit
     # zpatky na holy vypis (jedina vyjimka je smazani skupiny samotne,
     # po kterem uz detail nedava smysl).
@@ -745,6 +765,15 @@ def create_console_app(cfg: ServiceConfig):
             total=len(all_groups), shown=len(selected),
         )
 
+    def _group_detail_url(name: str) -> str:
+        """Vypis skupin s otevrenym detailem `name`, rovnou u jeho panelu.
+
+        Kotva patri jen k USPECHU. Po chybe se presmerovava bez ni: hlaska
+        stoji nahore nad vypisem a skok k panelu by ji odsunul z obrazu -
+        spravce by videl jen to, ze se nic nestalo.
+        """
+        return flask.url_for("_groups_list", group=name, _anchor="group-detail")
+
     def _groups_mutation(action, *args, target, redirect_to=None):
         """Spolecny tvar mutaci skupin: CSRF -> knihovni volani -> flash ->
         redirect na `target` (chyba i vychozi uspech) nebo `redirect_to(result)`
@@ -765,9 +794,7 @@ def create_console_app(cfg: ServiceConfig):
         return _groups_mutation(
             flask.g.store.add_group, name,
             target=flask.url_for("_groups_list"),
-            redirect_to=lambda _: flask.url_for(
-                "_groups_list", group=name, _anchor="group-detail",
-            ),
+            redirect_to=lambda _: _group_detail_url(name),
         )
 
     @app.post("/groups/<name>/delete")
@@ -784,9 +811,8 @@ def create_console_app(cfg: ServiceConfig):
         member = flask.request.form.get("clen", "")
         return _groups_mutation(
             flask.g.store.add_member, name, member,
-            target=flask.url_for(
-                "_groups_list", group=name, _anchor="group-detail",
-            ),
+            target=flask.url_for("_groups_list", group=name),
+            redirect_to=lambda _: _group_detail_url(name),
         )
 
     @app.post("/groups/<name>/member/<member>/remove")
@@ -794,9 +820,8 @@ def create_console_app(cfg: ServiceConfig):
     def _groups_member_remove(name, member):
         return _groups_mutation(
             flask.g.store.remove_member, name, member,
-            target=flask.url_for(
-                "_groups_list", group=name, _anchor="group-detail",
-            ),
+            target=flask.url_for("_groups_list", group=name),
+            redirect_to=lambda _: _group_detail_url(name),
         )
 
     @app.post("/groups/<name>/chain")
@@ -805,9 +830,8 @@ def create_console_app(cfg: ServiceConfig):
         included = flask.request.form.get("zahrnuti", "")
         return _groups_mutation(
             flask.g.store.include, name, included,
-            target=flask.url_for(
-                "_groups_list", group=name, _anchor="group-detail",
-            ),
+            target=flask.url_for("_groups_list", group=name),
+            redirect_to=lambda _: _group_detail_url(name),
         )
 
     # == aplikace =============================================================
@@ -1095,10 +1119,13 @@ def create_console_app(cfg: ServiceConfig):
         if not text:
             return None
         try:
-            datetime.strptime(text, "%Y-%m-%d")
+            day = datetime.strptime(text, "%Y-%m-%d").date()
         except ValueError:
             return None
-        return text
+        # Kanonicky tvar, ne puvodni text: `strptime` vezme i "2026-1-5",
+        # ale obdobi se porovnava se jmeny souboru jako retezec a tam by
+        # "2026-1-5" neznamenalo paty leden.
+        return day.isoformat()
 
     def _event_row(event: dict) -> dict:
         """Jeden radek auditu - vsechna pole tolerantne pres `.get`.
@@ -1189,7 +1216,14 @@ def create_console_app(cfg: ServiceConfig):
 
     def _link(**changes) -> str:
         """Tataz stranka se stejnymi filtry, jen se `changes` (None = pryc)."""
-        arguments = flask.request.args.to_dict()
+        # Parametry zacinajici podtrzitkem jsou pro `url_for` RIDICI
+        # (`_external`, `_method`, `_scheme`, `_anchor`): z dotazu se do nej
+        # nesmi dostat, jinak `?_method=POST` shodi stranku a `?_external=1`
+        # prepise odkazy na absolutni.
+        arguments = {
+            key: value for key, value in flask.request.args.to_dict().items()
+            if not key.startswith("_")
+        }
         for key, value in changes.items():
             if value in (None, ""):
                 arguments.pop(key, None)

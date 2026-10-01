@@ -529,11 +529,11 @@ def _expand_run(run: dict, t) -> list[dict]:
 
 
 def with_days(rows, today: date, t) -> list[dict]:
-    """Proloz radky hlavickami dne: [{"den": "..."}, {"radek": ...}, ...]."""
+    """Proloz radky hlavickami dne: [{"day": "..."}, {"row": ...}, ...]."""
     output = []
     last = object()
     for row in rows:
-        d = row["day"] if "den" in row else utc_day(row["event"])
+        d = row["day"] if "day" in row else utc_day(row["event"])
         if d != last:
             output.append({"day": day_label(d, today, t)})
             last = d

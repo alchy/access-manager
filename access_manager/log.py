@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+import traceback
 from datetime import UTC, datetime
 
 #: Jmeno loggeru sluzby. Vse pod nim sdili handlery zapojene v `configure`.
@@ -48,7 +49,12 @@ LOGGER_NAME = "access_manager"
 MAX_VALUE = 256
 
 #: Klice, ktere si formatovac plni sam - pole udalosti je nesmi prebit.
-_RESERVED = frozenset({"t", "level", "event"})
+_RESERVED = frozenset({"t", "level", "event", "exception", "traceback"})
+
+#: Kolik poslednich ramcu zasobniku jde do radku. Staci na to, aby bylo
+#: videt misto v kodu sluzby i volani, ktere k nemu vedlo; cely zasobnik
+#: Flasku by radek jen natahl.
+MAX_FRAMES = 12
 
 _logger = logging.getLogger(LOGGER_NAME)
 
@@ -72,6 +78,28 @@ def sanitize(value):
     return value
 
 
+def _exception_fields(record: logging.LogRecord) -> dict:
+    """Vyjimka zaznamu jako pole radku - typ se zpravou a zasobnik.
+
+    Neosetrena vyjimka se driv vypsala jako holy mnohoradkovy vypis bez casu
+    sluzby (u API), nebo se z ni ztratilo vsechno krome "Exception on ..."
+    (u konzole). Oboji je k nicemu presne ve chvili, kdy je log potreba.
+    Takhle je to JEDEN radek se stejnym razitkem `t` jako vsechno ostatni.
+    Zprava vyjimky muze nest vstup od klienta (jmeno v ceste k souboru),
+    proto jde pres `sanitize`.
+    """
+    if not record.exc_info or record.exc_info[0] is None:
+        return {}
+    kind, error, trace = record.exc_info
+    frames = traceback.extract_tb(trace)[-MAX_FRAMES:]
+    return {
+        "exception": sanitize(f"{kind.__name__}: {error}"),
+        "traceback": [
+            f"{frame.filename}:{frame.lineno} {frame.name}" for frame in frames
+        ],
+    }
+
+
 class JsonFormatter(logging.Formatter):
     """Jeden JSON objekt na radek, klice v jednom jazyce s auditem.
 
@@ -90,6 +118,7 @@ class JsonFormatter(logging.Formatter):
             "event": record.getMessage(),
         }
         line.update(getattr(record, "fields", {}))
+        line.update(_exception_fields(record))
         return json.dumps(line, ensure_ascii=False, sort_keys=False)
 
 
@@ -100,7 +129,11 @@ class TextFormatter(logging.Formatter):
         stamp = datetime.fromtimestamp(record.created, UTC).isoformat(
             timespec="seconds"
         )
-        fields = getattr(record, "fields", {})
+        fields = dict(getattr(record, "fields", {}))
+        problem = _exception_fields(record)
+        if problem:
+            fields["exception"] = problem["exception"]
+            fields["traceback"] = " < ".join(reversed(problem["traceback"]))
         body = " ".join(
             "{}={}".format(key, "-" if value is None else value)
             for key, value in fields.items()
@@ -186,6 +219,21 @@ def configure(level: str = "info", fmt: str = "json") -> None:
     waitress = logging.getLogger("waitress")
     waitress.handlers = list(_logger.handlers)
     waitress.propagate = False
+
+
+def adopt(logger: logging.Logger) -> None:
+    """Zapoj cizi logger (Flask aplikaci) do handleru sluzby.
+
+    Flask si pro kazdou aplikaci drzi vlastni logger pojmenovany podle ni.
+    API se spousti jako `python -m access_manager.server`, takze se jeho
+    logger jmenuje `server`, pod `access_manager` nepatri a neosetrena
+    vyjimka sla mimo formatovac - bez casu sluzby a na mnoho radku. Stejne
+    jako u `waitress`: handlery sluzby a zadne propadani vys, at se radek
+    nevypise podruhe.
+    """
+    _ensure_configured()
+    logger.handlers = list(_logger.handlers)
+    logger.propagate = False
 
 
 def _ensure_configured() -> None:

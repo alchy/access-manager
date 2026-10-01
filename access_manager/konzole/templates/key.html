@@ -11,10 +11,12 @@
 
 <p>{{ t('aplikace.key') }}</p>
 <p class="mono klic-hodnota" id="klic-hodnota">{{ key }}</p>
-<button type="button"
-        onclick="navigator.clipboard.writeText(document.getElementById('klic-hodnota').textContent.trim())">
+{# Zadny `onclick`: nginx posila `script-src 'self'`, ktere inline obsluhu
+   zahodi, a tlacitko by v provozu nedelalo nic. Obsluha je v copy.js. #}
+<button type="button" data-copy-from="klic-hodnota">
   {{ t('aplikace.copy') }}
 </button>
 
 <p><a href="{{ url_for('_apps_list') }}">{{ t('spolecne.back') }}</a></p>
+<script src="{{ url_for('static', filename='copy.js') }}" defer></script>
 {% endblock %}

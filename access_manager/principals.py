@@ -53,8 +53,21 @@ _IDENTITY = re.compile(
 )
 
 
+#: Nejdelsi jmeno. Z jmena se stava jmeno adresare (`user-<jmeno>`,
+#: `admin-<jmeno>`, `realm-<jmeno>`) a souborovy system unese 255 bajtu.
+#: Vzory delku neomezuji, takze delsi jmeno proslo kontrolou a spadlo az na
+#: disku s `OSError` - z odmitnuti se stala chyba 500, a to i na prihlaseni
+#: do konzole, tedy bez jakehokoli overeni. 128 znaku pojme i dlouhou
+#: e-mailovou adresu a nechava rezervu na predponu.
+MAX_NAME_LENGTH = 128
+
+
 def _checked(name: str, vzor: re.Pattern, druh: str) -> str:
     text = str(name).strip().lower()
+    if len(text) > MAX_NAME_LENGTH:
+        raise ValueError(
+            f"neplatne jmeno ({druh}): delsi nez {MAX_NAME_LENGTH} znaku"
+        )
     if not vzor.match(text):
         raise ValueError(
             f"neplatne jmeno {name!r} ({druh}): povolena jsou mala pismena, "

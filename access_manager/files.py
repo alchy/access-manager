@@ -477,7 +477,7 @@ class FileStore:
             return Verdict.refused("disabled", gen=gen)
 
         secret = directory / "totp.secret"
-        if not secret.is_file():
+        if not _usable_secret(secret):
             # Zalozeny adresar bez tajemstvi neni "spatny kod": je to
             # nedokoncene zavedeni a spravce to ma poznat z auditu.
             return Verdict.refused("no_secret", gen=gen)
@@ -554,7 +554,7 @@ class FileStore:
         if (directory / "disabled").exists():
             return Verdict.refused("disabled", gen=gen)
         secret = directory / "totp.secret"
-        if not secret.is_file():
+        if not _usable_secret(secret):
             return Verdict.refused("no_secret", gen=gen)
         if self._enrolment_expired(directory):
             return Verdict.refused("expired", gen=gen)
@@ -1356,6 +1356,27 @@ def _qr_text(uri: str) -> str:
     buffer = io.StringIO()
     code.print_ascii(out=buffer)
     return buffer.getvalue()
+
+
+#: Nejkratsi tajemstvi, se kterym se smi overovat (znaku base32, tj. 80 bitu).
+#: Sluzba sama vydava 32 znaku; mez je tu kvuli poskozenemu souboru.
+MIN_SECRET_LENGTH = 16
+
+
+def _usable_secret(path: Path) -> bool:
+    """Je v souboru tajemstvi, se kterym se da overovat?
+
+    Jen `is_file()` nestacilo. Zapis soubor nejdriv zalozi a teprve pak plni,
+    takze plny disk nebo pad mezi tim necha `totp.secret` prazdny - a kod pro
+    PRAZDNE tajemstvi si spocita kdokoli. Prazdny nebo useknuty soubor se
+    proto bere stejne jako chybejici: nedokoncene zavedeni, ne ucet, do
+    ktereho se da vejit.
+    """
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        return False
+    return len(text) >= MIN_SECRET_LENGTH
 
 
 def _is_code(code) -> bool:

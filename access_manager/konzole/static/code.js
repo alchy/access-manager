@@ -1,7 +1,7 @@
 /* Login codes: convenience on top of inputs that work without this script.
  *
  * The template renders one box per digit and the server joins them back
- * together (_kod_z_formulare). This file only removes clicking: it advances
+ * together (_code_from_form). This file only removes clicking: it advances
  * the caret, steps back on delete and spreads a pasted code across the
  * boxes. If it fails to load, signing in still works - you just move
  * between the boxes with Tab.

@@ -205,3 +205,16 @@ def test_the_english_language_switches_table_texts(prihlaseny_klient):
     telo = klient.get("/groups?lang=en").get_data(as_text=True)
     assert "Groups" in telo
     assert "Skupiny" not in telo
+
+
+def test_an_error_lands_where_the_message_is_visible(prihlaseny_klient):
+    """Po chybe se presmerovava BEZ kotvy: hlaska je nahore nad vypisem
+    a skok k panelu detailu by ji odsunul z obrazu. Po uspechu s kotvou."""
+    klient, csrf = prihlaseny_klient
+    for nazev in ("a", "b"):
+        _pridej_skupinu(prihlaseny_klient, nazev)
+    dobre = klient.post("/groups/a/chain", data={"csrf": csrf, "zahrnuti": "b"})
+    assert dobre.headers["Location"].endswith("/groups?group=a#group-detail")
+    cyklus = klient.post("/groups/b/chain", data={"csrf": csrf, "zahrnuti": "a"})
+    assert cyklus.headers["Location"].endswith("/groups?group=b")
+    assert "Chyba" in klient.get("/groups?group=b").get_data(as_text=True)

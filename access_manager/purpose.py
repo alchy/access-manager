@@ -27,7 +27,9 @@ def check_purpose(purpose: str) -> str:
     uzivatele. Verdikt by ji schoval mezi bezne odmitnuti.
     """
     text = str(purpose)
-    if not _PURPOSE.match(text):
+    # `fullmatch`, ne `match`: `$` sedi i PRED koncovym "\n", takze "login\n"
+    # proslo jako vlastni ucel a tyz kod sel pouzit podruhe.
+    if not _PURPOSE.fullmatch(text):
         raise ValueError(
             f"neplatny ucel {purpose!r}: cekam `login` nebo `unlock:<cil>`"
         )

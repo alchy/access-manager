@@ -223,6 +223,7 @@ def create_app(cfg: ServiceConfig):
     cache: dict[str, tuple[str, Component, int]] = {}
 
     app = flask.Flask(__name__)
+    log.adopt(app.logger)
 
     @app.before_request
     def _security_pipeline():

@@ -50,6 +50,18 @@ def _prune(adresar: Path, retention_days: int) -> None:
             soubor.unlink(missing_ok=True)
 
 
+def _radky(soubor: Path) -> list[str]:
+    """Radky denniho souboru - deleno JEN znakem konce radku.
+
+    `str.splitlines()` deli i na U+2028, U+2029, U+0085 a dalsich oddelovacich,
+    ktere zapis (`ensure_ascii=False`) nechava v hodnotach syrove. Radek s
+    takovym znakem v ceste nebo v puvodu se pak rozpadl na dve neparsovatelne
+    pulky a ctecka ho tise preskocila - na disku byl, konzole ho neukazala.
+    Kdo znal platny klic, mohl tak schovat vlastni zamitnute pokusy.
+    """
+    return soubor.read_text(encoding="utf-8").split("\n")
+
+
 def recent_by(root, field, values, *, kind=None, limit=5) -> dict[str, list]:
     """Poslednich `limit` udalosti pro kazdou hodnotu pole `field`,
     NEJNOVEJSI PRVNI.
@@ -78,7 +90,7 @@ def recent_by(root, field, values, *, kind=None, limit=5) -> dict[str, list]:
     for soubor in sorted(adresar.glob("*.jsonl"), reverse=True):
         if not zbyva:
             break
-        for radek in reversed(soubor.read_text(encoding="utf-8").splitlines()):
+        for radek in reversed(_radky(soubor)):
             try:
                 udalost = json.loads(radek)
             except json.JSONDecodeError:
@@ -123,7 +135,7 @@ def read_events(root, day_from=None, day_to=None, *, subject=None,
             continue
         if day_to and den > day_to:
             continue
-        for radek in soubor.read_text(encoding="utf-8").splitlines():
+        for radek in _radky(soubor):
             try:
                 udalost = json.loads(radek)
             except json.JSONDecodeError:
