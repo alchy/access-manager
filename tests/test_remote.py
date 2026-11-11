@@ -154,6 +154,22 @@ def test_remote_authenticate_matches_local_shapes(sluzba_s_daty):
     assert verdikt.gen is not None
 
 
+def test_access_remote_authenticate_goes_through_the_facade(sluzba_s_daty):
+    """Access.authenticate predava key_id/origin vzdy - vzdalene uloziste je
+    musi prijmout (a ignorovat), jinak kazde prihlaseni pres Access.remote
+    padalo na TypeError. Ostatni testy volaji RemoteStore primo, proto to
+    nezachytily."""
+    app, tichy, _, _, _ = sluzba_s_daty
+    access = Access(_remote(app, tichy))
+
+    verdikt = access.authenticate(
+        "hana", {"totp": kod()}, purpose="login", client_origin="192.0.2.7",
+    )
+
+    assert verdikt.outcome == "ok"
+    assert verdikt.subject_id == "user:hana"
+
+
 def test_remote_replay_is_denied(sluzba_s_daty):
     app, tichy, _, _, _ = sluzba_s_daty
     remote = _remote(app, tichy)

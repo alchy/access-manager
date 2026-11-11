@@ -162,13 +162,18 @@ class RemoteStore:
         *,
         purpose: str,
         component: str | None = None,
+        key_id: str | None = None,
+        origin: str | None = None,
         client_origin: str | None = None,
     ) -> Verdict:
         """Overeni totoznosti - vzdy z dratu, NIKDY z cache.
 
-        `component` se ignoruje: na strane sluzby ho urcuje klic samotny
-        (kazda komponenta ma svuj), parametr tu zustava jen kvuli stejnemu
-        podpisu jako `Access.authenticate`/`FileStore.authenticate`.
+        `component`, `key_id` a `origin` se ignoruji: na strane sluzby je urcuje
+        klic samotny (kazda komponenta ma svuj, s vlastnim key_id) a adresa,
+        ze ktere pozadavek prisel. Klient je nesmi umet podvrhnout - parametry
+        tu zustavaji jen kvuli stejnemu podpisu jako `Access.authenticate`/
+        `FileStore.authenticate` (Access je predava vzdy; bez nich padal kazdy
+        vzdaleny `Access.authenticate` na TypeError).
         400 od sluzby je chyba VOLAJICIHO (spatny tvar ucelu/pole), ne
         verdikt - takova odpoved se hlasi jako `RuntimeError`.
 
