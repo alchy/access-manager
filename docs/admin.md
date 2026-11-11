@@ -18,6 +18,60 @@ těm, kdo žádný nemají. Restart ve 3 ráno nikomu nic nevymění.
 Všechna jména se normalizují na **malá písmena**; uživatelé a správci smí mít
 jeden `@`, takže identifikátorem může být e-mailová adresa.
 
+## Realm se stejnými lidmi jako jiný realm
+
+Někdy má aplikace dostat **vlastní realm** (vlastní klíče, skupiny a audit), ale lidé se
+mají přihlašovat **stejným kódem jako jinde** – nový realm by jinak znamenal nové
+párování každého člověka. Řešení je provozní, na serveru: identity zkopírovat **dřív, než
+realm deklarujete**. Reconcile pak správce s existujícím tajemstvím nechá být
+(„doplňuje se jen co chybí“) a nic nového nevygeneruje.
+
+```bash
+# jako uzivatel sluzby; H = datovy adresar instance (na tomto stroji ~access-manager/.access-manager)
+H=/www/access-manager/.access-manager
+SRC=$H/realm-soc.autumnpartials.com
+DST=$H/realm-uniforms.autumnpartials.com
+test ! -e "$DST"                       # novy realm jeste nesmi existovat
+
+umask 077; mkdir -m 700 "$DST"
+for d in "$SRC"/admin-* "$SRC"/user-*; do
+  n=$(basename "$d"); mkdir -m 700 "$DST/$n"
+  for f in totp.secret totp.uri totp.txt totp.issued totp.paired; do
+    [ -f "$d/$f" ] && cp -p "$d/$f" "$DST/$n/"
+  done
+done
+cp -p "$SRC/groups.json" "$DST/"       # volitelne: stejne skupiny
+```
+
+Teprve potom deklarace a reload:
+
+```bash
+printf '{\n  "name": "uniforms.autumnpartials.com",\n  "admins": ["jindrich"]\n}\n' \
+  > conf.d/realms/uniforms.autumnpartials.com.json
+systemctl reload access-manager-container        # SIGHUP: reconcile, nikoho neodhlasi
+```
+
+Co se **nekopíruje** a proč:
+
+| Soubor | Proč ne |
+|--------|---------|
+| `used.json` | anti-replay patří realmu; prázdný v novém realmu je správně |
+| `throttle.json` | zámky po neúspěšných pokusech se nepřenášejí |
+| `components.json` | klíče aplikací jsou per realm – nová aplikace dostane nový klíč |
+| `audit/`, `gen` | historie a generace starého realmu do nového nepatří |
+
+Důsledky, se kterými je třeba počítat:
+
+- **Tajemství jsou od té chvíle dvě nezávislé kopie.** Odvolání nebo nové párování
+  v jednom realmu se druhého **nedotkne** – ztracený telefon se řeší v obou.
+- **Tatáž položka v autentikátoru** platí v obou realmech; její štítek ukazuje původní
+  realm (`soc.autumnpartials.com-member-jindrich`) a nový realm ho nepřepíše.
+- **Anti-replay je per realm** – tentýž kód projde jednou v každém z nich.
+- Nespárovaný uživatel (jen `totp.uri` / `totp.txt`) má v obou realmech tentýž QR;
+  první platný kód dokončí párování jen v realmu, kde byl použit.
+- Datový adresář je do kontejneru připojený s `:Z`; na stroji se SELinux v režimu
+  *enforcing* ověřte kontext nových souborů (`ls -Z`), případně je přeznačte.
+
 ## Webová konzole
 
 **Primární cesta ke správě** je webová konzole na portu **22001**

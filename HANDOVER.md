@@ -12,10 +12,11 @@ s diakritikou. V testech smí být cokoli pojmenováno česky.
 
 ---
 
-## Stav k 1. 10. 2026
+## Stav k 11. 11. 2026
 
 **Produkce** běží z obrazu `localhost/access-manager:latest` sestaveného 1. 10. 2026 z `main`
-(commit `3406cb9`; pozdější commity v `main` mění jen tento soubor). Nasazeno 1. 10. 2026
+(commit `3406cb9`; pozdější commity v `main` mění jen dokumentaci, tento soubor, klientskou
+knihovnu a její test – viz „Po nasazení v `main`“ níže). Nasazeno 1. 10. 2026
 v 18:45 UTC; restart trval půl minuty. Obsah obrazu je ověřený proti repozitáři soubor po
 souboru. Ten den proběhla dvě nasazení: v 18:02 UTC commit `086d6e1`, v 18:45 UTC `3406cb9`.
 
@@ -31,9 +32,24 @@ Co nasazená verze nese proti obrazu z 16. 9. (commit `76bed4d`):
 | panely Přidat | stejné rozložení, příklad a vysvětlení bez předpony, bez číslovky u aplikace |
 | omezování pokusů | klíčem je jméno a adresa klienta, zámek roste (bod 1 níže) |
 
-Testů **620** zelených, `ruff check .` čistý. `AM_TZ=Europe/Prague`
+Testů **621** zelených, `ruff check .` čistý. `AM_TZ=Europe/Prague`
 v `/etc/sysconfig/access-manager-container` zůstává; hodiny kontejneru jsou v pražském čase,
 zobrazení v konzoli to neovlivňuje.
+
+**Po nasazení v `main` (11. 11. 2026)** – obraz se kvůli tomu **nepřestavuje**:
+
+| commit | co | dopad na produkci |
+|---|---|---|
+| `53b64ba` | `RemoteStore.authenticate` přijímá `key_id` a `origin` (ignoruje je jako `component`); předtím každé `Access.remote(...).authenticate` padalo na `TypeError` | jen klient – služba v obrazu je beze změny; klienti aplikací se připínají na `53b64ba` |
+| (docs) | `docs/aplikace.md`: konvence skupin `<aplikace>-user` / `<aplikace>-admin`, postup napojení aplikace; `docs/admin.md`: realm se stejnými lidmi jako jiný realm | žádný |
+
+**Realmy na stroji:** `autumnpartials.com`, `soc.autumnpartials.com`,
+`uniforms.autumnpartials.com` (11. 11. 2026, identity zkopírované ze SOC realmu postupem
+z `docs/admin.md`). Skupiny podle konvence: v SOC `soc-user` (všichni) a `soc-admin`
+(jindrich), v UniForms `uniforms-user` a `uniforms-admin`; obecná `user` zůstává.
+SOC portál vyžaduje `soc-user` (`/etc/sysconfig/soc-portal-container`). Aplikace
+`uniforms` (klíč `k1`, `detail: true`) smí z `116.203.157.235/32`,
+`2a01:4f8:1c1b:8c66::1/128` a `127.0.0.1/32`; klíč je v DB UniForms (Settings).
 
 **Návrat k předchozí verzi.** Starší obrazy jsou označené:
 

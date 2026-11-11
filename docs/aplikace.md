@@ -22,6 +22,12 @@ povinný u lokálního zapojení; u vzdáleného je volitelné **tvrzení** — 
 realm určuje sám a nesoulad s tvrzením je hlasitá chyba při startu, ne tiché
 ptaní se jinam.
 
+> **Verze klienta:** vzdálené `Access.authenticate` funguje od commitu `53b64ba`
+> (11. 11. 2026). Starší klient předával vzdálenému úložišti `key_id` a `origin`, které
+> nepřijímalo, a každé ověření přes `Access.remote` končilo `TypeError` – aplikace je
+> obcházely voláním `RemoteStore` přímo. Klienta připínejte nejméně na tuto verzi:
+> `access-manager[remote] @ git+https://github.com/alchy/access-manager@53b64ba`.
+
 `Access.remote` navíc: vyžaduje `https://` (výjimkou jen loopback pro vývoj;
 vlastní CA přes `ca="/cesta/ca.pem"` — ověření certifikátu nemá vypínač),
 při startu zkontroluje verzi API a `whoami`, síťové výpadky přečkává retry
@@ -110,6 +116,35 @@ množin — `bool(user.principals & acl)`.
 Identifikátorem uživatele může být i e-mail (`jindrich.nemec@yahoo.com`);
 všechna jména se normalizují na malá písmena.
 
+## Skupiny pro aplikace: konvence
+
+Access-manager žádnou „výchozí“ skupinu uživatelů nezakládá – automatický je jen
+`group:public` a jméno `users` je vyřazené (viz výše). Skupiny, podle kterých aplikace
+pouští dovnitř a přiděluje role, zakládá správce realmu. Na tomto serveru platí jednotná
+konvence **`<aplikace>-user`** (přístup) a **`<aplikace>-admin`** (správci aplikace):
+
+| Aplikace | Přístup | Správci | Kde se nastavuje |
+|----------|---------|---------|------------------|
+| SOC portál | `soc-user` | `soc-admin` (portál ji zatím nepoužívá) | `SOC_PORTAL_REQUIRED_GROUP` |
+| UniForms | `uniforms-user` | `uniforms-admin` | Settings → Remote authentication (*User group*, *Admin group*) |
+
+Obecná skupina `user` v realmech zůstává pro starší ACL; nové aplikace na ni nestaví.
+Skupina `<aplikace>-admin` dělá ze člověka správce **aplikace** – se **správcem realmu**
+(oddělená identita `admin-<jméno>`, vstup do konzole dvěma kódy) nemá nic společného.
+
+Autorizace v aplikaci je pak jediný průnik s uzávěrem z verdiktu:
+
+```python
+ADMIN, USER = "group:uniforms-admin", "group:uniforms-user"
+
+def role(verdikt) -> str | None:
+    if ADMIN in verdikt.principals:
+        return "admin"
+    if USER in verdikt.principals:
+        return "reader"
+    return None                    # platny kod, ale bez pristupu - fail-closed
+```
+
 ## Provozní drobnosti
 
 ```python
@@ -153,3 +188,29 @@ def obnov_relaci(session) -> bool:
 Klíč aplikaci vydává správce realmu (viz [admin.md](admin.md)); patří do
 prostředí či secret storu, nikdy do gitu — `.gitignore` repozitáře vzory
 `*.key` už zná.
+
+## Napojení nové aplikace krok za krokem
+
+Postup pro správce realmu i pro správce aplikace. Aplikace sama v access-manageru **nic
+nezakládá** – dostane URL, realm a klíč a dál se jen ptá.
+
+1. **Realm.** Aplikace buď sdílí realm s ostatními (stejní lidé, stejná skupinová
+   politika), nebo dostane vlastní deklaraci v `conf.d/realms/` (viz
+   [admin.md](admin.md)). Vlastní realm se stejnými lidmi viz
+   [Realm se stejnými lidmi jako jiný realm](admin.md#realm-se-stejnými-lidmi-jako-jiný-realm).
+2. **Skupiny** `<aplikace>-user` a `<aplikace>-admin`, do nich lidé (konzole → Skupiny).
+3. **Registrace aplikace** (konzole → Aplikace, nebo `Admin.register_component`).
+   Klíč se ukáže **jednou** – rovnou ho předejte správci aplikace, nikam neukládejte.
+4. **Povolené rozsahy** = adresa, ze které uvidí access-manager požadavky **aplikace**
+   (za svou důvěryhodnou proxy). Běží-li aplikace na tomtéž stroji a volá veřejné
+   `https://` jméno služby, je to **veřejná adresa stroje** (IPv4 i IPv6), ne smyčka.
+   Špatný rozsah se pozná podle odmítnutých požadavků aplikace v auditu realmu.
+5. **`detail`** – zapnout jen důvěryhodné aplikaci, která důvod (`bad_code`, `replay`,
+   `unknown_user` …) zapíše jen do svého auditu a uživateli ukáže jednu hlášku.
+6. **Aplikace** dostane `url`, `realm` a `key`: `Access.remote(url, key=key, realm=realm)`.
+   Konstrukce sama ověří verzi API a že klíč patří realmu; nesoulad je chyba hned při startu.
+7. **Ověření:** přihlášení člověka ze skupiny `<aplikace>-user` projde, člověk mimo ni
+   dostane od aplikace odmítnutí; obojí je vidět v auditu realmu (záložka Aplikace).
+
+Příklad hotového napojení s GUI konfigurací, přehledem přístupu a diagnostikou podle
+auditu: [UniForms – docs/ACCESS_MANAGER.md](https://github.com/alchy/UniForms/blob/main/docs/ACCESS_MANAGER.md).
